@@ -7,32 +7,36 @@
 // Dati di test per la geometria
 static R_GL_Vertex test_vertices[4] = {
     {
-        {-0.5f, 0.5f, 0.0f},
-        {0.0f, 0.5f, 0.5f, 1.0f},
-        2,
-        1.0f,
-        0.0f
+        {-50.0f, 50.0f, 0.0f}, //Position
+        {0.0f, 0.5f, 0.5f, 1.0f}, // Color
+        1.0f, // thickness
+        5, // patternType
+		1, // is_end_polyline
+		0.0f // distanceFromStart;
     },
     {
-        {0.5f, 0.5f, 0.0f},
+        {50.0f, 50.0f, 0.0f},
         {0.5f, 0.0f, 0.5f, 1.0f},
-        2,
-        1.0f,
-        1.0f
+        1.0f, // thickness
+        5, // patternType
+		1, // is_end_polyline
+		100.0f // distanceFromStart;
     },
     {
-        {0.5f, -0.5f, 0.0f},
+        {50.0f, -50.0f, 0.0f},
         {0.5f, 0.5f, 0.0f, 1.0f},
-        3,
-        1.0f,
-        0.0f
+        1.0f, // thickness
+        5, // patternType
+		1, // is_end_polyline
+		200.0f // distanceFromStart;
     },
     {
-        {-0.5f, -0.5f, 0.0f},
+        {-50.0f, -50.0f, 0.0f},
         {1.0f, 0.0f, 0.0f, 1.0f},
-        4,
-        1.0f,
-        0.0f
+		1.0f, // thickness
+        5, // patternType
+		0, // is_end_polyline
+		300.0f // distanceFromStart;
     }
 };
 
@@ -47,7 +51,7 @@ static unsigned int test_indices[] = {
 
 int main(void) {
     printf("start\n");
-    
+
     // Inizializzazione SDL
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         printf("SDL Init error: %s\n", SDL_GetError());
@@ -115,7 +119,8 @@ int main(void) {
     }
     
     // Setup geometrie
-    R_GL_set_sheet(210.0f, 297.0f);
+    R_GL_Scale scale = {2, 1};
+	R_GL_set_sheet(210.0f, 297.0f, scale);
     R_GL_setup_geometry(test_vertices, 4, test_indices, 12);
     R_GL_zoom_all_sheet();
     
@@ -142,6 +147,9 @@ int main(void) {
                 case SDL_KEYDOWN:
                     if (event.key.keysym.sym == SDLK_z) {
                         R_GL_zoom_all_sheet();
+                    }
+                    if (event.key.keysym.sym == SDLK_t) {
+                        R_GL_toggle_color_thickness();
                     }
                     break;
                 

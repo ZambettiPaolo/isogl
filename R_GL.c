@@ -5,6 +5,8 @@
 // Variabili private per la gestione della trasformazione
 static float zoom_all = 0.0f;
 static R_GL_Point pan_all = {0.0f, 0.0f};
+static float scale = 1;
+static GLint colorThikness = 0;
 
 // Variabili private per i buffer OpenGL
 static GLuint VAO_sheet = 0;
@@ -35,7 +37,7 @@ static float view_matrix[16] = {
 static float projection_matrix[16] = {
     1, 0, 0, 0,
     0, 1, 0, 0,
-    0, 0, -1, 0,
+    0, 0, 1, 0,
     0, 0, 0, 1
 };
 
@@ -67,47 +69,59 @@ const char* R_GL_vertex_shader_source_segment =
 "\n"
 "layout(location = 0) in vec3 aPosition;\n"
 "layout(location = 1) in vec4 aColor;\n"
-"layout(location = 2) in int aPatternType;\n"
-"layout(location = 3) in float aSegmentLength;\n"
-"layout(location = 4) in float aDistanceFromStart;\n"
+"layout(location = 2) in float aThickness;\n"
+"layout(location = 3) in int aPatternType;\n"
+"layout(location = 4) in int aIs_end_polyline;\n"
+"layout(location = 5) in float aDistanceFromStart;\n"
 "\n"
-"flat out vec4 vColor;\n"
 "out float vDistance;\n"
+"flat out vec4 vColor;\n"
 "flat out int vPatternType;\n"
-"flat out float vSegmentLength;\n"
+"flat out int vIs_end_polyline;\n"
+"flat out float vThikness;\n"
 "\n"
 "uniform mat4 uProjection;\n"
 "uniform mat4 uView;\n"
 "uniform mat4 uModel;\n"
+"uniform int uColorThickness;\n"
 "\n"
 "void main()\n"
 "{\n"
 "    gl_Position = uProjection * uView * uModel * vec4(aPosition, 1.0);\n"
-"    vColor = aColor;\n"
+"    if (uColorThickness == 0){\n"
+"		vColor = vec4(1.0f, 1.0f, 1.0f, 1.0f); \n"
+" 		if (aThickness <0.25) vColor = vec4(1.0f, 0.0f, 0.0f, 0.5f); \n"
+" 		if (aThickness > 0.4) vColor = vec4(1.0f, 1.0f, 0.0f, 1.0f); \n"
+" 	}else{\n"
+"       vColor = aColor;\n"
+"   }\n"
 "    vDistance = aDistanceFromStart;\n"
 "    vPatternType = aPatternType;\n"
-"    vSegmentLength = aSegmentLength;\n"
+"	 vIs_end_polyline = aIs_end_polyline;\n"
+"	 vThikness = aThickness;\n"
 "}\n";
 
 const char* R_GL_fragment_shader_source_segment = 
 "#version 330 core\n"
 "\n"
-"flat in vec4 vColor;\n"
 "in float vDistance;\n"
+"flat in vec4 vColor;\n"
 "flat in int vPatternType;\n"
-"flat in float vSegmentLength;\n"
+"flat in int vIs_end_polyline;\n"
+"flat in float vThikness;\n"
 "\n"
 "out vec4 FragColor;\n"
 "\n"
 "uniform float uPatternScale;\n"
+"uniform float uScale;\n"
 "\n"
 "void main()\n"
 "{\n"
 "    float alpha = 1.0;\n"
 "    \n"
 "    if (vPatternType == 1) {\n"
-"        float pattern = mod(vDistance, 0.2);\n"
-"        if (vDistance > 0.5) {\n"
+"        float pattern = mod(vDistance, (8 + 4) * vThikness / uScale);\n"
+"        if (pattern > (8 * vThikness / uScale)) {\n"
 "           discard; \n"
 "        }\n"
 "    }\n"
@@ -123,20 +137,21 @@ const char* R_GL_fragment_shader_source_segment =
 "            discard;\n"
 "        }\n"
 "    }\n"
-"    else if (vPatternType == 4) {\n"
-"        alpha = 1.0 - (vDistance / vSegmentLength);\n"
-"    }\n"
-"    \n"
-"    FragColor = vec4(vColor.rgb, vColor.a * alpha);\n"
+"	FragColor = vColor;\n"
 "}\n";
 
 // Funzioni di inizializzazione
 int R_GL_init(void) {
     // Abilita linee antialiasing
-    glEnable(GL_LINE_SMOOTH);
-    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
-    
-    // Crea shader programs
+//	glEnable(GL_BLEND);
+//   	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+//    glEnable(GL_LINE_SMOOTH);
+//    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+//	glDisable(GL_CULL_FACE);
+//	glLineWidth(1.5f);    
+   
+
+	// Crea shader programs
     shader_program_segment = R_GL_create_shader_program(
         R_GL_vertex_shader_source_segment, 
         R_GL_fragment_shader_source_segment
@@ -213,12 +228,13 @@ GLuint R_GL_create_shader_program(const char *vertex_shader_source, const char *
 }
 
 // Gestione sheet
-int R_GL_set_sheet(float width, float height) {
-    float vertices[10] = {
+int R_GL_set_sheet(float width, float height, R_GL_Scale sc) {
+	scale = (float)sc.num / sc.den;
+	float vertices[10] = {
         0,      0,
-        width,  0,
-        width,  height,
-        0,      height,
+        width/scale,  0,
+        width/scale,  height/scale,
+        0,      height/scale,
         0,      0
     };
     
@@ -236,13 +252,13 @@ int R_GL_set_sheet(float width, float height) {
     glBindVertexArray(0);
     
     if (width >= height) {
-        zoom_all = 2.0f * 0.8f / width;
+        zoom_all = 2.0f * 0.8f * scale / width;
     } else {
-        zoom_all = 2.0f * 0.8f / height;
+        zoom_all = 2.0f * 0.8f * scale / height;
     }
     
-    pan_all.x = -zoom_all * width / 2.0f;
-    pan_all.y = -zoom_all * height / 2.0f;
+    pan_all.x = -zoom_all * width / (2.0f * scale);
+    pan_all.y = -zoom_all * height / (2.0f * scale);
     
     return 0;
 }
@@ -254,7 +270,7 @@ void R_GL_draw_sheet(void) {
     GLint viewLoc = glGetUniformLocation(shader_program_sheet, "uView");
     GLint modelLoc = glGetUniformLocation(shader_program_sheet, "uModel");
     GLint colorLoc = glGetUniformLocation(shader_program_sheet, "uColor");
-    
+
     if (projLoc != -1) glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection_matrix);
     if (viewLoc != -1) glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view_matrix);
     if (modelLoc != -1) glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model_matrix);
@@ -283,7 +299,17 @@ void R_GL_zoom_all_sheet(void) {
     model_matrix[13] = pan_all.y;
 }
 
+
+void R_GL_toggle_color_thickness(){
+	if (colorThikness == 0) {
+		colorThikness = 1;
+	}else{
+		colorThikness = 0;
+	}
+}
+
 // Gestione geometrie
+
 void R_GL_setup_geometry(R_GL_Vertex* vertices, size_t vertex_count, unsigned int* indices, size_t index_count) {
     glGenVertexArrays(1, &VAO_geometry);
     glGenBuffers(1, &VBO_geometry);
@@ -297,24 +323,34 @@ void R_GL_setup_geometry(R_GL_Vertex* vertices, size_t vertex_count, unsigned in
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO_geometry);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_count * sizeof(unsigned int), indices, GL_STREAM_DRAW);
     
+    // location 0: position
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, position));
     glEnableVertexAttribArray(0);
     
+    // location 1: color
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, color));
     glEnableVertexAttribArray(1);
     
-    glVertexAttribIPointer(2, 1, GL_INT, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, patternType));
-    glEnableVertexAttribArray(2);
+    // location 2: thickness
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, thickness));
+    glEnableVertexAttribArray(2);   
     
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, segmentLength));
+    // location 3: patternType 
+    glVertexAttribIPointer(3, 1, GL_INT, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, patternType));
     glEnableVertexAttribArray(3);
     
-    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, distanceFromStart));
+    // location 4: is_end_polyline 
+    glVertexAttribIPointer(4, 1, GL_INT, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, is_end_polyline));
     glEnableVertexAttribArray(4);
+    
+    // location 5: distanceFromStart 
+    glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, distanceFromStart));
+    glEnableVertexAttribArray(5);
     
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 }
+
 
 void R_GL_draw_geometry(size_t index_count) {
     glUseProgram(shader_program_segment);
@@ -323,13 +359,17 @@ void R_GL_draw_geometry(size_t index_count) {
     GLint viewLoc = glGetUniformLocation(shader_program_segment, "uView");
     GLint modelLoc = glGetUniformLocation(shader_program_segment, "uModel");
     GLint patternScale = glGetUniformLocation(shader_program_segment, "uPatternScale");
-    
-    if (projLoc != -1) glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection_matrix);
+    GLint colorThiknessLoc = glGetUniformLocation(shader_program_segment, "uColorThickness");
+    GLint scaleLoc = glGetUniformLocation(shader_program_segment, "uScale");
+ 
+	if (projLoc != -1) glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection_matrix);
     if (viewLoc != -1) glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view_matrix);
     if (modelLoc != -1) glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model_matrix);
     if (patternScale != -1) glUniform1f(patternScale, 1.0f);
-    
-    glBindVertexArray(VAO_geometry);
+	if (colorThiknessLoc != -1)	glUniform1i(colorThiknessLoc, colorThikness);
+	if (scaleLoc != -1)	glUniform1f(scaleLoc, scale);
+    glLineWidth(1.5f); 
+	glBindVertexArray(VAO_geometry);
     glDrawElements(GL_LINES, index_count, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 }
@@ -368,6 +408,7 @@ void R_GL_handle_zoom(SDL_Window* window, int wheel_y, float mouseX, float mouse
     R_GL_Point modelP;
     R_GL_pixel_to_point(window, &pixelP, &modelP);
    	float zoom = model_matrix[0];
+	printf("zoom: %f \n",zoom);
 	R_GL_Point pan = {model_matrix[12], model_matrix[13]};
     if (wheel_y > 0) {
         zoom *= 2.0f;
