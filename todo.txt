@@ -1,0 +1,4 @@
+Implementare la corrispondenza tra Primitive e R_GL_vertex: mancano layer e colore
+
+Implementare array dinamico che contine strutture con ID VBO e matrice di trasformazione
+

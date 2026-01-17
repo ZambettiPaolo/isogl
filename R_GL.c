@@ -1,6 +1,12 @@
 #include "R_GL.h"
 #include <stdio.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#define MAX_DIM_SHADER 8192 // Size max of buffer
+
+static float R_GL_w = 100;
+static float R_GL_h = 100;
 
 // Variabili private per la gestione della trasformazione
 static float zoom_all = 0.0f;
@@ -13,7 +19,6 @@ static GLuint VAO_sheet = 0;
 static GLuint VBO_sheet = 0;
 static GLuint VAO_geometry = 0;
 static GLuint VBO_geometry = 0;
-static GLuint EBO_geometry = 0;
 
 // Variabili private per gli shader programs
 static GLuint shader_program_segment = 0;
@@ -34,132 +39,69 @@ static float view_matrix[16] = {
     0, 0, 0, 1
 };
 
-static float projection_matrix[16] = {
-    1, 0, 0, 0,
-    0, 1, 0, 0,
-    0, 0, 1, 0,
-    0, 0, 0, 1
-};
+unsigned int R_GL_pack(unsigned int thickness, unsigned int pattern, unsigned int layer){
+    return (thickness & 0x1F) |           // 8 bits for thickness (0-255)
+           ((pattern & 0x1F) << 5) |      // 8 bits for pattern (0-255)
+           ((layer & 0x1F) << 5);        // 8 bits for layer (0-255)
+                                          // bits 24-31 reserved for future use
+}
 
-// Shader sources
-const char* R_GL_vertex_shader_source_sheet =
-"#version 330 core\n"
-"layout (location = 0) in vec2 aPos;\n"
-"\n"
-"uniform mat4 uProjection;\n"
-"uniform mat4 uView;\n"
-"uniform mat4 uModel;\n"
-"void main()\n"
-"{\n"
-"    gl_Position = uProjection * uView * uModel * vec4(aPos, 0.0, 1.0);\n"
-"}\n";
+unsigned int R_GL_unpack_thickness(unsigned int packed) {
+    return packed & 0xFF;
+}
 
-const char* R_GL_fragment_shader_source_sheet =
-"#version 330 core\n"
-"out vec4 FragColor;\n"
-"\n"
-"uniform vec4 uColor;\n"
-"void main()\n"
-"{\n"
-"    FragColor = uColor;\n"
-"}\n";
+unsigned int R_GL_unpack_pattern(unsigned int packed) {
+    return (packed >> 8) & 0xFF;
+}
 
-const char* R_GL_vertex_shader_source_segment = 
-"#version 330 core\n"
-"\n"
-"layout(location = 0) in vec3 aPosition;\n"
-"layout(location = 1) in vec4 aColor;\n"
-"layout(location = 2) in float aThickness;\n"
-"layout(location = 3) in int aPatternType;\n"
-"layout(location = 4) in int aIs_end_polyline;\n"
-"layout(location = 5) in float aDistanceFromStart;\n"
-"\n"
-"out float vDistance;\n"
-"flat out vec4 vColor;\n"
-"flat out int vPatternType;\n"
-"flat out int vIs_end_polyline;\n"
-"flat out float vThikness;\n"
-"\n"
-"uniform mat4 uProjection;\n"
-"uniform mat4 uView;\n"
-"uniform mat4 uModel;\n"
-"uniform int uColorThickness;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    gl_Position = uProjection * uView * uModel * vec4(aPosition, 1.0);\n"
-"    if (uColorThickness == 0){\n"
-"		vColor = vec4(1.0f, 1.0f, 1.0f, 1.0f); \n"
-" 		if (aThickness <0.25) vColor = vec4(1.0f, 0.0f, 0.0f, 0.5f); \n"
-" 		if (aThickness > 0.4) vColor = vec4(1.0f, 1.0f, 0.0f, 1.0f); \n"
-" 	}else{\n"
-"       vColor = aColor;\n"
-"   }\n"
-"    vDistance = aDistanceFromStart;\n"
-"    vPatternType = aPatternType;\n"
-"	 vIs_end_polyline = aIs_end_polyline;\n"
-"	 vThikness = aThickness;\n"
-"}\n";
+unsigned int R_GL_unpack_layer(unsigned int packed) {
+    return (packed >> 16) & 0xFF;
+}
 
-const char* R_GL_fragment_shader_source_segment = 
-"#version 330 core\n"
-"\n"
-"in float vDistance;\n"
-"flat in vec4 vColor;\n"
-"flat in int vPatternType;\n"
-"flat in int vIs_end_polyline;\n"
-"flat in float vThikness;\n"
-"\n"
-"out vec4 FragColor;\n"
-"\n"
-"uniform float uPatternScale;\n"
-"uniform float uScale;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    float alpha = 1.0;\n"
-"    \n"
-"    if (vPatternType == 1) {\n"
-"        float pattern = mod(vDistance, (8 + 4) * vThikness / uScale);\n"
-"        if (pattern > (8 * vThikness / uScale)) {\n"
-"           discard; \n"
-"        }\n"
-"    }\n"
-"    else if (vPatternType == 2) {\n"
-"        float pattern = mod(vDistance * uPatternScale, 0.2);\n"
-"        if ((pattern > 0.08 && pattern < 0.1) || pattern > 0.12) {\n"
-"            discard;\n"
-"        }\n"
-"    }\n"
-"    else if (vPatternType == 3) {\n"
-"        float pattern = mod(vDistance * uPatternScale, 0.1);\n"
-"        if (pattern > 0.02) {\n"
-"            discard;\n"
-"        }\n"
-"    }\n"
-"	FragColor = vColor;\n"
-"}\n";
 
-// Funzioni di inizializzazione
+// this function load the program shader foron local directori and compile int
+// return the GLint of program or 0 if an error occurred
+
+GLuint R_GL_load_shader(GLenum shader_type  , char *shader_file_name){
+	
+	FILE * f_shader = fopen(shader_file_name, "r");
+	if (f_shader == NULL ) return 0;
+	
+	fseek(f_shader, 0, SEEK_END);
+    long dim = ftell(f_shader);
+    fseek(f_shader, 0, SEEK_SET);
+	
+	if (dim >= MAX_DIM_SHADER) {
+		fclose(f_shader);
+		return 0;
+	}
+
+	char shader_string[dim+1]; 
+	fread(shader_string, 1, dim, f_shader);
+    shader_string[dim] = '\0';  // end of string
+	fclose(f_shader);
+	return R_GL_compile_shader(shader_type, shader_string);
+}
+
+// ===== FUNZIONI DI INIZIALIZZAZIONE =====
+
 int R_GL_init(void) {
-    // Abilita linee antialiasing
-//	glEnable(GL_BLEND);
-//   	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-//    glEnable(GL_LINE_SMOOTH);
-//    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
-//	glDisable(GL_CULL_FACE);
-//	glLineWidth(1.5f);    
-   
-
-	// Crea shader programs
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_MULTISAMPLE);
+    glGenVertexArrays(1, &VAO_geometry);
+    glGenBuffers(1, &VBO_geometry); 
+    // Crea shader programs
     shader_program_segment = R_GL_create_shader_program(
-        R_GL_vertex_shader_source_segment, 
-        R_GL_fragment_shader_source_segment
+        "./vs_segment.glsl", 
+    	"./gs_segment.glsl",
+        "./fs_segment.glsl"
     );
     
     shader_program_sheet = R_GL_create_shader_program(
-        R_GL_vertex_shader_source_sheet, 
-        R_GL_fragment_shader_source_sheet
+        "./vs_sheet.glsl", 
+        NULL,
+        "./fs_sheet.glsl"
     );
     
     if (shader_program_segment == 0 || shader_program_sheet == 0) {
@@ -172,17 +114,17 @@ int R_GL_init(void) {
 void R_GL_cleanup(void) {
     if (VAO_geometry) glDeleteVertexArrays(1, &VAO_geometry);
     if (VBO_geometry) glDeleteBuffers(1, &VBO_geometry);
-    if (EBO_geometry) glDeleteBuffers(1, &EBO_geometry);
     if (VAO_sheet) glDeleteVertexArrays(1, &VAO_sheet);
     if (VBO_sheet) glDeleteBuffers(1, &VBO_sheet);
     if (shader_program_sheet) glDeleteProgram(shader_program_sheet);
     if (shader_program_segment) glDeleteProgram(shader_program_segment);
 }
 
-// Gestione shader
-GLuint R_GL_compile_shader(GLenum type, const char* source) {
+// ===== GESTIONE SHADER =====
+
+GLuint R_GL_compile_shader(GLenum type, char* source) {
     GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, NULL);
+    glShaderSource(shader, 1,  (const GLchar**)&source, NULL);
     glCompileShader(shader);
     
     GLint success;
@@ -197,45 +139,59 @@ GLuint R_GL_compile_shader(GLenum type, const char* source) {
     return shader;
 }
 
-GLuint R_GL_create_shader_program(const char *vertex_shader_source, const char *fragment_shader_source) {
-    GLuint vertexShader = R_GL_compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
-    GLuint fragmentShader = R_GL_compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
-    
-    if (vertexShader == 0 || fragmentShader == 0) {
+GLuint R_GL_create_shader_program(
+    char *vertex_shader_source,
+    char *geometry_shader_source,
+    char *fragment_shader_source)
+{
+    GLuint vertexShader =R_GL_load_shader(GL_VERTEX_SHADER, vertex_shader_source);
+    GLuint geometryShader = 0;
+    GLuint fragmentShader = R_GL_load_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
+
+    if (geometry_shader_source) {
+        geometryShader = R_GL_load_shader(GL_GEOMETRY_SHADER, geometry_shader_source);
+    }
+
+    if (vertexShader == 0 || fragmentShader == 0 ||
+        (geometry_shader_source && geometryShader == 0)) {
+        fprintf(stderr, "Shader compilation failed\n");
         return 0;
     }
-    
-    GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-    
-    int success;
-    char infoLog[512];
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        fprintf(stderr, "ERROR: Shader linking failed\n%s\n", infoLog);
-        glDeleteShader(vertexShader);
-        glDeleteShader(fragmentShader);
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    if (geometry_shader_source)
+        glAttachShader(program, geometryShader);
+    glAttachShader(program, fragmentShader);
+
+    glLinkProgram(program);
+
+    GLint linked = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[1024];
+        glGetProgramInfoLog(program, 1024, NULL, log);
+        fprintf(stderr, "Program link error:\n%s\n", log);
         return 0;
     }
-    
+
     glDeleteShader(vertexShader);
+    if (geometry_shader_source) glDeleteShader(geometryShader);
     glDeleteShader(fragmentShader);
-    
-    return shaderProgram;
+
+    return program;
 }
 
-// Gestione sheet
+// ===== GESTIONE SHEET =====
+
 int R_GL_set_sheet(float width, float height, R_GL_Scale sc) {
-	scale = (float)sc.num / sc.den;
-	float vertices[10] = {
-        0,      0,
+    scale = (float)sc.num / sc.den;
+    float vertices[10] = {
+        0,            0,
         width/scale,  0,
         width/scale,  height/scale,
-        0,      height/scale,
-        0,      0
+        0,            height/scale,
+        0,            0
     };
     
     glGenVertexArrays(1, &VAO_sheet);
@@ -266,12 +222,10 @@ int R_GL_set_sheet(float width, float height, R_GL_Scale sc) {
 void R_GL_draw_sheet(void) {
     glUseProgram(shader_program_sheet);
     
-    GLint projLoc = glGetUniformLocation(shader_program_sheet, "uProjection");
     GLint viewLoc = glGetUniformLocation(shader_program_sheet, "uView");
     GLint modelLoc = glGetUniformLocation(shader_program_sheet, "uModel");
     GLint colorLoc = glGetUniformLocation(shader_program_sheet, "uColor");
 
-    if (projLoc != -1) glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection_matrix);
     if (viewLoc != -1) glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view_matrix);
     if (modelLoc != -1) glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model_matrix);
     
@@ -280,7 +234,7 @@ void R_GL_draw_sheet(void) {
     // Fill
     float color[4] = {0.10f, 0.110f, 0.12f, 1.0f};
     if (colorLoc != -1) glUniform4fv(colorLoc, 1, color);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 5);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
     
     // Outline
     color[1] = 0.17f;
@@ -292,89 +246,119 @@ void R_GL_draw_sheet(void) {
 }
 
 void R_GL_zoom_all_sheet(void) {
-
     model_matrix[0] = zoom_all;
     model_matrix[5] = zoom_all;
     model_matrix[12] = pan_all.x;
     model_matrix[13] = pan_all.y;
 }
 
-
-void R_GL_toggle_color_thickness(){
-	if (colorThikness == 0) {
-		colorThikness = 1;
-	}else{
-		colorThikness = 0;
-	}
+void R_GL_toggle_color_thickness() {
+    colorThikness = (colorThikness == 0) ? 1 : 0;
 }
 
-// Gestione geometrie
-
-void R_GL_setup_geometry(R_GL_Vertex* vertices, size_t vertex_count, unsigned int* indices, size_t index_count) {
-    glGenVertexArrays(1, &VAO_geometry);
-    glGenBuffers(1, &VBO_geometry);
-    glGenBuffers(1, &EBO_geometry);
+// ===== GESTIONE GEOMETRIE =====
+size_t upload_VBO(Segment_list *segment_list) {
+    if (!segment_list) {
+        printf("Error: segment_list is NULL\n");
+        return 0;
+    }
     
+    if (segment_list->size == 0) {
+        printf("Warning: No vertices to upload\n");
+        return 0;
+    }
+    
+    printf("Number of vertices: %zu, capacity: %zu\n", 
+           segment_list->size, segment_list->capacity);
+    
+    // Bind existing VAO (already created in R_GL_init)
     glBindVertexArray(VAO_geometry);
     
+    // Bind existing VBO and upload data
     glBindBuffer(GL_ARRAY_BUFFER, VBO_geometry);
-    glBufferData(GL_ARRAY_BUFFER, vertex_count * sizeof(R_GL_Vertex), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 
+                 segment_list->size * sizeof(R_GL_Vertex), 
+                 segment_list->vertex, 
+                 GL_STATIC_DRAW);
     
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO_geometry);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_count * sizeof(unsigned int), indices, GL_STREAM_DRAW);
+    // Verify buffer upload
+    GLint bufferSize = 0;
+    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &bufferSize);
+    printf("VBO buffer size: %d bytes (expected: %zu bytes)\n", 
+           bufferSize, segment_list->size * sizeof(R_GL_Vertex));
     
-    // location 0: position
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, position));
+    // Setup vertex attributes (only if not already configured)
+    // location 0: position (vec2)
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
+                          (void*)offsetof(R_GL_Vertex, position));
     glEnableVertexAttribArray(0);
     
-    // location 1: color
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, color));
+    // location 1: color (vec4)
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
+                          (void*)offsetof(R_GL_Vertex, color));
     glEnableVertexAttribArray(1);
     
-    // location 2: thickness
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, thickness));
-    glEnableVertexAttribArray(2);   
+    // location 2: distanceFromStart (float)
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
+                          (void*)offsetof(R_GL_Vertex, distanceFromStart));
+    glEnableVertexAttribArray(2);
     
-    // location 3: patternType 
-    glVertexAttribIPointer(3, 1, GL_INT, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, patternType));
+    // location 3: attributes (unsigned int) - packed thickness|pattern|layer
+    glVertexAttribIPointer(3, 1, GL_UNSIGNED_INT, sizeof(R_GL_Vertex),
+                           (void*)offsetof(R_GL_Vertex, pk_thickness_pattern_layer));
     glEnableVertexAttribArray(3);
     
-    // location 4: is_end_polyline 
-    glVertexAttribIPointer(4, 1, GL_INT, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, is_end_polyline));
-    glEnableVertexAttribArray(4);
-    
-    // location 5: distanceFromStart 
-    glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex), (void*)offsetof(R_GL_Vertex, distanceFromStart));
-    glEnableVertexAttribArray(5);
+    // Check for OpenGL errors
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        printf("OpenGL Error after VBO upload: %d\n", err);
+    	glBindBuffer(GL_ARRAY_BUFFER, 0);
+    	glBindVertexArray(0);
+		return 0; 
+    }
     
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+	return segment_list->size; 
 }
 
-
-void R_GL_draw_geometry(size_t index_count) {
+void R_GL_draw_geometry(size_t vertex_count) {
     glUseProgram(shader_program_segment);
     
-    GLint projLoc = glGetUniformLocation(shader_program_segment, "uProjection");
     GLint viewLoc = glGetUniformLocation(shader_program_segment, "uView");
     GLint modelLoc = glGetUniformLocation(shader_program_segment, "uModel");
-    GLint patternScale = glGetUniformLocation(shader_program_segment, "uPatternScale");
-    GLint colorThiknessLoc = glGetUniformLocation(shader_program_segment, "uColorThickness");
+    GLint colorThicknessLoc = glGetUniformLocation(shader_program_segment, "uColorThickness");
     GLint scaleLoc = glGetUniformLocation(shader_program_segment, "uScale");
- 
-	if (projLoc != -1) glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection_matrix);
+    GLint vpLoc = glGetUniformLocation(shader_program_segment, "uViewportSize");
+    
+    // Nuovi uniform per i filtri a maschera 32-bit
+    GLint thicknessMaskLoc = glGetUniformLocation(shader_program_segment, "uThicknessMask");
+    GLint patternMaskLoc = glGetUniformLocation(shader_program_segment, "uPatternMask");
+    GLint layerMaskLoc = glGetUniformLocation(shader_program_segment, "uLayerMask");
+    
     if (viewLoc != -1) glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view_matrix);
     if (modelLoc != -1) glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model_matrix);
-    if (patternScale != -1) glUniform1f(patternScale, 1.0f);
-	if (colorThiknessLoc != -1)	glUniform1i(colorThiknessLoc, colorThikness);
-	if (scaleLoc != -1)	glUniform1f(scaleLoc, scale);
-    glLineWidth(1.5f); 
-	glBindVertexArray(VAO_geometry);
-    glDrawElements(GL_LINES, index_count, GL_UNSIGNED_INT, 0);
+    if (colorThicknessLoc != -1) glUniform1i(colorThicknessLoc, colorThikness);
+    if (scaleLoc != -1) glUniform1f(scaleLoc, scale);
+    if (vpLoc != -1) glUniform2f(vpLoc, R_GL_w, R_GL_h);
+    
+    // Imposta i filtri (esempio: mostra tutto di default)
+    // Puoi modificare questi valori per filtrare dinamicamente
+    unsigned int thicknessMask = 0xFFFFFFFF;  // tutti i thickness visibili (bit 0-31)
+    unsigned int patternMask = 0xFFFFFFFF;    // tutti i pattern visibili
+    unsigned int layerMask = 0xFFFFFFFF;      // tutti i layer visibili
+    
+    if (thicknessMaskLoc != -1) glUniform1ui(thicknessMaskLoc, thicknessMask);
+    if (patternMaskLoc != -1) glUniform1ui(patternMaskLoc, patternMask);
+    if (layerMaskLoc != -1) glUniform1ui(layerMaskLoc, layerMask);
+    
+    glBindVertexArray(VAO_geometry);
+    glDrawArrays(GL_LINES, 0, vertex_count);
     glBindVertexArray(0);
 }
 
-// Gestione viewport e trasformazioni
+// ===== GESTIONE VIEWPORT E TRASFORMAZIONI =====
+
 void R_GL_resize_viewport(SDL_Window* window) {
     int w, h;
     SDL_GetWindowSize(window, &w, &h);
@@ -387,6 +371,8 @@ void R_GL_resize_viewport(SDL_Window* window) {
         view_matrix[0] = 1.0f;
         view_matrix[5] = (float)w / (float)h;
     }
+    R_GL_w = w;
+    R_GL_h = h;
 }
 
 void R_GL_pixel_to_point(SDL_Window *window, R_GL_Point *pixelP, R_GL_Point *modelP) {
@@ -402,14 +388,18 @@ void R_GL_pixel_to_point(SDL_Window *window, R_GL_Point *pixelP, R_GL_Point *mod
     }
 }
 
-// Gestione zoom e pan
+// ===== GESTIONE ZOOM E PAN =====
+
 void R_GL_handle_zoom(SDL_Window* window, int wheel_y, float mouseX, float mouseY) {
     R_GL_Point pixelP = {mouseX, mouseY};
     R_GL_Point modelP;
     R_GL_pixel_to_point(window, &pixelP, &modelP);
-   	float zoom = model_matrix[0];
-	printf("zoom: %f \n",zoom);
-	R_GL_Point pan = {model_matrix[12], model_matrix[13]};
+    
+    float zoom = model_matrix[0];
+    R_GL_Point pan = {model_matrix[12], model_matrix[13]};
+    
+    printf("zoom: %f\n", zoom);
+    
     if (wheel_y > 0) {
         zoom *= 2.0f;
         pan.x = pan.x * 2.0f - modelP.x;
@@ -443,7 +433,8 @@ void R_GL_handle_pan(SDL_Window* window, int xrel, int yrel) {
     model_matrix[13] += deltaY;
 }
 
-// Rendering
+// ===== RENDERING =====
+
 void R_GL_clear(float r, float g, float b, float a) {
     glClearColor(r, g, b, a);
     glClear(GL_COLOR_BUFFER_BIT);
