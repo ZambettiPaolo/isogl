@@ -17,6 +17,7 @@ flat out uint vLayer;
 // Uniforms
 uniform mat4 uView;
 uniform mat4 uModel;
+uniform mat4 uRelative;
 uniform int uColorThickness; // flag modalità colore
 
 void main() {
@@ -26,7 +27,7 @@ void main() {
     uint layer       = (aAttributes >> 10u) & 31u;
     
     // Trasforma in view space (non clip space!)
-    vec4 viewPos = uView * uModel * vec4(aPosition, 0.0, 1.0);
+    vec4 viewPos = uView * uModel * uRelative * vec4(aPosition, 0.0, 1.0);
     vPosition = viewPos.xy;
     gl_Position = viewPos;
     // Calcolo colore in base a flag uColorThickness o spessore

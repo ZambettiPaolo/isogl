@@ -39,6 +39,7 @@ static float view_matrix[16] = {
     0, 0, 0, 1
 };
 
+
 unsigned int R_GL_pack(unsigned int thickness, unsigned int pattern, unsigned int layer){
     return (thickness & 0x1F) |           // 8 bits for thickness (0-255)
            ((pattern & 0x1F) << 5) |      // 8 bits for pattern (0-255)
@@ -257,71 +258,6 @@ void R_GL_toggle_color_thickness() {
 }
 
 // ===== GESTIONE GEOMETRIE =====
-size_t upload_VBO(Segment_list *segment_list) {
-    if (!segment_list) {
-        printf("Error: segment_list is NULL\n");
-        return 0;
-    }
-    
-    if (segment_list->size == 0) {
-        printf("Warning: No vertices to upload\n");
-        return 0;
-    }
-    
-    printf("Number of vertices: %zu, capacity: %zu\n", 
-           segment_list->size, segment_list->capacity);
-    
-    // Bind existing VAO (already created in R_GL_init)
-    glBindVertexArray(VAO_geometry);
-    
-    // Bind existing VBO and upload data
-    glBindBuffer(GL_ARRAY_BUFFER, VBO_geometry);
-    glBufferData(GL_ARRAY_BUFFER, 
-                 segment_list->size * sizeof(R_GL_Vertex), 
-                 segment_list->vertex, 
-                 GL_STATIC_DRAW);
-    
-    // Verify buffer upload
-    GLint bufferSize = 0;
-    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &bufferSize);
-    printf("VBO buffer size: %d bytes (expected: %zu bytes)\n", 
-           bufferSize, segment_list->size * sizeof(R_GL_Vertex));
-    
-    // Setup vertex attributes (only if not already configured)
-    // location 0: position (vec2)
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
-                          (void*)offsetof(R_GL_Vertex, position));
-    glEnableVertexAttribArray(0);
-    
-    // location 1: color (vec4)
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
-                          (void*)offsetof(R_GL_Vertex, color));
-    glEnableVertexAttribArray(1);
-    
-    // location 2: distanceFromStart (float)
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
-                          (void*)offsetof(R_GL_Vertex, distanceFromStart));
-    glEnableVertexAttribArray(2);
-    
-    // location 3: attributes (unsigned int) - packed thickness|pattern|layer
-    glVertexAttribIPointer(3, 1, GL_UNSIGNED_INT, sizeof(R_GL_Vertex),
-                           (void*)offsetof(R_GL_Vertex, pk_thickness_pattern_layer));
-    glEnableVertexAttribArray(3);
-    
-    // Check for OpenGL errors
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        printf("OpenGL Error after VBO upload: %d\n", err);
-    	glBindBuffer(GL_ARRAY_BUFFER, 0);
-    	glBindVertexArray(0);
-		return 0; 
-    }
-    
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
-	return segment_list->size; 
-}
-
 void R_GL_draw_geometry(size_t vertex_count) {
     glUseProgram(shader_program_segment);
     
@@ -442,4 +378,352 @@ void R_GL_clear(float r, float g, float b, float a) {
 
 void R_GL_swap_buffers(SDL_Window* window) {
     SDL_GL_SwapWindow(window);
+}
+//======================================================================================================
+/**
+ * @brief Initialize the VBO array
+ * 
+ * @param vbo_array Pointer to the VBO array to initialize
+ * @return 0 on success, -1 on allocation error
+ */
+int vbo_array_init(VBO_Array *vbo_array) {
+    vbo_array->size = 0;
+    vbo_array->capacity = 10;  // Initial capacity
+    vbo_array->objects = (VBO_Object*)malloc(vbo_array->capacity * sizeof(VBO_Object));
+    
+    if (!vbo_array->objects) {
+        printf("Error: Failed to allocate VBO array\n");
+        return -1;
+    }
+    
+    return 0;
+}
+
+/**
+ * @brief Add a new VBO object to the array
+ * 
+ * @param vbo_array Pointer to the VBO array
+ * @param vbo_id OpenGL VBO identifier
+ * @param vertex_count Number of vertices in the VBO
+ * @return Index of the added object, or -1 on error
+ */
+int vbo_array_add(VBO_Array *vbo_array, GLuint id, size_t vertex_count) {
+    // Check if we need to expand the array
+    if (vbo_array->size >= vbo_array->capacity) {
+        size_t new_capacity = vbo_array->capacity * 2;
+        VBO_Object *new_objects = (VBO_Object*)realloc(vbo_array->objects, 
+                                                        new_capacity * sizeof(VBO_Object));
+        
+        if (!new_objects) {
+            printf("Error: Failed to expand VBO array\n");
+            return -1;
+        }
+        
+        vbo_array->objects = new_objects;
+        vbo_array->capacity = new_capacity;
+    }
+    
+    // Initialize the new object with default values
+    size_t index = vbo_array->size;
+    vbo_array->objects[index].vbo_id = id;
+    vbo_array->objects[index].vertex_count = vertex_count;
+    vbo_array->objects[index].visible = 1;  // Visible by default
+    float transform_matrix[16] = {
+    	1, 0, 0, 0,
+    	0, 1, 0, 0,
+    	0, 0, 1, 0,
+    	0, 0, 0, 1
+	};
+
+    // Initialize transform to identity matrix
+	for (int i = 0; i < 16; i++)
+		vbo_array->objects[index].transform[i] = transform_matrix[i];
+    
+	vbo_array->size++;
+    
+    printf("Added VBO object at index %zu: VBO=%u, vertices=%zu\n", 
+           index, id, vertex_count);
+    
+    return (int)index;
+}
+
+/**
+ * @brief Set transformation using TRS parameters
+ * 
+ * @param vbo_array Pointer to the VBO array
+ * @param index Index of the object
+ * @param tx Translation X
+ * @param ty Translation Y
+ * @param rotation Rotation in radians
+ * @param sx Scale X
+ * @param sy Scale Y
+ * @return 0 on success, -1 if index out of bounds
+ */
+int vbo_array_set_transform(VBO_Array *vbo_array, GLuint id, 
+                            float tx, float ty, float rotation, float scale) {
+
+	if (!vbo_array || id == 0) return 0;
+	float cosr = cosf(rotation);
+	float sinr = sinf(rotation);
+	float transform_matrix[16] = {
+    	scale*cosr,  scale*sinr,  0.0f, 0.0f,
+   		-scale*sinr, scale*cosr,  0.0f, 0.0f,
+    	0.0f,        0.0f,        1.0f, 0.0f,
+    	scale*(cosr*tx - sinr*ty), scale*(sinr*tx + cosr*ty), 0.0f, 1.0f
+	};
+
+	for (size_t index = 0; index < vbo_array->size ;index++){
+		if (vbo_array->objects[index].vbo_id == id){
+			for (int i = 0; i < 16; ++i)
+				vbo_array->objects[index].transform[i] = transform_matrix[i];
+    		return 0;
+
+		}
+	}
+ 	printf("Error: VBO id:%u notfound ", id);
+    return -1;
+}
+
+/**
+ * @brief Set visibility for a VBO object
+ * 
+ * @param vbo_array Pointer to the VBO array
+ * @param index Index of the object
+ * @param visible Visibility flag (0 = hidden, 1 = visible)
+ * @return 0 on success, -1 if index out of bounds
+ */
+int vbo_array_set_visible(VBO_Array *vbo_array, GLuint id, int visible) {
+	if (!vbo_array || id == 0) return 0;
+	for (size_t index = 0; index < vbo_array->size ;index++){
+		if (vbo_array->objects[index].vbo_id == id){
+    		vbo_array->objects[index].visible = visible;
+    		return 0;
+		}
+	}
+	printf("Error: VBO id:%u notfound ", id);
+    return -1;
+}
+
+
+/**
+ * @brief Get VBO object by index
+ * 
+ * @param vbo_array Pointer to the VBO array
+ * @param index Index of the object
+ * @return Pointer to VBO_Object, or NULL if index out of bounds
+ */
+VBO_Object* vbo_array_get(VBO_Array *vbo_array, GLuint id) {
+	if (!vbo_array || id == 0) return NULL;
+	for (size_t index = 0; index < vbo_array->size ;index++){
+		if (vbo_array->objects[index].vbo_id == id){
+			return &vbo_array->objects[index];
+		}
+	}
+ 	printf("Error: VBO id:%u notfound ", id);
+    return NULL;
+}
+
+
+/**
+ * @brief Remove a VBO object from the array
+ * 
+ * @param vbo_array Pointer to the VBO array
+ * @param index Index of the object to remove
+ * @return 0 on success, -1 if index out of bounds
+ */
+int vbo_array_remove(VBO_Array *vbo_array, GLuint id) {
+	if (!vbo_array || id == 0) return 0;
+	size_t index = 0;
+	int found= 0;
+	for (index = 0; index < vbo_array->size ;index++){
+		if (vbo_array->objects[index].vbo_id == id){
+    		// Delete the OpenGL VBO
+    		glDeleteBuffers(1, &vbo_array->objects[index].vbo_id);	
+			found = 1;
+			break;
+		}
+	}
+	if (!found){
+ 		printf("Error: VBO id:%u notfound ", id);
+    	return -1;
+	}
+    // Shift remaining elements left
+    for (size_t i = index; i < vbo_array->size - 1; i++) {
+        vbo_array->objects[i] = vbo_array->objects[i + 1];
+    }
+    
+    vbo_array->size--;
+    return 0;
+}
+
+/**
+ * @brief Free all resources used by the VBO array
+ * 
+ * @param vbo_array Pointer to the VBO array
+ */
+void vbo_array_free(VBO_Array *vbo_array) {
+    if (!vbo_array) return;
+    
+    // Delete all OpenGL VBOs
+    for (size_t i = 0; i < vbo_array->size; i++) {
+        glDeleteBuffers(1, &vbo_array->objects[i].vbo_id);
+    }
+    
+    // Free the array
+    if (vbo_array->objects) {
+        free(vbo_array->objects);
+        vbo_array->objects = NULL;
+    }
+    
+    vbo_array->size = 0;
+    vbo_array->capacity = 0;
+}
+
+/**
+ * @brief Upload segment list to a new VBO and add to VBO array
+ * 
+ * @param vbo_array Pointer to the VBO array
+ * @param segment_list Pointer to the segment list
+ * @return Index of the created VBO object, or -1 on error
+ */
+int upload_VBO(VBO_Array *vbo_array, Segment_list *segment_list) {
+    if (!segment_list || !vbo_array) {
+        printf("Error: NULL pointer passed to upload_VBO\n");
+        return -1;
+    }
+    
+    if (segment_list->size == 0) {
+        printf("Warning: No vertices to upload\n");
+        return -1;
+    }
+    
+    printf("Uploading %zu vertices to new VBO\n", segment_list->size);
+    
+    // Create a new VBO
+    GLuint vbo_id;
+    glGenBuffers(1, &vbo_id);
+    
+    if (vbo_id == 0) {
+        printf("Error: Failed to generate VBO\n");
+        return -1;
+    }
+    
+    // Bind and upload data
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_id);
+    glBufferData(GL_ARRAY_BUFFER, 
+                 segment_list->size * sizeof(R_GL_Vertex), 
+                 segment_list->vertex, 
+                 GL_STATIC_DRAW);
+    
+    // Verify upload
+    GLint bufferSize = 0;
+    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &bufferSize);
+    printf("VBO %u buffer size: %d bytes (expected: %zu bytes)\n", 
+           vbo_id, bufferSize, segment_list->size * sizeof(R_GL_Vertex));
+    
+    // Check for errors
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR || bufferSize == 0) {
+        printf("OpenGL Error after VBO upload: %d\n", err);
+        glDeleteBuffers(1, &vbo_id);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        return -1;
+    }
+    
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    
+    // Add to VBO array
+    int index = vbo_array_add(vbo_array, vbo_id, segment_list->size);
+    
+    return index;
+}
+
+/**
+ * @brief Draw a specific VBO object with its transformation matrix
+ * 
+ * @param vbo_array Pointer to the VBO array
+ * @param index Index of the object to draw
+ */
+void R_GL_draw_vbo_object(VBO_Array *vbo_array, size_t index) {
+    if (index >= vbo_array->size) {
+        printf("Error: VBO index %zu out of bounds\n", index);
+        return;
+    }
+    
+    VBO_Object *obj = &vbo_array->objects[index];
+    
+    // Skip if not visible
+    if (!obj->visible) {
+        return;
+    }
+    
+    glUseProgram(shader_program_segment);
+    
+    GLint viewLoc = glGetUniformLocation(shader_program_segment, "uView");
+    GLint modelLoc = glGetUniformLocation(shader_program_segment, "uModel");
+    GLint relativeLoc = glGetUniformLocation(shader_program_segment, "uRelative");
+    GLint colorThicknessLoc = glGetUniformLocation(shader_program_segment, "uColorThickness");
+    GLint scaleLoc = glGetUniformLocation(shader_program_segment, "uScale");
+    GLint vpLoc = glGetUniformLocation(shader_program_segment, "uViewportSize");
+    
+    // Nuovi uniform per i filtri a maschera 32-bit
+    GLint thicknessMaskLoc = glGetUniformLocation(shader_program_segment, "uThicknessMask");
+    GLint patternMaskLoc = glGetUniformLocation(shader_program_segment, "uPatternMask");
+    GLint layerMaskLoc = glGetUniformLocation(shader_program_segment, "uLayerMask");
+    
+    if (viewLoc != -1) glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view_matrix);
+    if (modelLoc != -1) glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model_matrix);
+    if (colorThicknessLoc != -1) glUniform1i(colorThicknessLoc, colorThikness);
+    if (scaleLoc != -1) glUniform1f(scaleLoc, scale);
+    if (vpLoc != -1) glUniform2f(vpLoc, R_GL_w, R_GL_h);
+    // Set uniforms
+    
+   	if (relativeLoc != -1) glUniformMatrix4fv(relativeLoc, 1, GL_FALSE, obj->transform);  // Use object's transform
+    
+    // Set filter masks
+    
+    unsigned int thicknessMask = 0xFFFFFFFF;
+    unsigned int patternMask = 0xFFFFFFFF;
+    unsigned int layerMask = 0xFFFFFFFF;
+    
+    if (thicknessMaskLoc != -1) glUniform1ui(thicknessMaskLoc, thicknessMask);
+    if (patternMaskLoc != -1) glUniform1ui(patternMaskLoc, patternMask);
+    if (layerMaskLoc != -1) glUniform1ui(layerMaskLoc, layerMask);
+    
+    // Bind VAO and VBO for this object
+    glBindVertexArray(VAO_geometry);
+    glBindBuffer(GL_ARRAY_BUFFER, obj->vbo_id);
+    
+    // Setup vertex attributes
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
+                          (void*)offsetof(R_GL_Vertex, position));
+    glEnableVertexAttribArray(0);
+    
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
+                          (void*)offsetof(R_GL_Vertex, color));
+    glEnableVertexAttribArray(1);
+    
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(R_GL_Vertex),
+                          (void*)offsetof(R_GL_Vertex, distanceFromStart));
+    glEnableVertexAttribArray(2);
+    
+    glVertexAttribIPointer(3, 1, GL_UNSIGNED_INT, sizeof(R_GL_Vertex),
+                           (void*)offsetof(R_GL_Vertex, pk_thickness_pattern_layer));
+    glEnableVertexAttribArray(3);
+    
+    // Draw
+    glDrawArrays(GL_LINES, 0, obj->vertex_count);
+    
+    glBindVertexArray(0);
+}
+
+/**
+ * @brief Draw all visible VBO objects
+ * 
+ * @param vbo_array Pointer to the VBO array
+ */
+void R_GL_draw_all_vbo_objects(VBO_Array *vbo_array) {
+    for (size_t i = 0; i < vbo_array->size; i++) {
+        R_GL_draw_vbo_object(vbo_array, i);
+    }
 }

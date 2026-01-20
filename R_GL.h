@@ -18,18 +18,50 @@ typedef struct{
 	int den;
 } R_GL_Scale;
 
+
+/**
+ * @brief CPU-side temporary dynamic array used to fill a VBO with vertex pairs.
+ *
+ * Each pair of vertices represents a single line segment and is rendered accordingly.
+ * This structure is intended to be consumed by the segment rendering pipeline
+ * (vs_segment, gs_segment, fs_segment).
+ */
 typedef struct LineVertex {
     float   position[2];       // layout(location = 0) - 8 bytes
     float   color[4];          // layout(location = 1) - 16 bytes
     float   distanceFromStart; // layout(location = 2) - 4 bytes
     unsigned int pk_thickness_pattern_layer;       // layout(location = 3) - 4 bytes (packed: thickness|pattern|layer)
-} R_GL_Vertex; // Totale: 32 bytes, perfettamente allineato
+} R_GL_Vertex; // Total: 32 bytes
 
+/**
+ * @brief Dynamic array managing a collection of R_GL_Vertex objects.
+ *
+ * Used as a staging buffer before uploading data to the GPU.
+ */
 typedef struct{
 	R_GL_Vertex *vertex;
 	size_t size;
 	size_t capacity;
 } Segment_list;
+
+/**
+ * @brief Structure to store VBO information and transformations
+ */
+typedef struct {
+    GLuint vbo_id;              // OpenGL VBO identifier
+    size_t vertex_count;        // Number of vertices in this VBO
+    int visible;                // Visibility flag (0 = hidden, 1 = visible)
+    float transform[16];        // 4x4 transformation matrix (column-major for OpenGL)
+} VBO_Object;
+
+/**
+ * @brief Dynamic array to manage multiple VBO objects
+ */
+typedef struct {
+    VBO_Object *objects;        // Array of VBO objects
+    size_t size;                // Current number of objects
+    size_t capacity;            // Maximum capacity before reallocation
+} VBO_Array;
 
 /**
  * @brief Pack three 5-bit values into a single 32-bit unsigned integer
@@ -90,10 +122,17 @@ int R_GL_set_sheet(float width, float height, R_GL_Scale scale);
 void R_GL_draw_sheet(void);
 void R_GL_zoom_all_sheet(void);
 void R_GL_toggle_color_thickness();
-			
-size_t upload_VBO(Segment_list *segment_list);
-//void R_GL_setup_geometry(R_GL_Vertex* vertices, size_t vertex_count);
+
+int vbo_array_init(VBO_Array *vbo_array); 		
+int vbo_array_add(VBO_Array *vbo_array, GLuint vbo_id, size_t vertex_count);
+int vbo_array_set_visible(VBO_Array *vbo_array, GLuint id, int visible); 
+int vbo_array_remove(VBO_Array *vbo_array, GLuint id);
+VBO_Object* vbo_array_get(VBO_Array *vbo_array, GLuint id); 
+void vbo_array_free(VBO_Array *vbo_array); 
+int upload_VBO(VBO_Array *vbo_array, Segment_list *segment_list);
+void R_GL_draw_vbo_object(VBO_Array *vbo_array, size_t index); 
 void R_GL_draw_geometry(size_t index_count);
+void R_GL_draw_all_vbo_objects(VBO_Array *vbo_array);
 
 // Gestione viewport e trasformazioni
 void R_GL_resize_viewport(SDL_Window* window);

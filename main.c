@@ -11,6 +11,8 @@
     #define M_PI 3.14159265358979323846
 #endif
 
+VBO_Array vbo_array;
+
 // Test data for geometry
 static Primitive line1 = {
     .next = NULL,
@@ -243,7 +245,12 @@ int main(void) {
 	Segment_list segment_list;
 	segment_list_init( &segment_list);
 	append_primitive(&segment_list, &rectangle);
-	size_t number_of_segments = upload_VBO(&segment_list);
+	vbo_array_init(&vbo_array);
+	GLuint vbo_id = 0;
+	glGenBuffers(1, &vbo_id);
+	vbo_array_add(&vbo_array, vbo_id, segment_list.size);
+	upload_VBO(&vbo_array, &segment_list);
+
 	
 	//upload_VBO(&rectangle, VBO);
     //R_GL_setup_geometry(test_vertices, 4);
@@ -312,7 +319,8 @@ int main(void) {
         // Rendering
         R_GL_clear(0.1f, 0.1f, 0.1f, 1.0f);
         R_GL_draw_sheet();
-        R_GL_draw_geometry(number_of_segments);
+		R_GL_draw_all_vbo_objects(&vbo_array); 
+		R_GL_draw_vbo_object(&vbo_array, 1); 
         R_GL_swap_buffers(window);
         SDL_Delay(20);
     }
