@@ -8,7 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      PREFIX: ${{ github.workspace }}/_install
+      ISOGL_PREFIX: ${{ github.workspace }}/_install
       LIBGL_ALWAYS_SOFTWARE: "1"
     steps:
       - uses: actions/checkout@v4
@@ -17,16 +17,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev xvfb
 
       - name: Build library and demo
-        run: make -j"$(nproc)" PREFIX="$PREFIX"
+        run: make -j"$(nproc)" PREFIX="$ISOGL_PREFIX"
 
       - name: Run tests
         run: xvfb-run -a -s "-screen 0 1280x720x24" make test
 
       - name: Install library
-        run: make PREFIX="$PREFIX" install
+        run: |
+          make PREFIX="$ISOGL_PREFIX" install
+          test -f "$ISOGL_PREFIX/lib/pkgconfig/isogl.pc"
+          PKG_CONFIG_PATH="$ISOGL_PREFIX/lib/pkgconfig" pkg-config --modversion isogl
 
       - name: Build isocad
-        run: make -C apps/isocad PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/_install/lib/pkgconfig
+        run: make -C apps/isocad
 
       - name: Smoke-run isocad
         run: |
