@@ -1,1 +1,6 @@
-myopengl
+build*/
+_install/
+*.o
+*.d
+__pycache__/
+reference/

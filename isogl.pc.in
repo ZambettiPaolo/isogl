@@ -1,0 +1,13 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+datadir=${prefix}/share/isogl
+
+Name: isogl
+Description: ISO 128 single-line vector renderer
+Version: @VERSION@
+Requires: sdl2
+Cflags: -I${includedir}
+Libs: -L${libdir} -lisogl
+Libs.private: -ldl -lm

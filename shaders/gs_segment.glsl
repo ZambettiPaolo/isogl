@@ -12,13 +12,12 @@ flat in uint vThickness[];
 flat in uint vLayer[];
 
 // Varyings verso FS
-out vec2 gPosition;
 out float gDistance;
 out vec4 gColor;
 flat out uint gPatternType;
 flat out uint gThickness;
+
 // Uniforms
-uniform vec2 uViewportSize;
 uniform float uScale;
 
 // Filtri a maschera 32-bit
@@ -108,12 +107,10 @@ void main() {
     //gLayer = vLayer[0];
     
     gDistance = dist0;
-    gPosition = p0;
-	gl_Position = vec4(p0, 0.0, 1.0); 
+	gl_Position = vec4(p0, 0.0, 1.0);
     EmitVertex();
-    
+
     gDistance = dist1;
-    gPosition = p1;
 	gl_Position = vec4(p1, 0.0, 1.0);
     EmitVertex();
     

@@ -18,34 +18,28 @@ flat out uint vLayer;
 uniform mat4 uView;
 uniform mat4 uModel;
 uniform mat4 uRelative;
-uniform int uColorThickness; // flag modalità colore
+uniform int uColorThickness;            // 0 = colori-spessore, 1 = colori-stampa
+uniform vec4 uWeightColor[8];           // predefined thickness -> colour map
 
 void main() {
-    // Unpacking degli attributi compressi (senza suffisso u)
+    // Unpacking degli attributi compressi
     uint thickness   = aAttributes & 31u;
     uint patternType = (aAttributes >> 5u) & 31u;
     uint layer       = (aAttributes >> 10u) & 31u;
-    
-    // Trasforma in view space (non clip space!)
+
+    // Trasforma in clip space (le matrici sono ortografiche, w = 1)
     vec4 viewPos = uView * uModel * uRelative * vec4(aPosition, 0.0, 1.0);
     vPosition = viewPos.xy;
     gl_Position = viewPos;
-    // Calcolo colore in base a flag uColorThickness o spessore
+
     if (uColorThickness == 0) {
-        if (thickness < 25u) 
-            vColor = vec4(1.0, 0.0, 0.0, 0.5);
-        else if (thickness > 40u) 
-            vColor = vec4(1.0, 1.0, 0.0, 1.0);
-        else 
-            vColor = vec4(1.0, 1.0, 1.0, 1.0);
+        vColor = uWeightColor[min(thickness, 7u)];
     } else {
         vColor = aColor;
     }
-    
-    // Passaggio varyings
+
     vDistance = aDistanceFromStart;
     vPatternType = patternType;
     vThickness = thickness;
     vLayer = layer;
 }
-
