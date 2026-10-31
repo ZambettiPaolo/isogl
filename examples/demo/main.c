@@ -319,11 +319,11 @@ int main(int argc, char **argv) {
     isogl_string_list string_list = {0};    
     isogl_glyph_string* s = isogl_create_glyph_string("EUREKA!!!!", font_data);
 
-    isogl_string_list_append(&string_list, s, 210, 0, 2.5, ((float)scale.num/scale.den), 0, font_data); 
+    isogl_string_list_append(&string_list, s, 210, 0, 2.5, ((float)scale.num/scale.den), 0, font_data, 0);
 
     s = isogl_create_glyph_string("Paolo Zambetti", font_data);
 
-    isogl_string_list_append(&string_list, s, 100, -50, 5.0, ((float)scale.num/scale.den), 1, font_data); 
+    isogl_string_list_append(&string_list, s, 100, -50, 5.0, ((float)scale.num/scale.den), 1, font_data, 0);
     
     // Loop principale
     SDL_Event event;

@@ -14,7 +14,8 @@ SDL2_LIBS   := $(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null)
 
 CFLAGS      ?= -O2 -g
 CFLAGS      += -std=c11 -Wall -Wextra -MMD -MP -fPIC
-CPPFLAGS    += -Iinclude/isogl -Ithird_party/tomlc99 \
+CPPFLAGS    += -Iinclude -Iinclude/isogl -Ithird_party/tomlc99 \
+               -Iapps/isocad/src \
                -DISOGL_DEFAULT_ASSET_DIR=\"$(DATADIR)\"
 LDLIBS      := -ldl -lm
 
@@ -31,7 +32,7 @@ TEST        := $(BUILD)/test-core
 LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_style.c \
                third_party/glad/glad.c third_party/tomlc99/toml.c
 DEMO_SRCS   := examples/demo/main.c
-TEST_SRCS   := tests/test_core.c
+TEST_SRCS   := tests/test_core.c apps/isocad/src/cad.c
 
 LIB_OBJS    := $(LIB_SRCS:%.c=$(BUILD)/%.o)
 DEMO_OBJS   := $(DEMO_SRCS:%.c=$(BUILD)/%.o)

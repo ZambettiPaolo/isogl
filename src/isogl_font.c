@@ -1,5 +1,6 @@
 // isogl_font.c
 #include "isogl_font.h"
+#include "isogl.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +66,18 @@ static const isogl_glyph *isogl_find_glyph(const isogl_font_data *font,
         if (font->glyphs[i].codepoint == codepoint) return &font->glyphs[i];
     }
     return NULL;
+}
+
+double isogl_font_text_advance(const isogl_font_data *font, const char *text) {
+    if (!font || !text) return 0.0;
+
+    double advance = 0.0;
+    for (const char *cursor = text; *cursor; ) {
+        uint32_t codepoint = isogl_utf8_next(&cursor);
+        const isogl_glyph *glyph = isogl_find_glyph(font, codepoint);
+        if (glyph) advance += (double)glyph->advance;
+    }
+    return advance;
 }
 
 // ============================================================================
@@ -443,7 +456,8 @@ void isogl_create_string_matrix(float* m, float x, float y, float scale, float a
 
 bool isogl_string_list_append(isogl_string_list* list, isogl_glyph_string* glyph_string,
                               float x, float y, float height, float global_scale,
-                              float angle, isogl_font_data* font) {
+                              float angle, isogl_font_data* font,
+                              uint32_t pick_id) {
     if (!list || !glyph_string || !font) return false;
     if (!(font->height > 0.0f) || !(global_scale > 0.0f) || !(height > 0.0f)) {
         return false;
@@ -468,8 +482,46 @@ bool isogl_string_list_append(isogl_string_list* list, isogl_glyph_string* glyph
 
     isogl_create_string_matrix(list->glyph_strings[list->glyph_string_count].string_matrix,
                                x, y, scale, angle);
+    list->glyph_strings[list->glyph_string_count].pick_id = pick_id;
+    list->glyph_strings[list->glyph_string_count].selected = 0;
     list->glyph_string_count++;
     return true;
+}
+
+static int isogl_font_compare_u32(const void *a, const void *b) {
+    uint32_t va = *(const uint32_t *)a;
+    uint32_t vb = *(const uint32_t *)b;
+    return (va > vb) - (va < vb);
+}
+
+int isogl_string_list_apply_selection(isogl_string_list *list,
+                                      const uint32_t *entity_ids,
+                                      size_t count) {
+    if (!list) return -1;
+    if (count > 0 && !entity_ids) return -1;
+    if (count > SIZE_MAX / sizeof(uint32_t)) return -1;
+
+    for (uint32_t i = 0; i < list->glyph_string_count; ++i) {
+        list->glyph_strings[i].selected = 0;
+    }
+    if (count == 0) return 0;
+
+    uint32_t *sorted = malloc(count * sizeof(uint32_t));
+    if (!sorted) return -1;
+    memcpy(sorted, entity_ids, count * sizeof(uint32_t));
+    qsort(sorted, count, sizeof(uint32_t), isogl_font_compare_u32);
+
+    for (uint32_t i = 0; i < list->glyph_string_count; ++i) {
+        uint32_t pick_id = list->glyph_strings[i].pick_id;
+        if (pick_id == 0) continue;
+        if (bsearch(&pick_id, sorted, count, sizeof(uint32_t),
+                    isogl_font_compare_u32) != NULL) {
+            list->glyph_strings[i].selected = 1;
+        }
+    }
+
+    free(sorted);
+    return 0;
 }
 
 // Cached font uniforms.
@@ -480,6 +532,13 @@ typedef struct {
     GLint relative;
     GLint string;
     GLint color;
+    GLint pick_scale;
+    GLint pick_offset;
+    GLint pick_id;
+    GLint sel_active;
+    GLint sel_rect;
+    GLint sel_color;
+    GLint selected;
 } isogl_font_uniforms;
 
 static isogl_font_uniforms isogl_font_u;
@@ -492,6 +551,13 @@ static void isogl_cache_font_uniforms(GLuint program) {
     isogl_font_u.relative = glGetUniformLocation(program, "relative_matrix");
     isogl_font_u.string = glGetUniformLocation(program, "string_matrix");
     isogl_font_u.color = glGetUniformLocation(program, "uColor");
+    isogl_font_u.pick_scale = glGetUniformLocation(program, "uPickScale");
+    isogl_font_u.pick_offset = glGetUniformLocation(program, "uPickOffset");
+    isogl_font_u.pick_id = glGetUniformLocation(program, "uPickId");
+    isogl_font_u.sel_active = glGetUniformLocation(program, "uSelActive");
+    isogl_font_u.sel_rect = glGetUniformLocation(program, "uSelRect");
+    isogl_font_u.sel_color = glGetUniformLocation(program, "uSelColor");
+    isogl_font_u.selected = glGetUniformLocation(program, "uSelected");
 }
 
 void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_program,
@@ -513,6 +579,18 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
         glUniformMatrix4fv(isogl_font_u.relative, 1, GL_FALSE, relative_matrix);
     if (isogl_font_u.color != -1)
         glUniform4fv(isogl_font_u.color, 1, isogl_font_color);
+    if (isogl_font_u.pick_scale != -1)
+        glUniform2f(isogl_font_u.pick_scale, 1.0f, 1.0f);
+    if (isogl_font_u.pick_offset != -1)
+        glUniform2f(isogl_font_u.pick_offset, 0.0f, 0.0f);
+    if (isogl_font_u.sel_active != -1)
+        glUniform1i(isogl_font_u.sel_active,
+                    isogl_get_selection_active() &&
+                    isogl_get_selection_preview());
+    if (isogl_font_u.sel_rect != -1)
+        glUniform4fv(isogl_font_u.sel_rect, 1, isogl_get_selection_rect());
+    if (isogl_font_u.sel_color != -1)
+        glUniform4fv(isogl_font_u.sel_color, 1, isogl_get_selection_color());
 
     glBindVertexArray(isogl_font_vao);
     glEnableVertexAttribArray(0);
@@ -524,6 +602,59 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
 
         if (isogl_font_u.string != -1)
             glUniformMatrix4fv(isogl_font_u.string, 1, GL_FALSE, glyph_string->string_matrix);
+        if (isogl_font_u.selected != -1)
+            glUniform1i(isogl_font_u.selected, glyph_string->selected ? 1 : 0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, glyph_string->vbo);
+        glVertexAttribPointer(0, 2, GL_SHORT, GL_FALSE,
+                              sizeof(isogl_font_vertex), (void*)0);
+
+        glMultiDrawArrays(GL_LINE_STRIP, glyph_string->first, glyph_string->count,
+                          (GLsizei)glyph_string->polyline_count);
+    }
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glUseProgram(0);
+}
+
+void isogl_draw_string_list_pick(isogl_string_list* string_list, GLuint shader_program,
+                                 float model_matrix[16],
+                                 float view_matrix[16],
+                                 float relative_matrix[16],
+                                 float pick_scale_x, float pick_scale_y,
+                                 float pick_offset_x, float pick_offset_y) {
+    if (!string_list || string_list->glyph_string_count == 0) return;
+    if (shader_program == 0) return;
+    if (isogl_font_vao == 0) isogl_font_init_vao();
+
+    glUseProgram(shader_program);
+    isogl_cache_font_uniforms(shader_program);
+
+    if (isogl_font_u.view != -1)
+        glUniformMatrix4fv(isogl_font_u.view, 1, GL_FALSE, view_matrix);
+    if (isogl_font_u.model != -1)
+        glUniformMatrix4fv(isogl_font_u.model, 1, GL_FALSE, model_matrix);
+    if (isogl_font_u.relative != -1)
+        glUniformMatrix4fv(isogl_font_u.relative, 1, GL_FALSE, relative_matrix);
+    if (isogl_font_u.pick_scale != -1)
+        glUniform2f(isogl_font_u.pick_scale, pick_scale_x, pick_scale_y);
+    if (isogl_font_u.pick_offset != -1)
+        glUniform2f(isogl_font_u.pick_offset, pick_offset_x, pick_offset_y);
+
+    glBindVertexArray(isogl_font_vao);
+    glEnableVertexAttribArray(0);
+
+    for (uint32_t s = 0; s < string_list->glyph_string_count; ++s) {
+        isogl_glyph_string* glyph_string = &string_list->glyph_strings[s];
+        if (glyph_string->pick_id == 0) continue;
+        if (glyph_string->polyline_count == 0 || glyph_string->vbo == 0) continue;
+
+        if (isogl_font_u.string != -1)
+            glUniformMatrix4fv(isogl_font_u.string, 1, GL_FALSE,
+                               glyph_string->string_matrix);
+        if (isogl_font_u.pick_id != -1)
+            glUniform1ui(isogl_font_u.pick_id, glyph_string->pick_id);
 
         glBindBuffer(GL_ARRAY_BUFFER, glyph_string->vbo);
         glVertexAttribPointer(0, 2, GL_SHORT, GL_FALSE,

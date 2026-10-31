@@ -20,6 +20,8 @@ uniform mat4 uModel;
 uniform mat4 uRelative;
 uniform int uColorThickness;            // 0 = colori-spessore, 1 = colori-stampa
 uniform vec4 uWeightColor[8];           // predefined thickness -> colour map
+uniform vec2 uPickScale;                // pick pass: 1,1 in normal rendering
+uniform vec2 uPickOffset;               // pick pass: 0,0 in normal rendering
 
 void main() {
     // Unpacking degli attributi compressi
@@ -29,6 +31,7 @@ void main() {
 
     // Trasforma in clip space (le matrici sono ortografiche, w = 1)
     vec4 viewPos = uView * uModel * uRelative * vec4(aPosition, 0.0, 1.0);
+    viewPos.xy = viewPos.xy * uPickScale + uPickOffset;
     vPosition = viewPos.xy;
     gl_Position = viewPos;
 

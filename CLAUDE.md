@@ -1,0 +1,377 @@
+# Contesto per agenti — isocad / isogl
+
+Questo file è il contesto di progetto per chi lavora al repository. Va letto
+prima di modificare il modello del documento, il rendering o la selezione.
+Il documento di progetto completo, con sei diagrammi, è in
+[`docs/generatore-di-simboli.html`](docs/generatore-di-simboli.html): aprilo
+in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
+
+## Cos'è il repository
+
+- `libisogl`: renderer OpenGL 2D per disegno tecnico, conforme a ISO 128
+  (linee) e ISO 3098 (testo). Non è una libreria neutra: espone e impone le
+  norme. Le tabelle normative stanno in `include/isogl/isogl_style.h`.
+- `apps/isocad`: CAD 2D minimale costruito sopra la libreria. Possiede
+  finestra, contesto, documento (layer ed entità) e comandi.
+- C11, SDL2, OpenGL 3.3 core, glad, tomlc99. Nessuna dipendenza da FreeType o
+  Pango: i font sono vettoriali e caricati da TOML.
+- Contratto: l'applicazione crea e distrugge il contesto; la libreria non lo
+  fa. `gladLoadGLLoader()` prima di `isogl_init*`; un solo contesto corrente;
+  nessuna thread-safety; `isogl_cleanup()` idempotente.
+
+Stato: Milestone A. Esistono foglio, linee, cerchi, rettangoli, testo, pattern
+e pesi ISO, zoom/pan, modalità colori-spessore, selezione d’area persistente e
+quota allineata con geometria di render e di pick. Editing, archi, polilinee ed
+export non sono implementati.
+
+Il pick GPU è ora implementato in `isogl_pick_at` (`GL_R32UI`, box logico 8×8
+pixel, texture 16×16 per 2× di definizione, stesso VS/GS e `fs_pick.glsl` per
+i segmenti, `fs_font_pick.glsl` per il testo), con test in `tests/test_core.c`.
+Il readback è scansionato a spirale dal centro verso l’esterno, quindi gli ID
+distinti sono ordinati dal più vicino al cursore; `out_ids[0]` è il candidato
+centrale. Mancano il pre-filtro di distanza e la politica topmost/centro. Il
+pick pass disegna tutti gli oggetti con `pick_id != 0`, non solo i candidati.
+
+La selezione d’area è implementata in `isocad`: drag sinistro con start in mm
+e modo dinamico (sinistra→destra window, destra→sinistra crossing). Durante il
+drag la CPU ricalcola il set esatto con `cad_select_rect()` a ogni movimento e
+lo applica al renderer come flag per entità (`cad_selection_apply`):
+`isogl_vbo_object.selected` e `isogl_glyph_string.selected`, tinti dal FS via
+`uSelected`. Il set resta evidenziato dopo il rilascio e nei frame successivi,
+anche dopo pan/zoom; è stato UI, non documento, e va riapplicato per ID dopo un
+rebuild. Il rettangolo (`vs_selection.glsl`/`fs_selection.glsl`) è solo overlay
+rubber-band. Il predicato per segmento nel GS
+(`uSelActive/uSelCrossing/uSelRectNdc`) resta disponibile come anteprima veloce
+ma è disattivato in isocad (`isogl_set_selection_preview(0)`), così anteprima e
+set finale coincidono; il testo usa il flag per stringa, non più il test per
+frammento. Il pan è sul tasto centrale e non interrompe la selezione; la
+rotella zooma anche durante il drag; Esc annulla e svuota il set, Q esce.
+Mancano il pre-filtro del click e la politica topmost/centro; l’OBB del testo
+per la selezione a rettangolo è calcolato dagli advance reali
+(`isogl_font_text_advance`), non più da `strlen * 0.6 * h`.
+
+## Decisione architetturale da rispettare
+
+Il generatore di simboli **non è ancora implementato**: è la direzione
+progettuale concordata. Il punto centrale è separare due consumatori del
+documento, invece di metterli in catena.
+
+```
+                         ┌──────────────────┐
+                         │   CadDocument    │
+                         │ modello analitico│
+                         │      (RAM)       │
+                         └───────┬──────────┘
+                                 │ parametri
+                 ┌───────────────┴───────────────┐
+                 ▼                               ▼
+      ┌────────────────────┐          ┌────────────────────┐
+      │  Kernel geometrico │          │ Generatore simboli │
+      │ bounds / hit_test  │          │  entità → polilinee│
+      │ snap / intersezioni│          │  + run di testo    │
+      │ puro, nessun GL    │          │  puro, nessun GL   │
+      └─────────┬──────────┘          └─────────┬──────────┘
+                │ id entità                     │ staging transitorio
+                ▼                               ▼
+      ┌────────────────────┐          ┌────────────────────┐
+      │ Selezione / comandi│          │  isogl → VBO/VRAM  │
+      └────────────────────┘          └────────────────────┘
+```
+
+Regole che ne derivano:
+
+1. **La selezione non legge i segmenti.** Usa i parametri analitici
+   dell'entità. Il collegamento selezione → staging/VRAM non deve esistere.
+2. **Il modello analitico sta in RAM perché è il documento.** Serve per
+   editing, undo, snap, salvataggio, export e rigenerazione.
+3. **Non esiste una copia RAM permanente dei segmenti.** Lo staging
+   (`isogl_segment_list`) vive il tempo di un upload e viene liberato subito;
+   i segmenti definitivi stanno solo in VRAM.
+4. **La CPU fa selezione, snap e tessellazione una tantum. La GPU rasterizza,
+   tratteggia, clippa e mappa i colori-spessore.**
+5. **Il generatore è puro:** nessuna chiamata GL o SDL, nessuna dipendenza dal
+   documento. Riceve entità + stile, emette polilinee e run di testo tramite
+   callback.
+
+## Invarianti e trappole
+
+- **Niente mirror della tessellazione.** Un cerchio a 96 segmenti costa
+  192 vertici × 32 B = 6 KiB. Diecimila cerchi = ~60 MiB. Il modello analitico
+  degli stessi cerchi è circa 1 MB. Duplicare i segmenti in RAM raddoppia il
+  dato più grande senza aggiungere capacità.
+- **Tessellazione a tolleranza di corda, non a conteggio fisso.**
+  `N = ceil(π / acos(1 − s/r))`. La tolleranza è in mm di carta (0,02–0,05 mm,
+  sotto il peso minimo ISO di 0,18 mm) e **non** dipende dallo zoom. Con
+  `s = 0,05 mm`: r = 5 mm → N ≈ 23; r = 50 mm → N ≈ 71; r = 500 mm → N ≈ 223.
+  Il 96 fisso attuale è sbagliato sia per i raggi piccoli sia per i grandi.
+- **Stile per polilinea, non per entità.** In una quota la linea di quota e i
+  riferimenti seguono il layer, ma punte e testo hanno vincoli propri. Oggi
+  `cad_vertex()` prende pattern e peso dall'entità per tutti i vertici.
+- **Il testo è un run separato**, non un insieme di segmenti: va alla pipeline
+  font. L'emitter ha due callback, `polyline` e `text`.
+- **Aggiornamento per entità sporca.** Una versione per entità, un dirty set,
+  un emit per entità. Se il conteggio vertici non cambia: `glBufferSubData`
+  nel range. Se cambia: nuovo range da free-list o rebuild della pagina.
+- **Vista ≠ modello.** Pan e zoom cambiano solo `uView`/`uModel`: layout e VBO
+  sono in mm di carta, quindi pan/zoom non rigenerano nulla e non toccano la
+  VRAM. Traslare una *entità* riscrive solo il suo range; a parità di conteggio
+  vertici è una `glBufferSubData`, non un rebuild del disegno. La tolleranza di
+  corda è di stampa, non di schermo, quindi nemmeno lo zoom richiede una nuova
+  tessellazione.
+- **Il batch non è per stile e non è un oggetto.** Pattern, peso, layer e
+  colore sono attributi per vertice: una pagina può contenere stili misti.
+  L'identità dell'entità è il range `entity_id → (page, first, count)`; la
+  selezione non usa il range. Un draw per pagina basta; `glMultiDrawArrays`
+  serve solo a saltare range invisibili. Il generatore non decide il VBO:
+  emette verso un emitter, il backend sceglie se usare un VBO per entità o una
+  pagina.
+- **Handle stabili.** L'entità non deve conoscere il VBO; il backend tiene
+  `entity_id → range/slot`. `isogl_vbo_array_remove()` oggi shifta l'array e
+  non ha free-list: non è una base stabile per undo e selezione.
+- **Pick GPU solo per click/hover; rettangolo analitico.** Il click usa un FBO
+  di ID 16×16 (`GL_R32UI`, 4 B/pixel) su un box logico 8×8: seleziona ciò che
+  è colorato a schermo.
+  Il rettangolo resta analitico: il pixel buffer non risponde a “contenuto” e
+  una linea tratteggiata può attraversarlo senza pixel dentro.
+- **L'AABB non basta per il click.** A zoom alto è troppo conservativo: il box
+  di un cerchio include l'interno, quello di una diagonale è enorme. Dopo la
+  broad phase AABB/grid, filtra con la distanza analitica dal cursore alle
+  primitive del layout, tolleranza `pick_radius_mm + sagitta`. Il filtro è solo
+  un early-out: il pick pass GPU decide sul pixel.
+- **Il pick pass è fedele al display.** Stessi VBO, stesso GS/FS con
+  `uPickId`/`uPickMode`, stessi filtri di visibilità/layer/clipping; niente
+  blending, MSAA o `GL_LINE_SMOOTH`. I vuoti del tratteggio sono ignorabili
+  (`pick_ignore_dashes`): il tratteggio è stile, non selezionabilità. Gli altri
+  vuoti (layer nascosto, interno del cerchio) restano non selezionabili.
+- **ID a 32 bit, non il colore di visualizzazione.** `CadEntity.id` è
+  `uint32_t` (4 B); il nome del VBO è `GLuint` (4 B) ma non è stabile. L'ID di
+  pick è l'ID entità, passato come uniform per draw: con i range candidati non
+  serve un attributo per vertice. 0 = nessuna entità.
+- **Soglia configurabile.** `pick_radius_px` e `pick_max_entities` sono
+  parametri. Dopo il readback conta gli ID distinti nel 16×16, scansionato a
+  spirale dal centro: 0 = niente,
+  1 = seleziona, 2..max = centro/più vicino/menu, > max = ambiguo.
+
+## Modello del documento
+
+- `CadLayer`: nome, colore di stampa, peso e tipo di linea ISO predefiniti.
+- `CadEntity`: linea, cerchio, rettangolo o testo; layer, pattern, peso,
+  visibilità, `vbo_id`.
+- `CadDocument`: array di entità, specchio GPU (`isogl_vbo_array` per i
+  segmenti, `isogl_string_list` per il testo), font, scala foglio.
+- Ogni entità geometrica ha oggi il proprio VBO. La modifica di un'entità
+  ricostruisce solo la sua lista di segmenti e chiama
+  `isogl_vbo_array_update()`; il resto resta in VRAM.
+- Il testo invece viene ricostruito **interamente** a ogni cambiamento
+  (`cad_document_rebuild_text`). Con le quote diventa una parte troppo grande
+  del modello: va reso incrementale per entità.
+
+La quota è il caso guida: in memoria `p1`, `p2`, `p3` (orientamento e distanza
+dal primo punto), `testo_prima`, `testo_dopo`. Il valore non è memorizzato: si
+calcola da `|p1 − p2|`. Le coordinate del modello sono in unità documento; la
+scala del foglio governa le grandezze di carta (altezza testo, frecce,
+tolleranze), non il valore misurato. Il generatore produce linee di
+riferimento, linea di quota, punte e un run di testo.
+
+La prima entità reale è la quota allineata (`CAD_DIMENSION`): `CadDimension`
+conserva `p1`, `p2`, `p3`, prefisso/unità/suffisso, precisione, altezza testo
+e `pick_text`. La stessa funzione in `cad.c` (`cad_dimension_geometry`) deriva
+dai parametri sia la geometria di render (linea di quota, riferimenti, punte,
+testo) sia quella di pick (le stesse linee/punte più l’OBB del testo). Il VBO
+e la stringa di testo condividono l’`entity_id`, quindi click e selezione a
+rettangolo restituiscono la quota intera. Il valore si formatta con la
+precisione richiesta; `pick_text = 0` esclude l’OBB del testo dal rettangolo
+lasciandolo cliccabile via pick GPU.
+
+## Selezione
+
+Due modalità, due rappresentazioni. Il kernel analitico non sparisce: cambia
+ruolo.
+
+### Click e hover: il pixel è la verità
+
+Il rendering è una spezzata: a zoom alto la corda visibile non coincide con
+l'arco analitico. Per il click la verità è il pixel colorato, non la curva
+ideale. L'ID dell'entità è il ponte: il pick restituisce l'ID, l'editing usa il
+modello double.
+
+1. Filtra layer, visibilità e selezionabilità.
+2. Broad phase AABB/grid sul rettangolo del cursore.
+3. Pre-filtro analitico sulla distanza alle primitive del layout:
+   segmento = punto-segmento; cerchio = `|dist(centro, cursore) − r|`;
+   arco = distanza dall'arco con controllo angolare, altrimenti estremo;
+   testo = OBB; quota = tutte le primitive visibili (il flag `pickable` del
+   layout serve al rettangolo, non al click).
+   Tolleranza = `pick_radius_mm + sagitta + epsilon`. Serve a scartare i falsi
+   positivi dell'AABB (interno del cerchio, diagonali lunghe).
+   Se i candidati AABB restano molti — una linea lunga ha un AABB grande —
+   indicizza le primitive (R-tree o grid sui segmenti/archi), non solo le
+   entità. Il test di distanza resta O(candidati) e avviene solo al click.
+   A zoom basso la tolleranza in mm cresce e il box contiene oggetti che sono
+   davvero vicini: il pre-filtro non li può separare. L'ambiguità si gestisce
+   con `pick_max_entities` e un menu/cycle, non con il filtro.
+4. Pick pass GPU sui soli candidati: FBO 16×16 `GL_R32UI` (box logico 8×8)
+   con matrice di pick
+   centrata sul cursore, clear 0, stessi VBO/GS/FS in modalità pick, un uniform
+   `pick_id` per draw, niente blending/MSAA/smooth. Disegna tutte le primitive
+   visibili: pre-filtro e pick pass devono vedere lo stesso insieme. Un
+   eventuale flag “pickable per click” va applicato a entrambi. Se
+   `pick_ignore_dashes`, il FS non scarta i vuoti del tratteggio.
+   L'attachment è una texture allocata con
+   `glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, 5, 5, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, NULL)`.
+5. `glReadPixels(GL_RED_INTEGER, GL_UNSIGNED_INT)`, conta gli ID distinti:
+   0 = niente; 1 = seleziona; 2..max = pixel centrale, più vicino o menu;
+   > max = ambiguo.
+
+Il pick pass non è il percorso caldo: può fare un draw per candidato. Con le
+pagine VBO si disegnano i soli range candidati, senza aggiungere un attributo
+ID per vertice. Anche il testo deve avere un `pick_id` (una quota ha segmenti e
+testo con lo stesso ID entità). Per il pre-filtro del testo serve
+`isogl_text_extents()`.
+
+### Rettangolo: window e crossing
+
+Dato un rettangolo:
+
+1. Converti i due angoli in pixel con l'inversa di `uView · uModel` e
+   normalizza min/max. Tutti i test avvengono in mm di carta.
+2. Applica prima i filtri di layer e visibilità.
+3. Broad phase: AABB analitico per entità, con un grid sul foglio.
+4. Narrow phase analitica per tipo:
+   - segmento: Liang–Barsky (lo stesso algoritmo del geometry shader);
+   - polilinea: tutte/una delle coppie;
+   - cerchio: `d_near ≤ r ≤ d_far` per attraversare il bordo; centro dentro e
+     `r ≤ d_near` per essere contenuto. `d_near` è la distanza minima del
+     centro dal bordo del rettangolo (se il centro è dentro, dal lato più
+     vicino); `d_far` è la distanza massima dai quattro vertici;
+   - arco: come il cerchio, più estremi e range angolare;
+   - testo: OBB e SAT; serve l'estensione del testo;
+   - quota: geometria di pick (linea di quota e riferimenti), non tutti i
+     segmenti generati.
+5. Semantica: **window** = solo contenute; **crossing** = contenute oppure
+   attraversanti il bordo. Sono due predicati.
+
+`isogl_font_text_advance()` calcola la larghezza dagli `advance` reali; l'OBB
+del testo (entità testo e testo della quota) la usa nella selezione a
+rettangolo. Manca ancora `isogl_text_extents()` come API completa per il
+pre-filtro del click; gli `advance` sono in `isogl_font_data`.
+
+## API proposta
+
+```c
+typedef struct {
+    void *user;
+    void (*polyline)(void *user, const float *xy, uint32_t count,
+                     uint8_t pattern, uint8_t weight, uint8_t layer);
+    void (*text)(void *user, const char *utf8, float x, float y,
+                 float height, float angle, int align);
+} symgen_emitter;
+
+void symgen_emit(const CadEntity *e, const CadStyle *style,
+                 symgen_emitter *out);
+
+bool entity_bounds(const CadEntity *e, sym_box *out);
+bool entity_hit(const CadEntity *e, const sym_box *query,
+                sym_hit_mode mode);   /* CONTAINED | CROSSING */
+
+typedef struct {
+    GLuint vbo_id;          /* oppure la glyph string, per il testo */
+    uint32_t entity_id;     /* l'ID opaco che torna dal pick */
+} isogl_pick_item;
+
+int isogl_pick_at(SDL_Window *win, int px, int py,
+                  const isogl_pick_item *items, size_t count,
+                  int radius_px, int max_entities,
+                  uint32_t *out_ids, size_t out_capacity,
+                  size_t *out_count);
+```
+
+L'emitter scrive direttamente nello staging: nessuna display list intermedia.
+`isogl` resta il renderer e non conosce né il kernel né i simboli. Anche il
+pick è entity-agnostic: l'app fornisce i candidati e gli ID; la libreria
+possiede FBO e shader. `radius_px` e `max_entities` sono parametri, non
+costanti. Il `pick_id` è opaco; il testo ne ha uno.
+
+## Punti del codice attuale
+
+Riferimenti al commit `05af29c`; verifica i numeri di riga prima di fidarti.
+
+| Punto | Oggi | Direzione |
+|---|---|---|
+| `include/isogl/isogl.h:59` | `isogl_vertex` 32 B | invariato |
+| `apps/isocad/src/cad.c:8` | 96 segmenti fissi per cerchio | `tessellate_arc(r, tolleranza)` |
+| `apps/isocad/src/cad.c:38` | stile per entità su tutti i vertici | stile per polilinea |
+| `apps/isocad/src/cad.c:237` | rebuild globale del testo | testo incrementale per entità |
+| `src/isogl.c:629` | add di un VBO per entità | invariato finché non si impagina |
+| `src/isogl.c:718` | update del singolo VBO | invariato; base per il delta |
+| `src/isogl.c:842` | remove con shift dell'array | handle stabili + free-list |
+| `src/isogl.c:954` | una draw call per entità | un draw per pagina; multi-draw solo per range invisibili |
+| `src/isogl.c:1038` | draw di tutti gli oggetti | batching quando il profilo lo chiede |
+| `apps/isocad/src/cad.h` | `CadEntity.id` `uint32_t` | ID stabile per il pick |
+| `include/isogl/isogl.h` | `isogl_vbo_object` senza pick ID | campo `pick_id` (fatto) |
+| `include/isogl/isogl_font.h` | glyph string senza pick ID | campo `pick_id` (fatto) |
+| `shaders/fs_pick.glsl` | nuovo | fragment shader che scrive `uPickId` |
+| `shaders/fs_font_pick.glsl` | nuovo | pick del testo |
+| `src/isogl.c` `isogl_pick_at` | implementato | mancano pre-filtro e topmost |
+
+Nota: `isogl_vbo_array_set_transform()` esiste, ma `isocad` non lo usa; la
+matrice relativa è sempre identità. Con la geometria già in mm di carta, il
+batch statico non ha bisogno di una matrice per oggetto. La trasformazione
+serve solo per overlay e anteprime.
+
+`CadEntity.id` oggi è `count + 1`: va bene finché non si rimuovono entità. Con
+delete/undo serve un contatore monotono, altrimenti un ID può essere riusato e
+il pick restituisce l'entità sbagliata.
+
+## Ordine di lavoro consigliato
+
+1. `symgen` puro + `tessellate_arc()` + test **senza contesto GL** (cerchio,
+   arco, punta, tolleranza).
+2. `entity_bounds()` per tipo e indice AABB/grid; test della broad phase.
+3. `entity_hit()` per tipo, window e crossing; test sui casi limite.
+4. Pick click/hover e selezione d’area: FBO 16×16 `GL_R32UI` (box 8×8), `pick_id` per
+   draw item, pre-filtro distanza dal layout, soglia/raggio configurabili;
+   drag sinistro con start in mm, highlight GPU e query CPU
+   `cad_select_rect`. Test: interno del cerchio, angolo vuoto di una diagonale,
+   tratteggio, due entità sovrapposte.
+5. Prima entità reale: la quota. La quota allineata è implementata in `cad.c`
+   (`cad_add_dimension`, `cad_dimension_geometry`); l’estrazione di un modulo
+   `symgen` separato e il testo incrementale restano da fare.
+6. Pagine VBO solo quando il profilo mostra che le draw call per entità sono
+   il collo di bottiglia. Fino ad allora resta un VBO per entità: il generatore
+   non dipende dal backend. Il batching non è per stile (lo stile è per
+   vertice) e non fonde le entità: tiene solo i loro range in un pool.
+
+## Da non fare
+
+- Tenere una copia RAM dei segmenti.
+- Fare hit-test sui segmenti invece che sulle entità.
+- Usare un pass di pick GPU per la selezione a rettangolo.
+- Usare il solo AABB come filtro del click: il cerchio include l'interno, la
+  diagonale include gli angoli vuoti.
+- Leggere il framebuffer normale per decidere se fare il pick.
+- Usare il colore di visualizzazione o il nome del VBO come ID di pick.
+- Rigenerare tutto il documento a ogni modifica.
+- Lasciare 96 segmenti fissi per ogni cerchio.
+- Introdurre FreeType/Pango o nuove dipendenze senza necessità.
+- Assumere thread-safety: lo stato è singleton e legato al contesto corrente.
+
+## Build e test
+
+```sh
+make                 # build/libisogl.a + build/isogl-demo
+make test            # test FBO: richiede un contesto OpenGL
+make -B SANITIZE=1 test
+```
+
+I test attuali di `tests/test_core.c` richiedono un contesto GL. I nuovi test
+del kernel e del generatore devono poter girare senza finestra: è un vantaggio
+della separazione, non un dettaglio.
+
+## Riferimenti
+
+- `docs/generatore-di-simboli.html` — documento completo con i diagrammi.
+- `README.md` — architettura, contratto, build, install.
+- `apps/isocad/README.md` — modello del documento e stato dell'app.
+- `include/isogl/isogl.h`, `include/isogl/isogl_font.h`,
+  `include/isogl/isogl_style.h` — API e tabelle normative.

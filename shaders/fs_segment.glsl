@@ -5,6 +5,7 @@ in float gDistance;
 in vec4 gColor;
 flat in uint gPatternType;
 flat in uint gThickness;
+flat in uint gSelected;
 
 out vec4 FragColor;
 
@@ -12,6 +13,10 @@ uniform float uScale;                 // sheet scale: model units -> mm
 uniform float uWeightMM[8];           // ISO line weights in mm
 uniform float uPatternRatios[150];    // 15 patterns x 10 ratios (multiples of thickness)
 uniform int uPatternCount[15];        // 0 = continuous
+
+uniform int uSelActive;
+uniform vec4 uSelColor;               // selection colour (preview and persistent)
+uniform int uSelected;                // persistent selection flag for this object
 
 const float MIN_DOT_RATIO = 0.5;      // zero-length ISO dots need a visible length
 const int PATTERN_STRIDE = 10;
@@ -57,6 +62,11 @@ void main()
 
     if (!applyPattern(gPatternType, gDistance * uScale, t)) {
         discard;
+    }
+
+    if (uSelected != 0 || (uSelActive != 0 && gSelected != 0u)) {
+        FragColor = uSelColor;
+        return;
     }
 
     FragColor = gColor;

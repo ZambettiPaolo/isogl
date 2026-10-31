@@ -16,6 +16,7 @@ out float gDistance;
 out vec4 gColor;
 flat out uint gPatternType;
 flat out uint gThickness;
+flat out uint gSelected;
 
 // Uniforms
 uniform float uScale;
@@ -24,6 +25,11 @@ uniform float uScale;
 uniform uint uThicknessMask;
 uniform uint uPatternMask;
 uniform uint uLayerMask;
+
+// Selection rectangle in NDC (xmin, ymin, xmax, ymax).
+uniform int uSelActive;
+uniform int uSelCrossing;
+uniform vec4 uSelRectNdc;
 
 // Clipping box (view space)
 const float xmin = -1.0;
@@ -74,36 +80,83 @@ bool filterSegment(uint pattern, uint thickness, uint layer) {
     uint thicknessBit = 1u << thickness;
     uint patternBit = 1u << pattern;
     uint layerBit = 1u << layer;
-    
+
     // Verifica se il bit corrispondente è attivo nella maschera
     if ((thicknessBit & uThicknessMask) == 0u) return false;
     if ((patternBit & uPatternMask) == 0u) return false;
     if ((layerBit & uLayerMask) == 0u) return false;
-    
+
     return true;
+}
+
+bool pointInSelection(vec2 p) {
+    return p.x >= uSelRectNdc.x && p.x <= uSelRectNdc.z &&
+           p.y >= uSelRectNdc.y && p.y <= uSelRectNdc.w;
+}
+
+// Liang-Barsky against the selection rectangle.
+bool segmentIntersectsSelection(vec2 p0, vec2 p1) {
+    if (pointInSelection(p0) || pointInSelection(p1)) return true;
+
+    vec2 d = p1 - p0;
+    float pp[4];
+    pp[0] = -d.x;
+    pp[1] = d.x;
+    pp[2] = -d.y;
+    pp[3] = d.y;
+
+    float q[4];
+    q[0] = p0.x - uSelRectNdc.x;
+    q[1] = uSelRectNdc.z - p0.x;
+    q[2] = p0.y - uSelRectNdc.y;
+    q[3] = uSelRectNdc.w - p0.y;
+
+    float t0 = 0.0;
+    float t1 = 1.0;
+    for (int i = 0; i < 4; ++i) {
+        if (pp[i] == 0.0) {
+            if (q[i] < 0.0) return false;
+        } else {
+            float r = q[i] / pp[i];
+            if (pp[i] < 0.0) t0 = max(t0, r);
+            else             t1 = min(t1, r);
+            if (t0 > t1) return false;
+        }
+    }
+    return t0 <= t1;
 }
 
 void main() {
     vec2 p0 = vPosition[0];
     vec2 p1 = vPosition[1];
-    
+
    	// Filtro pattern/thickness/layer prima di emettere
-	if (!filterSegment(vPatternType[0], vThickness[0], vLayer[0])) 
+	if (!filterSegment(vPatternType[0], vThickness[0], vLayer[0]))
     	return;
-    
+
+    uint selected = 0u;
+    if (uSelActive != 0) {
+        if (uSelCrossing != 0) {
+            selected = segmentIntersectsSelection(p0, p1) ? 1u : 0u;
+        } else {
+            selected = (pointInSelection(p0) && pointInSelection(p1)) ? 1u : 0u;
+        }
+    }
+
     // Clipping nel view space
     float t0, t1;
-    if (!clipLine(p0, p1, t0, t1)) 
+    if (!clipLine(p0, p1, t0, t1))
         return;
-    
+
     // Interpolazione distanze
     float dist0 = mix(vDistance[0], vDistance[1], t0);
     float dist1 = mix(vDistance[0], vDistance[1], t1);
-    
+
     // Output vertices
     gColor = vColor[0];
     gPatternType = vPatternType[0];
     gThickness = vThickness[0];
+    gSelected = selected;
     //gLayer = vLayer[0];
     
     gDistance = dist0;

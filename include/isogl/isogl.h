@@ -26,6 +26,13 @@
 extern GLuint isogl_shader_program_segment;
 extern GLuint isogl_shader_program_sheet;
 extern GLuint isogl_shader_program_font;
+extern GLuint isogl_shader_program_pick;
+extern GLuint isogl_shader_program_font_pick;
+
+/* Side, in window pixels, of the logical square box used by isogl_pick_at(). */
+#define ISOGL_PICK_SIZE 8
+/* Side, in texels, of the offscreen pick texture (2x definition). */
+#define ISOGL_PICK_TEXTURE_SIZE (ISOGL_PICK_SIZE * 2)
 
 
 typedef struct {
@@ -90,8 +97,10 @@ typedef struct {
     GLuint vbo_id;              // OpenGL VBO identifier
     size_t vertex_count;        // Number of vertices in this VBO
     int visible;                // Visibility flag (0 = hidden, 1 = visible)
+    int selected;               // Persistent selection highlight (0/1)
     float transform[16];        // 4x4 transformation matrix (column-major for OpenGL)
     isogl_vbo_type type;        // selector for shader program
+    uint32_t pick_id;           // opaque ID written by the pick pass (0 = not pickable)
 } isogl_vbo_object;
 
 
@@ -143,17 +152,80 @@ int isogl_vbo_array_update(isogl_vbo_array* vbo_array, GLuint id, const isogl_se
 int isogl_vbo_array_set_transform(isogl_vbo_array* vbo_array, GLuint id,
                                   float tx, float ty, float rotation, float scale);
 int isogl_vbo_array_set_visible(isogl_vbo_array* vbo_array, GLuint id, int visible);
+int isogl_vbo_array_set_pick_id(isogl_vbo_array* vbo_array, GLuint id, uint32_t pick_id);
+int isogl_vbo_array_set_selected(isogl_vbo_array* vbo_array, GLuint id, int selected);
+int isogl_vbo_array_clear_selection(isogl_vbo_array* vbo_array);
+int isogl_vbo_array_apply_selection(isogl_vbo_array* vbo_array,
+                                    const uint32_t* entity_ids, size_t count);
 isogl_vbo_object* isogl_vbo_array_get(isogl_vbo_array* vbo_array, GLuint id);
 int isogl_vbo_array_remove(isogl_vbo_array* vbo_array, GLuint id);
 void isogl_vbo_array_free(isogl_vbo_array* vbo_array);
 void isogl_draw_vbo_object(isogl_vbo_array* vbo_array, size_t index);
 void isogl_draw_all_vbo_objects(isogl_vbo_array* vbo_array);
 
+/**
+ * @brief Pick the opaque IDs visible in an ISOGL_PICK_SIZE square box
+ *        around a cursor position.
+ *
+ * The logical box is ISOGL_PICK_SIZE window pixels wide.  It is rendered
+ * into an ISOGL_PICK_TEXTURE_SIZE square GL_R32UI texture (2x definition),
+ * so thin lines get two texels per screen pixel.  Texels are read back and
+ * scanned from the centre outwards in a square spiral: the returned distinct
+ * IDs are ordered from the closest to the cursor outwards, so out_ids[0] is
+ * the centre-most hit.
+ *
+ * It does not change the current view/model or the objects.
+ *
+ * @param window     window whose size defines the pixel mapping
+ * @param vbo_array  segment objects to test (may be NULL)
+ * @param strings    text strings to test (may be NULL)
+ * @param px, py     cursor in window pixels, origin top-left (SDL convention)
+ * @param out_ids    caller array receiving distinct IDs, centre-out
+ * @param max_ids    capacity of out_ids; use ISOGL_PICK_TEXTURE_SIZE squared
+ *                   to receive every possible distinct ID
+ * @param out_count  number of distinct IDs written
+ * @return 0 on success, -1 on invalid arguments or GL failure
+ */
+int isogl_pick_at(SDL_Window* window, isogl_vbo_array* vbo_array,
+                  isogl_string_list* strings,
+                  float px, float py,
+                  uint32_t* out_ids, size_t max_ids, size_t* out_count);
+
 // Gestione viewport e trasformazioni
 void isogl_resize_viewport(SDL_Window* window);
 void isogl_pixel_to_point(SDL_Window *window, isogl_point *pixelP, isogl_point *modelP);
 int isogl_ndc_to_world(float ndc_x, float ndc_y, isogl_point *world);
 int isogl_screen_to_world(SDL_Window *window, float px, float py, isogl_point *world);
+int isogl_world_to_screen(SDL_Window *window, float wx, float wy, isogl_point *screen);
+
+/*
+ * Selection highlight for the next display frames.  The rectangle is in
+ * framebuffer pixels, origin bottom-left, and is used by the segment and
+ * text fragment shaders to tint the fragments inside it.  crossing chooses
+ * the highlight colour (yellow for crossing, green for window).
+ * This is a preview only; it does not change the pick IDs.
+ */
+void isogl_set_selection_rect(float x0, float y0, float x1, float y1, int crossing);
+void isogl_clear_selection_rect(void);
+void isogl_draw_selection_overlay(void);
+int isogl_get_selection_active(void);
+const float *isogl_get_selection_rect(void);
+const float *isogl_get_selection_color(void);
+
+/*
+ * Persistent selection.  isogl stores only a flag per VBO object (and per
+ * text string); the application owns the set of entity IDs.  Apply the set
+ * with isogl_vbo_array_apply_selection() / isogl_string_list_apply_selection()
+ * and the selected objects are tinted on every following frame, independently
+ * of the transient rectangle preview.
+ *
+ * The rectangle preview still uses the same colour.  isogl_set_selection_preview(0)
+ * disables the per-segment rectangle tint while keeping the rubber-band
+ * overlay drawn by isogl_draw_selection_overlay().
+ */
+void isogl_set_selection_color(float r, float g, float b, float a);
+void isogl_set_selection_preview(int enabled);
+int isogl_get_selection_preview(void);
 
 // Gestione zoom e pan
 void isogl_handle_zoom(SDL_Window* window, int wheel_y, float mouseX, float mouseY);

@@ -1,0 +1,1047 @@
+<title>Generatore di simboli</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Semi+Condensed:wght@500;600;700&display=swap">
+<style>
+  /* ------------------------------------------------------------------
+     Piano: carta tecnica fredda, inchiostro grafite, accento petrolio.
+     Display condensato per i titoli, Plex Sans per il testo, Plex Mono
+     per dati, formule e riferimenti al codice. Griglia da foglio da disegno.
+     ------------------------------------------------------------------ */
+  :root {
+    --bg: #f2f4f2;
+    --surface: #fbfcfa;
+    --surface-2: #e9eeea;
+    --ink: #18211f;
+    --muted: #5a6965;
+    --line: #c6cfca;
+    --line-strong: #9aa8a2;
+    --accent: #0d6b64;
+    --accent-ink: #07504b;
+    --accent-soft: #dcebe7;
+    --warn: #a34e2c;
+    --warn-soft: #f3e2d8;
+    --ok: #2f6b3a;
+    --ok-soft: #ddebd7;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+    --display: "Saira Semi Condensed", "Arial Narrow", sans-serif;
+    --measure: 68ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1413;
+      --surface: #151d1b;
+      --surface-2: #1b2522;
+      --ink: #e7edea;
+      --muted: #9aa9a4;
+      --line: #2b3935;
+      --line-strong: #455651;
+      --accent: #6acbbf;
+      --accent-ink: #8eded3;
+      --accent-soft: #14312d;
+      --warn: #e39a76;
+      --warn-soft: #33221a;
+      --ok: #8fcb98;
+      --ok-soft: #1a2e1e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1413;
+    --surface: #151d1b;
+    --surface-2: #1b2522;
+    --ink: #e7edea;
+    --muted: #9aa9a4;
+    --line: #2b3935;
+    --line-strong: #455651;
+    --accent: #6acbbf;
+    --accent-ink: #8eded3;
+    --accent-soft: #14312d;
+    --warn: #e39a76;
+    --warn-soft: #33221a;
+    --ok: #8fcb98;
+    --ok-soft: #1a2e1e;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 72px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 1rem;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  main, .sheet { width: 100%; max-width: 1080px; margin-inline: auto; }
+
+  /* ---- Testata ---- */
+  .masthead {
+    position: relative;
+    border-bottom: 1px solid var(--line-strong);
+    overflow: hidden;
+  }
+  .masthead::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, var(--line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--line) 1px, transparent 1px);
+    background-size: 28px 28px;
+    opacity: .32;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 92%);
+    mask-image: linear-gradient(to bottom, #000 0%, transparent 92%);
+    pointer-events: none;
+  }
+  .sheet { position: relative; z-index: 1; padding-block: clamp(2.5rem, 6vw, 4.5rem) 0; }
+  .eyebrow {
+    margin: 0 0 1rem;
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+  }
+  h1 {
+    margin: 0;
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(2.6rem, 7vw, 4.6rem);
+    line-height: .96;
+    letter-spacing: -.015em;
+    text-wrap: balance;
+  }
+  .lede {
+    margin: 1.25rem 0 0;
+    max-width: 62ch;
+    font-size: clamp(1.02rem, 2vw, 1.18rem);
+    color: var(--muted);
+  }
+
+  /* ---- Cartiglio ---- */
+  .cartiglio {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    margin: clamp(2rem, 5vw, 3.25rem) 0 0;
+    border: 1px solid var(--line-strong);
+    border-bottom: 0;
+    background: var(--surface);
+  }
+  .cartiglio > div {
+    min-width: 0;
+    padding: .65rem .85rem .7rem;
+    border-left: 1px solid var(--line);
+  }
+  .cartiglio > div:first-child { border-left: 0; }
+  .cartiglio dt {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: .62rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .cartiglio dd {
+    margin: .15rem 0 0;
+    font-family: var(--mono);
+    font-size: .82rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- Sezioni ---- */
+  section { margin-top: clamp(3rem, 7vw, 5rem); }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: .9rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--line-strong);
+  }
+  .section-index {
+    flex: none;
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--accent);
+  }
+  h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(1.65rem, 3.4vw, 2.25rem);
+    line-height: 1.08;
+    letter-spacing: -.005em;
+    text-wrap: balance;
+  }
+  h3 {
+    margin: 2.25rem 0 .55rem;
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.18rem;
+    letter-spacing: .005em;
+  }
+  p { margin: .9rem 0 0; max-width: var(--measure); }
+  .section-head + p { margin-top: 1.1rem; }
+  strong { font-weight: 600; }
+  a { color: var(--accent-ink); text-underline-offset: .18em; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* ---- Callout decisione ---- */
+  .decision {
+    margin-top: clamp(2.5rem, 6vw, 4rem);
+    padding: 1.35rem 1.5rem 1.45rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+  }
+  .decision h2 { font-size: 1.3rem; }
+  .decision ul {
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: .7rem;
+  }
+  .decision li {
+    display: grid;
+    grid-template-columns: 1.1rem minmax(0, 1fr);
+    gap: .55rem;
+    max-width: 78ch;
+  }
+  .decision li::before {
+    content: "→";
+    font-family: var(--mono);
+    color: var(--accent);
+    line-height: 1.62;
+  }
+
+  /* ---- Figure ---- */
+  figure {
+    margin: 2rem 0;
+    padding: 1.1rem 1.1rem .95rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .svg-wrap { overflow-x: auto; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption {
+    margin-top: .95rem;
+    padding-top: .7rem;
+    border-top: 1px solid var(--line);
+    font-size: .83rem;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 78ch;
+  }
+  .fig-label {
+    display: block;
+    margin-bottom: .3rem;
+    font-family: var(--mono);
+    font-size: .65rem;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  figcaption strong { color: var(--ink); }
+
+  /* ---- SVG condiviso ---- */
+  figure svg text {
+    font-family: var(--mono);
+    font-size: 12px;
+    fill: var(--ink);
+  }
+  .d-title { font-family: var(--display); font-size: 14px; font-weight: 600; fill: var(--ink); }
+  .d-small { font-size: 10.5px; }
+  .d-muted { fill: var(--muted); }
+  .d-accent { fill: var(--accent); }
+  .d-warn { fill: var(--warn); }
+  .d-ok { fill: var(--ok); }
+  .d-box { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1.1; }
+  .d-box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+  .d-box-warn { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1.3; }
+  .d-box-dashed { fill: var(--surface); stroke: var(--muted); stroke-width: 1.1; stroke-dasharray: 5 4; }
+  .d-arrow { fill: none; stroke: var(--muted); stroke-width: 1.3; }
+  .d-arrow-accent { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+  .d-marker { fill: var(--muted); }
+  .d-marker-accent { fill: var(--accent); }
+  .d-rule { fill: none; stroke: var(--line); stroke-width: 1; }
+  .d-forbidden { fill: none; stroke: var(--warn); stroke-width: 1.3; stroke-dasharray: 5 4; }
+  .d-window { fill: var(--accent-soft); fill-opacity: .4; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 7 5; }
+  .d-geom-ok { fill: none; stroke: var(--ok); stroke-width: 2; }
+  .d-geom-cross { fill: none; stroke: var(--warn); stroke-width: 2; }
+  .d-geom-muted { fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-dasharray: 4 3; }
+  .d-obb { fill: none; stroke: var(--ok); stroke-width: 1; stroke-dasharray: 3 3; }
+  .d-line { fill: none; stroke: var(--line); stroke-width: 1.2; }
+  .d-chord { stroke: var(--ink); stroke-width: 1.3; }
+  .d-arc { fill: none; stroke: var(--accent); stroke-width: 2.6; }
+  .d-sagitta { fill: none; stroke: var(--accent); stroke-width: 2.4; }
+  .d-dot { fill: var(--ink); }
+  .d-dot-accent { fill: var(--accent); }
+  .d-dim { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .d-ext { fill: none; stroke: var(--ink); stroke-width: 1; }
+  .d-object { fill: none; stroke: var(--ink); stroke-width: 2.6; }
+  .d-arrow-tri { fill: var(--accent); }
+  .d-entity { fill: none; stroke: var(--ink); stroke-width: 2; }
+  .d-aabb { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 5 4; }
+  .d-cursor { stroke: var(--warn); stroke-width: 1.6; fill: none; }
+  .d-cursor-box { fill: var(--warn-soft); fill-opacity: .45; stroke: var(--warn); stroke-width: 1; stroke-dasharray: 2 2; }
+  .d-distance { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 3 3; }
+
+  /* ---- Tabelle ---- */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 1.5rem 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+  table {
+    width: 100%;
+    min-width: 660px;
+    border-collapse: collapse;
+    font-size: .85rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    padding: .62rem .8rem;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: 0; }
+  th {
+    background: var(--surface-2);
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: .88rem;
+    letter-spacing: .01em;
+  }
+  td:first-child {
+    font-family: var(--mono);
+    font-size: .8rem;
+    white-space: nowrap;
+  }
+  td code, th code { white-space: nowrap; }
+
+  /* ---- Codice ---- */
+  pre {
+    margin: 1.4rem 0;
+    padding: 1rem 1.1rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: .79rem;
+    line-height: 1.58;
+  }
+  code { font-family: var(--mono); font-size: .9em; }
+  p code, li code, td code {
+    padding: .08em .3em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    font-size: .84em;
+  }
+
+  /* ---- Riquadri ---- */
+  .not {
+    margin: 1.6rem 0;
+    padding: 1rem 1.2rem 1.1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 2px solid var(--warn);
+  }
+  .not h3 { margin: 0 0 .55rem; font-size: 1.08rem; }
+  .not ul { margin: 0; padding-left: 1.1rem; display: block; max-width: 76ch; }
+  .not li { margin-top: .4rem; }
+  .not li::marker { color: var(--warn); }
+
+  .arithmetic {
+    margin: 1.6rem 0;
+    padding: 1rem 1.2rem;
+    background: var(--accent-soft);
+    border-left: 2px solid var(--accent);
+    font-family: var(--mono);
+    font-size: .84rem;
+    line-height: 1.65;
+    max-width: 78ch;
+  }
+  .arithmetic strong { color: var(--accent-ink); }
+
+  .steps {
+    margin: 1.5rem 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+    display: grid;
+    gap: 1rem;
+  }
+  .steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 2.2rem minmax(0, 1fr);
+    gap: .8rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--line);
+    max-width: 80ch;
+  }
+  .steps li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--accent);
+    padding-top: .25rem;
+  }
+  .steps strong { display: block; font-weight: 600; }
+  .steps strong code { padding: 0; border: 0; background: none; font-size: .95em; }
+
+  footer {
+    max-width: 1080px;
+    margin: 4.5rem auto 0;
+    padding-top: .85rem;
+    border-top: 1px solid var(--line-strong);
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.5rem;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+  }
+
+  @media (max-width: 760px) {
+    .cartiglio { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cartiglio > div { border-top: 1px solid var(--line); }
+    .cartiglio > div:nth-child(-n+2) { border-top: 0; }
+    .cartiglio > div:nth-child(odd) { border-left: 0; }
+    .section-head { flex-wrap: wrap; gap: .35rem .75rem; }
+    figure { padding: .75rem .6rem .8rem; }
+    figure svg { min-width: 860px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; }
+  }
+
+  @media print {
+    :root {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --surface-2: #f1f4f2;
+      --ink: #111817;
+      --muted: #48534f;
+      --line: #b9c3be;
+      --line-strong: #7f8c86;
+      --accent: #0a5f59;
+      --accent-ink: #0a5f59;
+      --accent-soft: #e4efec;
+      --warn: #8a3f1f;
+      --warn-soft: #f7e8e1;
+      --ok: #2b5f35;
+      --ok-soft: #e6f0e2;
+    }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @page { margin: 14mm 12mm; }
+    body { padding: 0; font-size: 10.5pt; }
+    .masthead::before { display: none; }
+    .sheet { padding-top: 0; }
+    figure, table, pre, .decision, .not, .arithmetic { break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="sheet">
+    <p class="eyebrow">Nota di architettura · isocad / isogl</p>
+    <h1>Generatore di simboli</h1>
+    <p class="lede">Un livello puro fra il documento e la GPU: le entità diventano polilinee e testo per il disegno, mentre la selezione lavora sui parametri e non sui segmenti.</p>
+    <dl class="cartiglio">
+      <div><dt>Tavola</dt><dd>Nota A-01</dd></div>
+      <div><dt>Committente</dt><dd>isocad</dd></div>
+      <div><dt>Oggetto</dt><dd>Simboli e selezione</dd></div>
+      <div><dt>Revisione</dt><dd>B — pick</dd></div>
+      <div><dt>Data</dt><dd>28.10.2026</dd></div>
+    </dl>
+  </div>
+</header>
+
+<main>
+  <aside class="decision" aria-labelledby="decisione">
+    <h2 id="decisione">La decisione</h2>
+    <ul>
+      <li><span>Il generatore di simboli è <strong>puro</strong>: nessuna chiamata GL, nessuna dipendenza da SDL. Riceve un’entità e uno stile, emette polilinee e run di testo.</span></li>
+      <li><span>La selezione vive in un <strong>kernel separato</strong> e legge il modello analitico; non attraversa mai la tessellazione.</span></li>
+      <li><span>Il modello analitico resta in RAM perché <strong>è il documento</strong>. I segmenti vivono solo in VRAM; lo staging è transitorio e si libera dopo l’upload.</span></li>
+      <li><span>La CPU fa selezione, snap e tessellazione una tantum. La GPU rasterizza, tratteggia, clippa e mappa i colori-spessore.</span></li>
+    </ul>
+  </aside>
+
+  <section aria-labelledby="s1">
+    <div class="section-head">
+      <span class="section-index">01</span>
+      <h2 id="s1">Due consumatori, non una catena</h2>
+    </div>
+    <p>L’errore da evitare è mettere in fila <em>documento → segmenti → selezione</em>. Il documento ha due consumatori indipendenti: il generatore, che produce il disegno, e il kernel, che risponde a domande geometriche. La selezione non deve pagare la tessellazione, e la tessellazione non deve conoscere la semantica della selezione.</p>
+    <p>Il kernel è fatto di predicati analitici: <code>entity_bounds()</code>, <code>entity_hit()</code>, snap e intersezioni. È deterministico e si testa senza una finestra. Il generatore è una proiezione deterministica da entità a display list; anche lui si testa senza GL. <code>isogl</code> resta il renderer: riceve vertici e testi, non sa cosa sia una quota.</p>
+
+    <figure>
+      <span class="fig-label">Fig. 01 · confini</span>
+      <div class="svg-wrap"><svg viewBox="0 0 980 480" role="img" aria-label="Il documento analitico alimenta il kernel di selezione e il generatore di simboli; solo il generatore raggiunge lo staging e la GPU. La selezione non legge i segmenti.">
+        <defs>
+          <marker id="f1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" class="d-marker-accent"/>
+          </marker>
+        </defs>
+
+        <!-- Documento -->
+        <rect x="24" y="96" width="200" height="300" class="d-box"/>
+        <text x="40" y="124" class="d-title">CadDocument</text>
+        <text x="40" y="142" class="d-small d-muted">modello analitico</text>
+        <line x1="40" y1="154" x2="208" y2="154" class="d-rule"/>
+        <text x="40" y="178">entità: linea, cerchio,</text>
+        <text x="40" y="196">arco, rettangolo, quota</text>
+        <text x="40" y="214">testo</text>
+        <line x1="40" y1="228" x2="208" y2="228" class="d-rule"/>
+        <text x="40" y="252">layer / stile</text>
+        <text x="40" y="270">version / dirty</text>
+        <text x="40" y="288">AABB per entità</text>
+        <text x="40" y="306">id stabile ↔ slot</text>
+        <text x="40" y="324">unità: mm di carta</text>
+        <text x="40" y="372" class="d-small d-accent">RAM · autoritativo</text>
+
+        <!-- Kernel -->
+        <rect x="330" y="40" width="260" height="150" class="d-box-accent"/>
+        <text x="346" y="68" class="d-title">Kernel geometrico</text>
+        <text x="346" y="86" class="d-small d-muted">puro · nessun GL</text>
+        <text x="346" y="112">entity_bounds()</text>
+        <text x="346" y="132">entity_hit(rect, modo)</text>
+        <text x="346" y="152">snap / intersezioni</text>
+        <text x="346" y="172" class="d-small d-muted">testabile senza contesto</text>
+
+        <!-- Selezione -->
+        <rect x="690" y="40" width="266" height="150" class="d-box"/>
+        <text x="706" y="68" class="d-title">Selezione</text>
+        <text x="706" y="86" class="d-small d-muted">risultato per l’app</text>
+        <text x="706" y="110">contenute → window</text>
+        <text x="706" y="130">intersecanti → crossing</text>
+        <text x="706" y="150">id entità</text>
+        <text x="706" y="170" class="d-small d-muted">→ comandi, undo</text>
+
+        <!-- Generatore -->
+        <rect x="330" y="290" width="260" height="150" class="d-box-accent"/>
+        <text x="346" y="318" class="d-title">Generatore di simboli</text>
+        <text x="346" y="336" class="d-small d-muted">puro · nessun GL</text>
+        <text x="346" y="362">tessellate_arc()</text>
+        <text x="346" y="382">quote / punte / trattini</text>
+        <text x="346" y="402">run di testo</text>
+        <text x="346" y="422" class="d-small d-muted">stile per sotto-elemento</text>
+
+        <!-- Staging -->
+        <rect x="690" y="290" width="266" height="80" class="d-box-dashed"/>
+        <text x="706" y="316" class="d-title">Staging</text>
+        <text x="706" y="338">isogl_segment_list</text>
+        <text x="706" y="356" class="d-small d-muted">vive per un upload</text>
+
+        <!-- GPU -->
+        <rect x="690" y="410" width="266" height="54" class="d-box-accent"/>
+        <text x="706" y="434" class="d-title">Pagine VBO · VRAM</text>
+        <text x="706" y="452" class="d-small d-muted">multi-draw · geometria in mm</text>
+
+        <!-- Frecce -->
+        <line x1="224" y1="116" x2="322" y2="116" class="d-arrow-accent" marker-end="url(#f1a)"/>
+        <text x="273" y="106" class="d-small d-muted" text-anchor="middle">parametri</text>
+
+        <line x1="590" y1="116" x2="682" y2="116" class="d-arrow-accent" marker-end="url(#f1a)"/>
+        <text x="636" y="106" class="d-small d-muted" text-anchor="middle">predicati</text>
+
+        <line x1="224" y1="320" x2="322" y2="320" class="d-arrow-accent" marker-end="url(#f1a)"/>
+        <text x="273" y="310" class="d-small d-muted" text-anchor="middle">parametri</text>
+
+        <line x1="590" y1="340" x2="682" y2="340" class="d-arrow-accent" marker-end="url(#f1a)"/>
+        <text x="636" y="318" class="d-small d-muted" text-anchor="middle">polilinee</text>
+        <text x="636" y="332" class="d-small d-muted" text-anchor="middle">+ testi</text>
+
+        <line x1="823" y1="370" x2="823" y2="402" class="d-arrow-accent" marker-end="url(#f1a)"/>
+        <text x="835" y="392" class="d-small d-muted">upload delta</text>
+
+        <!-- Divieto: selezione non legge i segmenti -->
+        <line x1="823" y1="190" x2="823" y2="290" class="d-forbidden"/>
+        <line x1="815" y1="232" x2="831" y2="248" class="d-forbidden"/>
+        <line x1="815" y1="248" x2="831" y2="232" class="d-forbidden"/>
+        <text x="805" y="258" class="d-small d-warn" text-anchor="end">la selezione non legge</text>
+        <text x="805" y="274" class="d-small d-warn" text-anchor="end">i segmenti</text>
+      </svg></div>
+      <figcaption><strong>Un solo documento, due consumatori.</strong> Il kernel e il generatore leggono gli stessi parametri ma non si parlano. Il tratteggio rosso segna il collegamento che non deve esistere: la selezione non legge lo staging né la VRAM.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="s2">
+    <div class="section-head">
+      <span class="section-index">02</span>
+      <h2 id="s2">Memoria: cosa sta dove</h2>
+    </div>
+    <p>La domanda «serve una copia in RAM del modello caricato in VRAM?» nasce dal confondere tre rappresentazioni diverse. Una è il documento, una è un indice, una è il risultato del disegno. Solo la terza è già in VRAM, e duplicarla in RAM non aggiunge nulla.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Rappresentazione</th><th>Dove</th><th>Costo</th><th>Ruolo</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Modello analitico</td><td>RAM</td><td>50–100 B / entità</td><td>Autoritativo: edit, undo, snap, salvataggio</td></tr>
+          <tr><td>AABB + metadati</td><td>RAM</td><td>~32 B / entità</td><td>Indice per la selezione</td></tr>
+          <tr><td>Segmenti tessellati</td><td>VRAM</td><td>64 B / segmento</td><td>Solo disegno</td></tr>
+          <tr><td>Staging</td><td>RAM</td><td>Transitorio</td><td>Upload del delta</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="arithmetic">
+      cerchio a 96 segmenti = 192 vertici × 32 B = <strong>6 KiB</strong><br>
+      10 000 cerchi = <strong>60 MiB</strong> di soli segmenti<br>
+      modello analitico degli stessi 10 000 cerchi ≈ <strong>1 MB</strong>
+    </div>
+
+    <p>La copia RAM dei segmenti raddoppia il dato più grande per non aggiungere niente: la selezione non la usa, e per esportare o stampare è più affidabile rigenerare dai parametri. Lo staging resta ciò che è già oggi in <code>cad_upload_entity()</code>: una lista che vive il tempo di un upload e viene liberata subito.</p>
+
+    <figure>
+      <span class="fig-label">Fig. 02 · RAM e VRAM</span>
+      <div class="svg-wrap"><svg viewBox="0 0 980 410" role="img" aria-label="Confronto fra tenere una copia dei segmenti in RAM e tenere solo lo staging transitorio: la copia è un doppione inutile, perché la selezione legge il documento analitico.">
+        <defs>
+          <marker id="f2m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" class="d-marker"/>
+          </marker>
+        </defs>
+
+        <text x="24" y="28" class="d-title d-warn">A · con mirror in RAM</text>
+        <text x="512" y="28" class="d-title d-accent">B · proposta</text>
+
+        <!-- Pannello A -->
+        <rect x="24" y="52" width="440" height="58" class="d-box"/>
+        <text x="40" y="76">Documento analitico</text>
+        <text x="40" y="96" class="d-small d-muted">~10 MB · 100 000 entità</text>
+        <text x="448" y="68" class="d-small d-muted" text-anchor="end">RAM</text>
+
+        <rect x="24" y="150" width="440" height="58" class="d-box-warn"/>
+        <text x="40" y="174">Segmenti in RAM (copia)</text>
+        <text x="40" y="194" class="d-small d-muted">~60 MiB · 10 000 cerchi</text>
+        <text x="448" y="194" class="d-small d-warn" text-anchor="end">inutile</text>
+        <text x="448" y="166" class="d-small d-muted" text-anchor="end">RAM</text>
+
+        <rect x="24" y="290" width="440" height="58" class="d-box"/>
+        <text x="40" y="314">Segmenti in VRAM</text>
+        <text x="40" y="334" class="d-small d-muted">~60 MiB · gli stessi vertici</text>
+        <text x="448" y="306" class="d-small d-muted" text-anchor="end">VRAM</text>
+
+        <line x1="244" y1="110" x2="244" y2="144" class="d-arrow" marker-end="url(#f2m)"/>
+        <text x="254" y="132" class="d-small d-muted">tessella + copia</text>
+        <line x1="244" y1="208" x2="244" y2="284" class="d-arrow" marker-end="url(#f2m)"/>
+        <text x="254" y="250" class="d-small d-muted">upload</text>
+
+        <!-- Pannello B -->
+        <rect x="512" y="52" width="440" height="58" class="d-box"/>
+        <text x="528" y="76">Documento analitico</text>
+        <text x="528" y="96" class="d-small d-muted">~10 MB · autoritativo</text>
+        <text x="936" y="68" class="d-small d-muted" text-anchor="end">RAM</text>
+
+        <rect x="512" y="150" width="440" height="58" class="d-box-dashed"/>
+        <text x="528" y="174">Staging transitorio</text>
+        <text x="528" y="194" class="d-small d-muted">pochi KB · liberato dopo l’upload</text>
+        <text x="936" y="166" class="d-small d-muted" text-anchor="end">RAM</text>
+
+        <rect x="512" y="290" width="440" height="58" class="d-box"/>
+        <text x="528" y="314">Segmenti in VRAM</text>
+        <text x="528" y="334" class="d-small d-muted">~60 MiB · solo qui</text>
+        <text x="936" y="306" class="d-small d-muted" text-anchor="end">VRAM</text>
+
+        <line x1="732" y1="110" x2="732" y2="144" class="d-arrow" marker-end="url(#f2m)"/>
+        <text x="742" y="132" class="d-small d-muted">tessella 1 entità</text>
+        <line x1="732" y1="208" x2="732" y2="284" class="d-arrow" marker-end="url(#f2m)"/>
+        <text x="742" y="250" class="d-small d-muted">upload</text>
+
+        <text x="490" y="392" class="d-small d-muted" text-anchor="middle">La selezione legge il documento; nessuna freccia verso la copia.</text>
+      </svg></div>
+      <figcaption><strong>Il doppione non compra capacità.</strong> A sinistra la tessellazione esiste due volte; a destra solo in VRAM. La selezione e lo snap leggono il documento analitico, che è anche l’unica cosa che serve per salvare e rigenerare.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="s3">
+    <div class="section-head">
+      <span class="section-index">03</span>
+      <h2 id="s3">Aggiornamento: solo l’entità sporca</h2>
+    </div>
+    <p>Il generatore è deterministico, quindi rigenerare è sempre corretto. La regola è non rigenerare più del necessario: una versione per entità, un insieme di entità sporche, un emit per ciascuna. Il resto del modello resta in VRAM e non viene toccato.</p>
+    <p>L’entità non conosce il VBO: il backend tiene la mappa <code>entity_id → range</code> e il generatore non vede né ID né handle. Così una modifica non dipende da dove l’entità è finita in memoria video.</p>
+    <p>Quando il conteggio dei vertici non cambia, l’aggiornamento è una <code>glBufferSubData</code> nel range esistente. Quando cambia, serve un range nuovo da una free-list, oppure il rebuild della pagina. Questo è il punto in cui il backend VBO deve diventare più furbo dell’attuale «un VBO per entità», senza che il generatore lo sappia.</p>
+
+    <figure>
+      <span class="fig-label">Fig. 03 · ciclo di modifica</span>
+      <div class="svg-wrap"><svg viewBox="0 0 980 230" role="img" aria-label="Ciclo di aggiornamento: un comando marca l'entità sporca, il generatore emette solo quella, lo staging viene caricato nel range del VBO, il frame successivo disegna.">
+        <defs>
+          <marker id="f3m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" class="d-marker"/>
+          </marker>
+        </defs>
+
+        <rect x="16" y="70" width="168" height="100" class="d-box"/>
+        <text x="30" y="96" class="d-title">Comando</text>
+        <text x="30" y="122" class="d-small">p1 / p2 / p3 mutati</text>
+        <text x="30" y="140" class="d-small d-muted">version++</text>
+
+        <rect x="211" y="70" width="168" height="100" class="d-box"/>
+        <text x="225" y="96" class="d-title">Dirty set</text>
+        <text x="225" y="122" class="d-small">una voce per entità</text>
+        <text x="225" y="140" class="d-small d-muted">niente rebuild globale</text>
+
+        <rect x="406" y="70" width="168" height="100" class="d-box-accent"/>
+        <text x="420" y="96" class="d-title">symgen_emit</text>
+        <text x="420" y="122" class="d-small">solo quell’entità</text>
+        <text x="420" y="140" class="d-small d-muted">polilinee + testo</text>
+
+        <rect x="601" y="70" width="168" height="100" class="d-box-dashed"/>
+        <text x="615" y="96" class="d-title">Staging</text>
+        <text x="615" y="122" class="d-small">poche decine di</text>
+        <text x="615" y="140" class="d-small d-muted">segmenti</text>
+
+        <rect x="796" y="70" width="168" height="100" class="d-box-accent"/>
+        <text x="810" y="96" class="d-title">VBO</text>
+        <text x="810" y="122" class="d-small">subdata nel range</text>
+        <text x="810" y="140" class="d-small d-muted">o nuovo range</text>
+
+        <line x1="184" y1="120" x2="203" y2="120" class="d-arrow" marker-end="url(#f3m)"/>
+        <line x1="379" y1="120" x2="398" y2="120" class="d-arrow" marker-end="url(#f3m)"/>
+        <line x1="574" y1="120" x2="593" y2="120" class="d-arrow" marker-end="url(#f3m)"/>
+        <line x1="769" y1="120" x2="788" y2="120" class="d-arrow" marker-end="url(#f3m)"/>
+
+        <text x="16" y="208" class="d-small d-muted">conteggio invariato → subdata · conteggio cambiato → free-list / rebuild della pagina</text>
+      </svg></div>
+      <figcaption><strong>Il costo di una modifica è proporzionale a una entità, non al documento.</strong> L’unica eccezione attuale è il testo, ricostruito per intero a ogni cambiamento; con le quote diventa una parte troppo grande del modello per restare così.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="s4">
+    <div class="section-head">
+      <span class="section-index">04</span>
+      <h2 id="s4">Selezione: rettangolo e click</h2>
+    </div>
+    <p>Due modalità, due rappresentazioni. Il rettangolo usa il kernel analitico; il click usa il pixel colorato. Il modello analitico resta la verità per l’editing; l’ID dell’entità è il ponte tra ciò che si vede e ciò che si modifica.</p>
+    <h3>Rettangolo: window e crossing</h3>
+    <p>Dato un rettangolo in mm di carta, servono due risposte diverse: <strong>contenuta</strong> (window selection: l’entità è tutta dentro) e <strong>intersecante</strong> (crossing selection: l’entità attraversa il bordo, oppure è contenuta). Sono due predicati, non uno. La selezione standard di un CAD usa entrambi.</p>
+    <p>Il rettangolo arriva in pixel: converti i due angoli con l’inversa di <code>uView · uModel</code> e normalizza min/max; tutti i test seguenti avvengono in mm di carta. Prima del test geometrico applica i filtri di layer e visibilità, così le entità spente non entrano nel risultato.</p>
+    <p>La fase larga è un test AABB per entità; con un grid sul foglio scarti quasi tutto prima di toccare la geometria. La fase stretta è analitica, per tipo. Per un cerchio non serve campionare: detta <code>d_near</code> la distanza minima del centro dal bordo del rettangolo (se il centro è dentro, dal lato più vicino) e <code>d_far</code> la distanza massima dai quattro vertici, il bordo del cerchio attraversa il rettangolo se e solo se <code>d_near ≤ r ≤ d_far</code>. È esatto a ogni zoom.</p>
+
+    <figure>
+      <span class="fig-label">Fig. 04 · window e crossing</span>
+      <div class="svg-wrap"><svg viewBox="0 0 980 430" role="img" aria-label="Un rettangolo di selezione con entità contenute in verde, entità che attraversano il bordo in ambra ed entità fuori in grigio.">
+        <rect x="240" y="100" width="380" height="240" class="d-window"/>
+        <text x="248" y="88" class="d-small d-accent">rettangolo di selezione</text>
+
+        <line x1="290" y1="150" x2="400" y2="150" class="d-geom-ok"/>
+        <circle cx="520" cy="160" r="30" class="d-geom-ok"/>
+        <rect x="294" y="282" width="64" height="26" class="d-obb"/>
+        <text x="300" y="300" class="d-small d-ok">testo</text>
+
+        <line x1="170" y1="220" x2="300" y2="220" class="d-geom-cross"/>
+        <circle cx="600" cy="300" r="45" class="d-geom-cross"/>
+
+        <line x1="700" y1="150" x2="800" y2="150" class="d-geom-muted"/>
+        <circle cx="740" cy="250" r="28" class="d-geom-muted"/>
+
+        <line x1="24" y1="388" x2="54" y2="388" class="d-geom-ok"/>
+        <text x="64" y="392" class="d-small">contenuta</text>
+        <line x1="190" y1="388" x2="220" y2="388" class="d-geom-cross"/>
+        <text x="230" y="392" class="d-small">intersecante</text>
+        <line x1="386" y1="388" x2="416" y2="388" class="d-geom-muted"/>
+        <text x="426" y="392" class="d-small">fuori</text>
+        <text x="540" y="392" class="d-small d-muted">window = verdi · crossing = verdi + ambra</text>
+      </svg></div>
+      <figcaption><strong>La stessa entità può rispondere diversamente ai due comandi.</strong> Le verdi sono contenute, le ambra attraversano il bordo, le grigie restano fuori. La distinzione non è estetica: decide cosa entra nella selezione.</figcaption>
+    </figure>
+
+    <h3>Predicati per il rettangolo</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Entità</th><th>Contenuta nel rettangolo</th><th>Attraversa il bordo</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Segmento</td><td>Entrambi gli estremi dentro</td><td>Liang–Barsky restituisce un tratto non vuoto</td></tr>
+          <tr><td>Polilinea</td><td>Tutte le coppie dentro</td><td>Almeno una coppia attraversa</td></tr>
+          <tr><td>Cerchio</td><td>Centro dentro e <code>r ≤ d_near</code></td><td><code>d_near ≤ r ≤ d_far</code></td></tr>
+          <tr><td>Arco</td><td>Come il cerchio, più gli estremi e il range angolare</td><td>Come il cerchio, filtrato sugli angoli</td></tr>
+          <tr><td>Testo</td><td>I quattro vertici dell’OBB dentro</td><td>SAT fra OBB e rettangolo</td></tr>
+          <tr><td>Quota</td><td>Geometria di pick (linea di quota e riferimento)</td><td>La stessa geometria, non i segmenti generati</td></tr>
+          <tr><td>Rettangolo</td><td>Quattro segmenti</td><td>Quattro segmenti</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Servono due API che oggi mancano: <code>entity_bounds()</code> per l’AABB analitico e <code>isogl_text_extents()</code> per la larghezza del testo. La seconda è indispensabile: senza l’estensione non si può costruire l’OBB, quindi né selezionare né posizionare correttamente il testo di una quota.</p>
+
+    <div class="not">
+      <h3>Perché il rettangolo non è in GPU</h3>
+      <ul>
+        <li>Un pass di picking per rettangolo restituisce pixel coperti, non la semantica «contenuto»: non dice se l’entità è tutta dentro.</li>
+        <li>Una linea tratteggiata può attraversare il rettangolo senza avere pixel dentro: il criterio “pixel” non basta per il crossing.</li>
+        <li>Il compute shader richiederebbe GL 4.3; il progetto è su 3.3 core, e i dati sono già in RAM.</li>
+      </ul>
+    </div>
+
+    <h3>Click: il pixel è la verità</h3>
+    <p>A zoom alto il cerchio a schermo è una spezzata: la corda visibile non coincide con l’arco analitico. Se l’utente clicca la corda, deve selezionare il cerchio; non deve fallire perché la corda non è l’arco. Per il click, quindi, la verità è il pixel colorato. L’ID dell’entità è il ponte: il pick restituisce l’ID, l’editing usa il modello double.</p>
+    <p>L’AABB da solo non basta. A zoom alto il box di un cerchio include l’interno; quello di una diagonale include due angoli vuoti. Dopo la broad phase AABB/grid serve un <strong>pre-filtro di distanza</strong> dal cursore alle primitive del layout: punto-segmento per la linea, <code>|dist(centro) − r|</code> per il cerchio, distanza dall’arco con controllo angolare, OBB per il testo. La tolleranza è <code>raggio_pick_mm + sagitta + epsilon</code>. Il filtro scarta i falsi positivi; non decide la selezione. Se i candidati AABB restano molti — una linea lunga ha un AABB grande — indicizza le primitive (R-tree o grid sui segmenti/archi), non solo le entità: il test di distanza resta O(candidati) e avviene solo al click.</p>
+    <p>Il pick pass disegna solo i candidati in un <strong>FBO 16×16 (box logico 8×8) <code>GL_R32UI</code></strong> con una matrice di pick che porta il cursore al centro, con gli stessi VBO e lo stesso GS/FS in modalità pick: un uniform <code>pick_id</code> per draw, niente blending/MSAA/<code>GL_LINE_SMOOTH</code>, stessi filtri di visibilità, layer e clipping. Disegna tutte le primitive visibili: pre-filtro e pass devono vedere lo stesso insieme. Se l’app vuole escludere dal click alcuni sotto-elementi, usa un flag per modalità e applicalo anche al pre-filtro. I vuoti del tratteggio sono ignorabili (<code>pick_ignore_dashes</code>): il tratteggio è stile, non selezionabilità. Poi <code>glReadPixels(GL_RED_INTEGER, GL_UNSIGNED_INT)</code> e conteggio degli ID distinti, leggendo i texel a spirale dal centro verso l’esterno (il primo ID è il candidato più vicino al cursore): 0 = niente, 1 = seleziona, 2..max = pixel centrale/più vicino/menu, &gt; max = ambiguo. Raggio e soglia sono parametri, non costanti.</p>
+    <p>A zoom basso la tolleranza in mm cresce e il box 8×8 contiene oggetti che sono davvero vicini: il pre-filtro non li può separare. L’ambiguità si gestisce con la soglia <code>pick_max_entities</code> e un menu/cycle, non con il filtro. Il pre-filtro serve solo a scartare i falsi positivi geometrici (interno del cerchio, angoli vuoti delle diagonali).</p>
+
+<pre><code>glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, 5, 5, 0,
+             GL_RED_INTEGER, GL_UNSIGNED_INT, NULL);
+glReadPixels(0, 0, 5, 5, GL_RED_INTEGER, GL_UNSIGNED_INT, ids);</code></pre>
+
+    <figure>
+      <span class="fig-label">Fig. 05 · dal candidato al pixel</span>
+      <div class="svg-wrap"><svg viewBox="0 0 980 350" role="img" aria-label="L'AABB di un cerchio include l'interno e quello di una diagonale include angoli vuoti; il pre-filtro di distanza scarta questi falsi positivi, poi il pick pass GPU decide sul pixel.">
+        <defs>
+          <marker id="f5m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" class="d-marker"/>
+          </marker>
+        </defs>
+
+        <circle cx="150" cy="120" r="50" class="d-entity"/>
+        <rect x="100" y="70" width="100" height="100" class="d-aabb"/>
+        <text x="105" y="62" class="d-small d-muted">AABB</text>
+        <line x1="150" y1="120" x2="200" y2="120" class="d-distance"/>
+        <text x="176" y="112" class="d-small d-accent" text-anchor="middle">distanza = r</text>
+        <rect x="140" y="110" width="20" height="20" class="d-cursor-box"/>
+        <line x1="144" y1="120" x2="156" y2="120" class="d-cursor"/>
+        <line x1="150" y1="114" x2="150" y2="126" class="d-cursor"/>
+        <text x="150" y="214" class="d-small d-warn" text-anchor="middle">interno: falso positivo</text>
+
+        <line x1="490" y1="45" x2="490" y2="235" class="d-rule"/>
+
+        <line x1="300" y1="60" x2="470" y2="190" class="d-entity"/>
+        <rect x="300" y="60" width="170" height="130" class="d-aabb"/>
+        <text x="305" y="52" class="d-small d-muted">AABB</text>
+        <line x1="450" y1="80" x2="404" y2="140" class="d-distance"/>
+        <text x="435" y="118" class="d-small d-accent">distanza</text>
+        <rect x="440" y="70" width="20" height="20" class="d-cursor-box"/>
+        <line x1="444" y1="80" x2="456" y2="80" class="d-cursor"/>
+        <line x1="450" y1="74" x2="450" y2="86" class="d-cursor"/>
+        <text x="400" y="228" class="d-small d-warn" text-anchor="middle">angolo vuoto: falso positivo</text>
+
+        <rect x="24" y="262" width="210" height="58" class="d-box"/>
+        <text x="38" y="286" class="d-title">Broad phase AABB</text>
+        <text x="38" y="304" class="d-small d-muted">molti falsi positivi</text>
+
+        <rect x="258" y="262" width="230" height="58" class="d-box-accent"/>
+        <text x="272" y="286" class="d-title">Distanza dal layout</text>
+        <text x="272" y="304" class="d-small d-muted">scarta interno e angoli</text>
+
+        <rect x="512" y="262" width="200" height="58" class="d-box"/>
+        <text x="526" y="286" class="d-title">FBO 16×16 · ID</text>
+        <text x="526" y="304" class="d-small d-muted">stesso GS/FS</text>
+
+        <rect x="736" y="262" width="220" height="58" class="d-box-accent"/>
+        <text x="750" y="286" class="d-title">Readback + soglia</text>
+        <text x="750" y="304" class="d-small d-muted">0 · 1 · 2..N · &gt;N</text>
+
+        <line x1="234" y1="291" x2="250" y2="291" class="d-arrow" marker-end="url(#f5m)"/>
+        <line x1="488" y1="291" x2="504" y2="291" class="d-arrow" marker-end="url(#f5m)"/>
+        <line x1="712" y1="291" x2="728" y2="291" class="d-arrow" marker-end="url(#f5m)"/>
+      </svg></div>
+      <figcaption><strong>L’AABB è un primo filtro, non un criterio di selezione.</strong> Il pre-filtro di distanza scarta l’interno del cerchio e gli angoli vuoti delle diagonali; il pick pass GPU decide solo sui candidati che possono avere pixel sotto il cursore.</figcaption>
+    </figure>
+
+    <div class="not">
+      <h3>Perché il click è in GPU</h3>
+      <ul>
+        <li>Seleziona ciò che è colorato: la corda visibile è la verità, non l’arco analitico.</li>
+        <li>A zoom alto il pre-filtro di distanza elimina l’interno del cerchio e gli angoli vuoti delle diagonali prima del pass.</li>
+        <li>GL 3.3 basta: FBO 16×16 (box 8×8), <code>GL_R32UI</code>, <code>glReadPixels</code>; stesso GS/FS in modalità pick, nessun compute.</li>
+        <li>Il readback è sincrono ma avviene solo sul click, su 16×16 texel (box logico 8×8): il costo è accettabile. Raggio e soglia sono configurabili.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section aria-labelledby="s5">
+    <div class="section-head">
+      <span class="section-index">05</span>
+      <h2 id="s5">Tessellazione: tolleranza, non conteggio</h2>
+    </div>
+    <p>Il modello è in mm di carta e l’output è stampa: la densità giusta di una curva è una tolleranza di corda assoluta, non un numero fisso di segmenti. Con una freccia di 0,05 mm, invisibile sotto il peso minimo ISO di 0,18 mm, il numero di segmenti cresce con il raggio e non con lo zoom.</p>
+    <p>La funzione si generalizza una volta: <code>tessellate_arc(centro, raggio, angolo_inizio, angolo_fine, tolleranza)</code>. Il cerchio è <code>0 → 2π</code>; l’arco, il raccordo e la punta usano la stessa funzione con estremi diversi.</p>
+
+    <figure>
+      <span class="fig-label">Fig. 06 · freccia di corda</span>
+      <div class="svg-wrap"><svg viewBox="0 0 760 340" role="img" aria-label="La freccia s fra corda e arco determina il numero di segmenti: N = pi greco diviso l'arcocoseno di uno meno s su r.">
+        <circle cx="210" cy="180" r="120" class="d-line"/>
+        <line x1="210" y1="180" x2="287.1" y2="88.1" class="d-rule"/>
+        <line x1="210" y1="180" x2="287.1" y2="271.9" class="d-rule"/>
+        <line x1="287.1" y1="88.1" x2="287.1" y2="271.9" class="d-chord"/>
+        <path d="M287.1 88.1 A120 120 0 0 1 287.1 271.9" class="d-arc"/>
+        <line x1="287.1" y1="180" x2="330" y2="180" class="d-sagitta"/>
+        <circle cx="210" cy="180" r="3" class="d-dot"/>
+
+        <text x="194" y="202" class="d-small d-muted">O</text>
+        <text x="238" y="126" class="d-small d-muted">r</text>
+        <text x="305" y="170" class="d-small d-accent">s</text>
+        <text x="292" y="80" class="d-small d-muted">corda</text>
+        <text x="336" y="260" class="d-small d-accent">arco</text>
+
+        <text x="430" y="84" class="d-title">Tolleranza di corda</text>
+        <text x="430" y="108" class="d-small d-muted">s = 0,05 mm</text>
+        <text x="430" y="148" style="font-size:15px">N = ceil(π / acos(1 − s/r))</text>
+        <text x="430" y="192" class="d-small">r = 5 mm <tspan class="d-accent">→ N ≈ 23</tspan></text>
+        <text x="430" y="216" class="d-small">r = 50 mm <tspan class="d-accent">→ N ≈ 71</tspan></text>
+        <text x="430" y="240" class="d-small">r = 500 mm <tspan class="d-accent">→ N ≈ 223</tspan></text>
+        <text x="430" y="282" class="d-small d-muted">96 fisso: troppo per i raggi piccoli,</text>
+        <text x="430" y="300" class="d-small d-muted">troppo poco per i raggi grandi.</text>
+      </svg></div>
+      <figcaption><strong>La tolleranza è di stampa, non di schermo.</strong> Poiché il modello è già in millimetri di carta, la tessellazione non cambia con lo zoom. Un eventuale LOD per la vista resta un’ottimizzazione separata e solo per le entità visibili.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="s6">
+    <div class="section-head">
+      <span class="section-index">06</span>
+      <h2 id="s6">Anatomia di una quota</h2>
+    </div>
+    <p>Una quota è il caso che giustifica tutto lo strato: cinque campi in memoria, decine di segmenti a video. Il generatore calcola il valore misurato da <code>|p1 − p2|</code> in unità documento (la scala del foglio governa testo, pesi e tolleranze); compone <code>testo_prima + valore + testo_dopo</code>, dispone le linee di riferimento con gli scostamenti ISO, e mette il testo in un run separato.</p>
+    <p>Il testo non è un insieme di segmenti: è un oggetto della pipeline font. Per questo il contratto dell’emitter ha due callback, <code>polyline</code> e <code>text</code>, e non una sola lista di vertici. La quota inoltre deve poter assegnare uno stile diverso ai suoi sotto-elementi: la linea di quota segue il layer, le punte e il testo hanno vincoli propri. Oggi <code>cad_vertex()</code> prende pattern e peso dall’entità per tutti i vertici; va spostato a un parametro per polilinea.</p>
+    <p><strong>Stato:</strong> la quota allineata è implementata in <code>cad.c</code> (<code>CAD_DIMENSION</code>). La stessa funzione (<code>cad_dimension_geometry</code>) deriva dai parametri il render (linea di quota, riferimenti, punte, testo) e la geometria di pick (le stesse linee/punte più l’OBB del testo). Il VBO e la stringa condividono l’<code>entity_id</code>; la selezione a rettangolo usa window = tutte le primitive contenute, crossing = almeno una, e <code>pick_text = 0</code> esclude l’OBB del testo dal rettangolo lasciandolo cliccabile. Restano da estrarre un modulo <code>symgen</code> separato e il testo incrementale.</p>
+
+    <figure>
+      <span class="fig-label">Fig. 07 · dati e disegno</span>
+      <div class="svg-wrap"><svg viewBox="0 0 760 440" role="img" aria-label="Una quota memorizzata come p1, p2, p3 e due testi genera linee di riferimento, linea di quota, punte e un run di testo.">
+        <rect x="24" y="16" width="300" height="118" class="d-box"/>
+        <text x="40" y="42" class="d-title">Memorizzato</text>
+        <text x="40" y="60" class="d-small d-muted">5 campi per entità</text>
+        <text x="40" y="86">p1 · p2 · p3</text>
+        <text x="40" y="106">testo_prima · testo_dopo</text>
+        <text x="40" y="126" class="d-small d-accent">≈ 48–64 B</text>
+
+        <rect x="404" y="16" width="332" height="118" class="d-box-accent"/>
+        <text x="420" y="42" class="d-title">Generato</text>
+        <text x="420" y="60" class="d-small d-muted">per il disegno</text>
+        <text x="420" y="86">2 linee di riferimento</text>
+        <text x="420" y="106">1 linea di quota + 2 punte</text>
+        <text x="420" y="126">1 run di testo</text>
+
+        <text x="360" y="172" class="d-small d-muted" text-anchor="middle">testo: run di testo, non segmenti</text>
+
+        <line x1="140" y1="360" x2="580" y2="360" class="d-object"/>
+        <text x="132" y="382" class="d-small d-muted" text-anchor="end">p1</text>
+        <text x="588" y="382" class="d-small d-muted">p2</text>
+        <text x="360" y="398" class="d-small d-muted" text-anchor="middle">oggetto misurato</text>
+
+        <line x1="140" y1="348" x2="140" y2="204" class="d-ext"/>
+        <line x1="580" y1="348" x2="580" y2="204" class="d-ext"/>
+
+        <line x1="140" y1="220" x2="580" y2="220" class="d-dim"/>
+        <polygon points="140,220 158,213 158,227" class="d-arrow-tri"/>
+        <polygon points="580,220 562,213 562,227" class="d-arrow-tri"/>
+
+        <text x="360" y="202" text-anchor="middle" style="font-size:14px"><tspan class="d-muted">L </tspan><tspan class="d-accent" style="font-weight:500">240</tspan><tspan class="d-muted"> ±0.5</tspan></text>
+
+        <circle cx="440" cy="220" r="3.5" class="d-dot-accent"/>
+        <text x="450" y="214" class="d-small d-accent">p3</text>
+        <text x="450" y="232" class="d-small d-muted">direzione + offset</text>
+
+        <text x="128" y="300" class="d-small d-muted" text-anchor="end">linea di riferimento</text>
+        <text x="596" y="214" class="d-small d-accent">linea di quota</text>
+        <text x="596" y="250" class="d-small d-muted">punte</text>
+      </svg></div>
+      <figcaption><strong>Pochi parametri, molti segmenti, un testo separato.</strong> <code>p3</code> dà direzione e distanza della linea di quota; il valore non è memorizzato, è calcolato. La geometria di pick resta la linea di quota e i riferimenti, non tutto ciò che viene disegnato.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="s7">
+    <div class="section-head">
+      <span class="section-index">07</span>
+      <h2 id="s7">Contratto e ordine di lavoro</h2>
+    </div>
+    <p>Il contratto minimo tiene separati i due strati. L’emitter permette di scrivere direttamente nello staging, senza materializzare una display list intermedia.</p>
+
+<pre><code>typedef struct {
+    void *user;
+    void (*polyline)(void *user, const float *xy, uint32_t count,
+                     uint8_t pattern, uint8_t weight, uint8_t layer);
+    void (*text)(void *user, const char *utf8, float x, float y,
+                 float height, float angle, int align);
+} symgen_emitter;
+
+void symgen_emit(const CadEntity *e, const CadStyle *style,
+                 symgen_emitter *out);
+
+bool entity_bounds(const CadEntity *e, sym_box *out);
+bool entity_hit(const CadEntity *e, const sym_box *query,
+                sym_hit_mode mode);   /* CONTAINED | CROSSING */
+
+typedef struct {
+    GLuint vbo_id;          /* oppure la glyph string, per il testo */
+    uint32_t entity_id;     /* l'ID opaco che torna dal pick */
+} isogl_pick_item;
+
+int isogl_pick_at(SDL_Window *win, int px, int py,
+                  const isogl_pick_item *items, size_t count,
+                  int radius_px, int max_entities,
+                  uint32_t *out_ids, size_t out_capacity,
+                  size_t *out_count);</code></pre>
+
+    <p>Il generatore non conosce GL, SDL né il documento: solo entità, stile e callback. Il kernel non conosce né il generatore né il renderer. <code>isogl</code> non conosce né il kernel né i simboli. Anche il pick è entity-agnostic: l’app fornisce i candidati e gli ID, la libreria possiede FBO e shader. <code>radius_px</code> e <code>max_entities</code> sono parametri, non costanti; il <code>pick_id</code> è opaco e anche il testo ne ha uno.</p>
+
+    <ol class="steps">
+      <li><span><strong>Generatore puro e <code>tessellate_arc</code></strong>Con test senza contesto GL: cerchio, arco, punta, tolleranza.</span></li>
+      <li><span><strong><code>entity_bounds</code> e indice AABB</strong>Grid sul foglio in mm; broad phase misurabile.</span></li>
+      <li><span><strong><code>entity_hit</code> per tipo</strong>Contenuta e attraversante, con test dedicati per cerchio, arco, testo e quota.</span></li>
+      <li><span><strong>Pick click/hover</strong>FBO 16×16 (box 8×8) <code>GL_R32UI</code>, <code>pick_id</code> per draw item, pre-filtro di distanza dal layout, raggio e soglia configurabili. Test: interno del cerchio, angolo vuoto di una diagonale, tratteggio, due entità sovrapposte.</span></li>
+      <li><span><strong>Prima entità reale: la quota</strong>Quota allineata implementata in <code>cad.c</code> con geometria di render e di pick; restano l’estrazione di un modulo <code>symgen</code> separato e il testo incrementale al posto del rebuild globale.</span></li>
+      <li><span><strong>Pagine VBO</strong>Solo quando il profilo mostra che le draw call per entità sono il collo di bottiglia. Il batching non è per stile e non fonde le entità: tiene solo i loro range in un pool.</span></li>
+    </ol>
+
+    <div class="not">
+      <h3>Da non fare</h3>
+      <ul>
+        <li>Tenere una copia RAM dei segmenti.</li>
+        <li>Fare hit-test sui segmenti invece che sulle entità.</li>
+        <li>Usare un pass di picking GPU per la selezione a rettangolo.</li>
+        <li>Usare il solo AABB come filtro del click: il cerchio include l’interno, la diagonale include gli angoli vuoti.</li>
+        <li>Leggere il framebuffer normale per decidere se fare il pick.</li>
+        <li>Usare il colore di visualizzazione o il nome del VBO come ID di pick.</li>
+        <li>Rigenerare tutto il documento a ogni modifica.</li>
+        <li>Lasciare 96 segmenti fissi per ogni cerchio.</li>
+      </ul>
+    </div>
+
+    <h3>Punti del codice attuale</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Punto</th><th>Oggi</th><th>Nel nuovo strato</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>cad.c:8</td><td>96 segmenti fissi per cerchio</td><td><code>tessellate_arc(r, tolleranza)</code></td></tr>
+          <tr><td>cad.c:38</td><td>Stile per entità su tutti i vertici</td><td>Stile per polilinea</td></tr>
+          <tr><td>cad.c:237</td><td>Rebuild globale del testo</td><td>Testo aggiornato per entità</td></tr>
+          <tr><td>isogl.c:954</td><td>Una draw call per entità</td><td>Un draw per pagina; multi-draw solo per range invisibili</td></tr>
+          <tr><td>isogl.c:842</td><td>Rimozione con shift dell’array</td><td>Handle stabili e free-list</td></tr>
+          <tr><td>cad.h</td><td><code>CadEntity.id</code> <code>uint32_t</code></td><td>ID stabile per il pick</td></tr>
+          <tr><td>isogl.h</td><td><code>isogl_vbo_object</code> senza pick ID</td><td>Campo <code>pick_id</code> opaco</td></tr>
+          <tr><td>isogl_font.h</td><td>Glyph string senza pick ID</td><td>Campo <code>pick_id</code></td></tr>
+          <tr><td>isogl.c</td><td>Draw a colore</td><td>FBO 16×16 + <code>uPickMode</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code>CadEntity.id</code> oggi è <code>count + 1</code>: va bene finché non si rimuovono entità. Con delete/undo serve un contatore monotono, altrimenti un ID può essere riusato e il pick restituisce l’entità sbagliata.</p>
+  </section>
+</main>
+
+<footer>
+  <span>isocad · nota A-01</span>
+  <span>Generatore di simboli</span>
+  <span>28.10.2026</span>
+</footer>
