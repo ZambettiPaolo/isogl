@@ -274,6 +274,60 @@ int main(int argc, char **argv) {
     check(!pixel_is_green(pixels, (int)dim_screen.x, (int)dim_screen.y),
           "cleared symbol returns to its style colour");
 
+    // ---- In-place symbol update ------------------------------------------
+    IsoglDimensionDesc dim_moved = spec.symbols[0].dimension;
+    dim_moved.y0 += 10.0;
+    dim_moved.y1 += 10.0;
+    dim_moved.py += 10.0;
+
+    check(isogl_symbol_set_selected(dim_id, 1) == 0,
+          "select dimension before update");
+    check(isogl_symbol_update_dimension(dim_id, &dim_moved) == 0,
+          "dimension transform update succeeds");
+    check(isogl_symbol_get_selected(dim_id) == 1,
+          "dimension selection survives the update");
+
+    isogl_box moved_bounds;
+    check(isogl_symbol_bounds(dim_id, &moved_bounds) == 0 &&
+          moved_bounds.ymin >= 69.0,
+          "dimension bounds follow the updated geometry");
+
+    IsoglDimensionDesc dim_stretched = dim_moved;
+    dim_stretched.x1 = 180.0;
+    check(isogl_symbol_update_dimension(dim_id, &dim_stretched) == 0,
+          "dimension value update succeeds");
+    check(isogl_symbol_get_selected(dim_id) == 1,
+          "dimension selection survives the value update");
+    check(isogl_symbol_bounds(dim_id, &moved_bounds) == 0 &&
+          moved_bounds.xmax >= 180.0,
+          "dimension bounds follow the new value");
+
+    isogl_point new_line_screen = {0.0f, 0.0f};
+    check(isogl_world_to_screen(window, 100.0f, 100.0f,
+                                &new_line_screen) == 0,
+          "updated dimension screen conversion");
+    uint32_t update_ids[64];
+    size_t update_count = 0;
+    check(fake_drawing_pick_symbols(&fake, window,
+                                    new_line_screen.x, new_line_screen.y,
+                                    update_ids, 64, &update_count) == 0,
+          "updated dimension pick succeeds");
+    check(update_count == 1 && update_ids[0] == dim_id,
+          "updated dimension keeps its ID and pick");
+
+    IsoglCenterMarkDesc center_big = spec.symbols[1].center_mark;
+    center_big.size_mm = 12.0;
+    check(isogl_symbol_set_selected(center_id, 1) == 0,
+          "select center mark before update");
+    check(isogl_symbol_update_center_mark(center_id, &center_big) == 0,
+          "center mark update succeeds");
+    check(isogl_symbol_get_selected(center_id) == 1,
+          "center mark selection survives the update");
+    isogl_box center_bounds;
+    check(isogl_symbol_bounds(center_id, &center_bounds) == 0 &&
+          center_bounds.xmin <= 138.0 && center_bounds.xmax >= 162.0,
+          "center mark bounds follow the new size");
+
     // ---- Explode the center mark ------------------------------------------
     size_t seg = 0, txt = 0;
     size_t prim_before = fake.spec.primitive_count;
@@ -292,7 +346,8 @@ int main(int argc, char **argv) {
     prim_before = fake.spec.primitive_count;
     check(fake_drawing_explode_symbol(&fake, 0, &seg, &txt) == 0,
           "dimension explode succeeds");
-    check(seg == 9 && txt == 1, "dimension emits 9 segments + 1 text (reference points included)");
+    check(seg == 9 && txt == 1,
+          "dimension emits 9 segments + 1 text (reference points included)");
     check(fake.ref_count == 0, "dimension reference removed");
     check(fake.spec.primitive_count == prim_before + 10,
           "dimension geometry transferred to the CAD");
@@ -302,7 +357,7 @@ int main(int argc, char **argv) {
     int found_value = 0;
     for (size_t i = 0; i < fake.spec.primitive_count; ++i) {
         const FakePrimitive *p = &fake.spec.primitives[i];
-        if (p->type == FAKE_PRIM_TEXT && strcmp(p->text, "120.0 mm") == 0) {
+        if (p->type == FAKE_PRIM_TEXT && strcmp(p->text, "140.0 mm") == 0) {
             found_value = 1;
         }
     }
@@ -316,7 +371,7 @@ int main(int argc, char **argv) {
 
     // The exploded dimension line is now CAD geometry, not a symbol.
     check(isogl_pick_at(window, &fake.parts, &fake.strings,
-                        dim_screen.x, dim_screen.y,
+                        new_line_screen.x, new_line_screen.y,
                         pick_ids, 64, &pick_count) == 0,
           "exploded geometry pick succeeds");
     check(pick_count >= 1 &&

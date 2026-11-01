@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <locale.h>
 #include "glad.h"
 #include "toml.h"
 
@@ -96,7 +97,7 @@ static void isogl_store_polyline(isogl_glyph *glyph, uint32_t *poly_idx,
     (*poly_idx)++;
 }
 
-isogl_font_data* isogl_font_load_from_toml(const char* filename) {
+static isogl_font_data* isogl_font_load_from_toml_impl(const char* filename) {
     char errbuf[256];
     FILE* fp = fopen(filename, "r");
     if (!fp) {
@@ -286,6 +287,28 @@ fail:
     return NULL;
 }
 
+/*
+ * tomlc99 parses floating point values with the C library's strtod(), which is
+ * locale-sensitive.  In a comma-decimal locale (it_IT, de_DE, fr_FR, ...)
+ * "advance = 320.0" fails to parse and the glyph advances stay zero, so every
+ * string collapses onto itself.  Parse under the C numeric locale and restore
+ * the host locale afterwards.  The library is documented as single-threaded.
+ */
+isogl_font_data* isogl_font_load_from_toml(const char* filename) {
+    char saved[128];
+    int restore = 0;
+    const char *current = setlocale(LC_NUMERIC, NULL);
+    if (current) {
+        snprintf(saved, sizeof(saved), "%s", current);
+        if (setlocale(LC_NUMERIC, "C")) restore = 1;
+    }
+
+    isogl_font_data *font = isogl_font_load_from_toml_impl(filename);
+
+    if (restore) setlocale(LC_NUMERIC, saved);
+    return font;
+}
+
 void isogl_font_free_data(isogl_font_data* font) {
     if (!font) return;
 
@@ -338,42 +361,43 @@ isogl_glyph_string* isogl_create_glyph_string(const char* text, isogl_font_data*
     }
     memcpy(glyph_string->text, text, text_len + 1);
 
-    // Pass 1: total vertices and polylines.
+    // Pass 1: count the vertices of the complete GL_LINES string.
+    // Each polyline of n points becomes 2*(n-1) independent vertices.
     uint32_t total_vertices = 0;
-    uint32_t total_polylines = 0;
     for (const char *cursor = text; *cursor; ) {
         uint32_t codepoint = isogl_utf8_next(&cursor);
         const isogl_glyph *glyph = isogl_find_glyph(font, codepoint);
         if (!glyph) continue;
-        total_vertices += glyph->vertex_count;
-        total_polylines += glyph->polyline_count;
+
+        for (uint32_t p = 0; p < glyph->polyline_count; ++p) {
+            uint32_t count = glyph->polyline_indices[p].index_count;
+            if (count < 2) continue;
+            uint32_t add = 2u * (count - 1u);
+            if (total_vertices > UINT32_MAX - add) {
+                free(glyph_string->text);
+                free(glyph_string);
+                return NULL;
+            }
+            total_vertices += add;
+        }
     }
 
     glyph_string->vertex_count = total_vertices;
-    glyph_string->polyline_count = total_polylines;
+    glyph_string->polyline_count = 0;
 
     // Nothing to draw (e.g. a string of spaces): valid empty string.
-    if (total_vertices == 0 || total_polylines == 0) {
-        glyph_string->vertex_count = 0;
-        glyph_string->polyline_count = 0;
-        return glyph_string;
-    }
+    if (total_vertices == 0) return glyph_string;
 
     isogl_font_vertex* all_vertices =
         calloc(total_vertices, sizeof(isogl_font_vertex));
-    if (!all_vertices) goto fail;
+    if (!all_vertices) {
+        free(glyph_string->text);
+        free(glyph_string);
+        return NULL;
+    }
 
-    glyph_string->polyline_indices =
-        calloc(total_polylines, sizeof(isogl_font_index_polyline));
-    if (!glyph_string->polyline_indices) goto fail_vertices;
-
-    glyph_string->first = calloc(total_polylines, sizeof(GLint));
-    glyph_string->count = calloc(total_polylines, sizeof(GLsizei));
-    if (!glyph_string->first || !glyph_string->count) goto fail_indices;
-
-    // Pass 2: place glyphs and build the glMultiDrawArrays ranges.
-    uint32_t vertex_offset = 0;
-    uint32_t polyline_offset = 0;
+    // Pass 2: place glyphs and emit independent segment pairs.
+    uint32_t out = 0;
     float pen_x = 0.0f;
     int clamped = 0;
 
@@ -382,27 +406,41 @@ isogl_glyph_string* isogl_create_glyph_string(const char* text, isogl_font_data*
         const isogl_glyph *glyph = isogl_find_glyph(font, codepoint);
         if (!glyph) continue;
 
-        for (uint32_t v = 0; v < glyph->vertex_count; ++v) {
-            float x = (float)glyph->vertices[v].x + pen_x;
-            if (x > 32767.0f) { x = 32767.0f; clamped = 1; }
-            if (x < -32768.0f) { x = -32768.0f; clamped = 1; }
-            all_vertices[vertex_offset + v].x = (int16_t)lrintf(x);
-            all_vertices[vertex_offset + v].y = glyph->vertices[v].y;
-        }
-
         for (uint32_t p = 0; p < glyph->polyline_count; ++p) {
-            uint32_t start = vertex_offset + glyph->polyline_indices[p].index_start;
+            uint32_t start = glyph->polyline_indices[p].index_start;
             uint32_t count = glyph->polyline_indices[p].index_count;
+            if (count < 2 || start >= glyph->vertex_count) continue;
+            if (count > glyph->vertex_count - start) {
+                count = glyph->vertex_count - start;
+            }
 
-            glyph_string->polyline_indices[polyline_offset].index_start = start;
-            glyph_string->polyline_indices[polyline_offset].index_count = count;
-            glyph_string->first[polyline_offset] = (GLint)start;
-            glyph_string->count[polyline_offset] = (GLsizei)count;
-            polyline_offset++;
+            for (uint32_t j = 0; j + 1 < count; ++j) {
+                const isogl_font_vertex *v0 = &glyph->vertices[start + j];
+                const isogl_font_vertex *v1 = &glyph->vertices[start + j + 1];
+                float x0 = (float)v0->x + pen_x;
+                float x1 = (float)v1->x + pen_x;
+
+                if (x0 > 32767.0f) { x0 = 32767.0f; clamped = 1; }
+                if (x0 < -32768.0f) { x0 = -32768.0f; clamped = 1; }
+                if (x1 > 32767.0f) { x1 = 32767.0f; clamped = 1; }
+                if (x1 < -32768.0f) { x1 = -32768.0f; clamped = 1; }
+
+                all_vertices[out].x = (int16_t)lrintf(x0);
+                all_vertices[out].y = v0->y;
+                all_vertices[out + 1].x = (int16_t)lrintf(x1);
+                all_vertices[out + 1].y = v1->y;
+                out += 2;
+            }
         }
 
-        vertex_offset += glyph->vertex_count;
         pen_x += (float)glyph->advance;
+    }
+
+    if (out != total_vertices) {
+        free(all_vertices);
+        free(glyph_string->text);
+        free(glyph_string);
+        return NULL;
     }
 
     if (clamped) {
@@ -411,7 +449,12 @@ isogl_glyph_string* isogl_create_glyph_string(const char* text, isogl_font_data*
     }
 
     glGenBuffers(1, &glyph_string->vbo);
-    if (glyph_string->vbo == 0) goto fail_indices;
+    if (glyph_string->vbo == 0) {
+        free(all_vertices);
+        free(glyph_string->text);
+        free(glyph_string);
+        return NULL;
+    }
 
     glBindBuffer(GL_ARRAY_BUFFER, glyph_string->vbo);
     glBufferData(GL_ARRAY_BUFFER,
@@ -422,20 +465,6 @@ isogl_glyph_string* isogl_create_glyph_string(const char* text, isogl_font_data*
 
     free(all_vertices);
     return glyph_string;
-
-fail_indices:
-    free(glyph_string->polyline_indices);
-    glyph_string->polyline_indices = NULL;
-    free(glyph_string->first);
-    glyph_string->first = NULL;
-    free(glyph_string->count);
-    glyph_string->count = NULL;
-fail_vertices:
-    free(all_vertices);
-fail:
-    free(glyph_string->text);
-    free(glyph_string);
-    return NULL;
 }
 
 void isogl_create_string_matrix(float* m, float x, float y, float scale, float angle) {
@@ -486,6 +515,91 @@ bool isogl_string_list_append(isogl_string_list* list, isogl_glyph_string* glyph
     list->glyph_strings[list->glyph_string_count].selected = 0;
     list->glyph_string_count++;
     return true;
+}
+
+static void isogl_glyph_string_free_contents(isogl_glyph_string *s) {
+    if (!s) return;
+    free(s->text);
+    free(s->vertices);
+    free(s->polyline_indices);
+    free(s->first);
+    free(s->count);
+    s->text = NULL;
+    s->vertices = NULL;
+    s->polyline_indices = NULL;
+    s->first = NULL;
+    s->count = NULL;
+    if (s->vbo != 0) {
+        glDeleteBuffers(1, &s->vbo);
+        s->vbo = 0;
+    }
+}
+
+static int isogl_text_scale(const isogl_font_data *font, float height,
+                            float global_scale, float *scale) {
+    if (!font || !scale || !(font->height > 0.0f) ||
+        !(height > 0.0f) || !(global_scale > 0.0f)) {
+        return -1;
+    }
+
+    float value = height / (font->height * global_scale);
+    if (!isfinite(value) || value <= 0.0f) return -1;
+
+    *scale = value;
+    return 0;
+}
+
+int isogl_string_list_update_by_pick_id(isogl_string_list *list,
+                                        uint32_t pick_id,
+                                        const char *text,
+                                        isogl_font_data *font,
+                                        float x, float y, float height,
+                                        float global_scale, float angle) {
+    if (!list || !text || !font) return -1;
+
+    float scale = 0.0f;
+    if (isogl_text_scale(font, height, global_scale, &scale) != 0) {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < list->glyph_string_count; ++i) {
+        if (list->glyph_strings[i].pick_id != pick_id) continue;
+
+        isogl_glyph_string *fresh = isogl_create_glyph_string(text, font);
+        if (!fresh) return -1;
+
+        fresh->pick_id = pick_id;
+        fresh->selected = list->glyph_strings[i].selected;
+        isogl_create_string_matrix(fresh->string_matrix, x, y, scale, angle);
+
+        isogl_glyph_string_free_contents(&list->glyph_strings[i]);
+        list->glyph_strings[i] = *fresh;
+        free(fresh);
+        return 0;
+    }
+    return -1;
+}
+
+int isogl_string_list_set_transform_by_pick_id(isogl_string_list *list,
+                                               uint32_t pick_id,
+                                               isogl_font_data *font,
+                                               float x, float y, float height,
+                                               float global_scale,
+                                               float angle) {
+    if (!list) return -1;
+
+    float scale = 0.0f;
+    if (isogl_text_scale(font, height, global_scale, &scale) != 0) {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < list->glyph_string_count; ++i) {
+        if (list->glyph_strings[i].pick_id != pick_id) continue;
+        isogl_create_string_matrix(list->glyph_strings[i].string_matrix,
+                                   x, y, scale, angle);
+        return 0;
+    }
+    return -1;
 }
 
 static int isogl_font_compare_u32(const void *a, const void *b) {
@@ -598,7 +712,7 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
     for (uint32_t s = 0; s < string_list->glyph_string_count; ++s) {
         isogl_glyph_string* glyph_string = &string_list->glyph_strings[s];
 
-        if (glyph_string->polyline_count == 0 || glyph_string->vbo == 0) continue;
+        if (glyph_string->vertex_count == 0 || glyph_string->vbo == 0) continue;
 
         if (isogl_font_u.string != -1)
             glUniformMatrix4fv(isogl_font_u.string, 1, GL_FALSE, glyph_string->string_matrix);
@@ -609,8 +723,7 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
         glVertexAttribPointer(0, 2, GL_SHORT, GL_FALSE,
                               sizeof(isogl_font_vertex), (void*)0);
 
-        glMultiDrawArrays(GL_LINE_STRIP, glyph_string->first, glyph_string->count,
-                          (GLsizei)glyph_string->polyline_count);
+        glDrawArrays(GL_LINES, 0, (GLsizei)glyph_string->vertex_count);
     }
 
     glBindVertexArray(0);
@@ -648,7 +761,7 @@ void isogl_draw_string_list_pick(isogl_string_list* string_list, GLuint shader_p
     for (uint32_t s = 0; s < string_list->glyph_string_count; ++s) {
         isogl_glyph_string* glyph_string = &string_list->glyph_strings[s];
         if (glyph_string->pick_id == 0) continue;
-        if (glyph_string->polyline_count == 0 || glyph_string->vbo == 0) continue;
+        if (glyph_string->vertex_count == 0 || glyph_string->vbo == 0) continue;
 
         if (isogl_font_u.string != -1)
             glUniformMatrix4fv(isogl_font_u.string, 1, GL_FALSE,
@@ -660,8 +773,7 @@ void isogl_draw_string_list_pick(isogl_string_list* string_list, GLuint shader_p
         glVertexAttribPointer(0, 2, GL_SHORT, GL_FALSE,
                               sizeof(isogl_font_vertex), (void*)0);
 
-        glMultiDrawArrays(GL_LINE_STRIP, glyph_string->first, glyph_string->count,
-                          (GLsizei)glyph_string->polyline_count);
+        glDrawArrays(GL_LINES, 0, (GLsizei)glyph_string->vertex_count);
     }
 
     glBindVertexArray(0);
@@ -677,11 +789,7 @@ int isogl_string_list_remove_by_pick_id(isogl_string_list *list,
         if (list->glyph_strings[i].pick_id != pick_id) continue;
 
         isogl_glyph_string *s = &list->glyph_strings[i];
-        free(s->text);
-        free(s->polyline_indices);
-        free(s->first);
-        free(s->count);
-        if (s->vbo != 0) glDeleteBuffers(1, &s->vbo);
+        isogl_glyph_string_free_contents(s);
 
         for (uint32_t j = i; j + 1 < list->glyph_string_count; ++j) {
             list->glyph_strings[j] = list->glyph_strings[j + 1];

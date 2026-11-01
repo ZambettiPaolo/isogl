@@ -115,7 +115,11 @@ Regole che ne derivano:
   riferimenti seguono il layer, ma punte e testo hanno vincoli propri. Oggi
   `cad_vertex()` prende pattern e peso dall'entità per tutti i vertici.
 - **Il testo è un run separato**, non un insieme di segmenti: va alla pipeline
-  font. L'emitter ha due callback, `polyline` e `text`.
+  font. Ogni stringa ha un **VBO completo** di coppie `GL_LINES` (glifi
+  duplicati, nessun atlas/instancing), disegnato con una `glDrawArrays` per
+  stringa. L’update è per `pick_id`: contenuto → nuovo VBO della stringa;
+  posizione/angolo/altezza → solo `string_matrix`. L'emitter ha due callback,
+  `polyline` e `text`.
 - **Aggiornamento per entità sporca.** Una versione per entità, un dirty set,
   un emit per entità. Se il conteggio vertici non cambia: `glBufferSubData`
   nel range. Se cambia: nuovo range da free-list o rebuild della pagina.
@@ -170,9 +174,14 @@ Regole che ne derivano:
 - Ogni entità geometrica ha oggi il proprio VBO. La modifica di un'entità
   ricostruisce solo la sua lista di segmenti e chiama
   `isogl_vbo_array_update()`; il resto resta in VRAM.
-- Il testo invece viene ricostruito **interamente** a ogni cambiamento
-  (`cad_document_rebuild_text`). Con le quote diventa una parte troppo grande
-  del modello: va reso incrementale per entità.
+- Il testo è incrementale per entità: `cad_add_text` crea solo la sua stringa;
+  `cad_update_text`/`cad_set_text_transform` aggiornano una sola voce per
+  `pick_id` (VBO nuovo solo se cambia il contenuto, matrice se cambia solo la
+  posizione). `cad_document_rebuild_text` resta per ricarica font/rebuild
+  globale esplicito. Ogni stringa ha un VBO completo di coppie `GL_LINES`,
+  senza `glMultiDrawArrays`. Memoria: font unico ~50–60 KiB; stringa tipica
+  ~0,5–0,8 KiB; 10.000 stringhe ~6–8 MB di VBO; a scala il limite sono i VBO e
+  le draw call, non i byte.
 
 La quota è il caso guida: in memoria `p1`, `p2`, `p3` (orientamento e distanza
 dal primo punto), `testo_prima`, `testo_dopo`. Il valore non è memorizzato: si
@@ -213,7 +222,9 @@ Implementazione:
 - `include/isogl/isogl_symbol.h`, `src/isogl_symbol.c`: registry GL con ID
   monotoni non riusati, VBO/stringhe posseduti dal modulo, draw/pick/hit/
   bounds/selected e explode transazionale (fallimento dell'emitter = simbolo
-  vivo). `isogl_string_list_remove_by_pick_id` libera la stringa del simbolo.
+  vivo). `isogl_string_list_remove_by_pick_id` libera la stringa del simbolo;
+  `isogl_symbol_update_dimension`/`isogl_symbol_update_center_mark`
+  rigenerano un simbolo **in place**, preservando ID, pick e selezione.
 - L'app `isocad` usa riferimenti simbolo: `CadDocument` conserva
   `isogl_symbol_id *symbols`; `cad_add_dimension_symbol` /
   `cad_add_center_mark_symbol` creano il simbolo e ne registrano l’ID. La
@@ -345,7 +356,7 @@ Riferimenti al commit `05af29c`; verifica i numeri di riga prima di fidarti.
 | `include/isogl/isogl.h:59` | `isogl_vertex` 32 B | invariato |
 | `apps/isocad/src/cad.c:8` | 96 segmenti fissi per cerchio | `tessellate_arc(r, tolleranza)` |
 | `apps/isocad/src/cad.c:38` | stile per entità su tutti i vertici | stile per polilinea |
-| `apps/isocad/src/cad.c:237` | rebuild globale del testo | testo incrementale per entità |
+| `apps/isocad/src/cad.c:237` | rebuild globale del testo | testo incrementale per entità (fatto) |
 | `src/isogl.c:629` | add di un VBO per entità | invariato finché non si impagina |
 | `src/isogl.c:718` | update del singolo VBO | invariato; base per il delta |
 | `src/isogl.c:842` | remove con shift dell'array | handle stabili + free-list |

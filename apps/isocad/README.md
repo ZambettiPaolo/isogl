@@ -139,13 +139,22 @@ make test
 
 Ogni entità geometrica ha il proprio VBO. Quando un'entità viene modificata
 l'app ricostruisce solo la sua lista di segmenti e chiama
-`isogl_vbo_array_update()`: il resto del modello resta in memoria video. Il
-testo viene ricostruito interamente solo quando cambiano entità di testo.
+`isogl_vbo_array_update()`: il resto del modello resta in memoria video.
+
+Il testo è incrementale per entità: ogni stringa ha un VBO completo di coppie
+`GL_LINES`; `cad_add_text` crea solo la sua, `cad_update_text` e
+`cad_set_text_transform` aggiornano una sola voce per `pick_id` (VBO nuovo solo
+se cambia il contenuto, `string_matrix` se cambia solo la posizione).
+`cad_document_rebuild_text` resta per ricarica font/rebuild globale. Anche un
+simbolo si aggiorna in place con `isogl_symbol_update_*`, preservando ID, pick e
+selezione. Memoria: ~0,5–0,8 KiB per stringa tipica e ~6–8 MB per 10.000
+stringhe; a scala il limite sono i VBO e le draw call, non i byte.
 
 ## Stato attuale
 
 Milestone A: foglio, linee, cerchi, rettangoli, testo vettoriale, pattern e pesi
 ISO, zoom/pan, modalità colori-spessore/stampa, selezione d’area persistente
 taggata CAD/simbolo, quota e center mark come simboli isogl con registry,
-hit/pick/explode e ambiente di test gerarchico. Editing, UI layer, archi,
-polilinee, export/stampa e modello CAD gerarchico sono i passi successivi.
+hit/pick/explode, ambiente di test gerarchico e testo incrementale per entità.
+Editing, UI layer, archi, polilinee, export/stampa e modello CAD gerarchico
+sono i passi successivi.

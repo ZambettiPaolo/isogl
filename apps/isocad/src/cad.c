@@ -568,6 +568,34 @@ uint32_t cad_add_rectangle(CadDocument *doc, int layer, isogl_line_type pattern,
     return entity->id;
 }
 
+static CadEntity *cad_find_entity(CadDocument *doc, uint32_t id) {
+    if (!doc || id == 0) return NULL;
+    for (size_t i = 0; i < doc->count; ++i) {
+        if (doc->entities[i].id == id) return &doc->entities[i];
+    }
+    return NULL;
+}
+
+static int cad_text_append(CadDocument *doc, const CadEntity *entity) {
+    if (!doc || !entity || !doc->font) return -1;
+
+    isogl_glyph_string *string =
+        isogl_create_glyph_string(entity->geom.label.text, doc->font);
+    if (!string) return -1;
+
+    if (!isogl_string_list_append(&doc->strings, string,
+                                  entity->geom.label.x,
+                                  entity->geom.label.y,
+                                  entity->geom.label.height,
+                                  doc->sheet_scale,
+                                  entity->geom.label.angle,
+                                  doc->font, entity->id)) {
+        isogl_free_glyph_string(string);
+        return -1;
+    }
+    return 0;
+}
+
 uint32_t cad_add_text(CadDocument *doc, int layer, float x, float y,
                       float height_mm, float angle, const char *text) {
     if (!text) return 0;
@@ -582,31 +610,77 @@ uint32_t cad_add_text(CadDocument *doc, int layer, float x, float y,
     entity->geom.label.angle = angle;
     snprintf(entity->geom.label.text, sizeof(entity->geom.label.text), "%s", text);
 
-    cad_document_rebuild_text(doc);
+    /* Incremental: only this entity's string is created. */
+    cad_text_append(doc, entity);
     return entity->id;
+}
+
+int cad_update_text(CadDocument *doc, uint32_t entity_id, const char *text) {
+    if (!doc || !text) return -1;
+
+    CadEntity *entity = cad_find_entity(doc, entity_id);
+    if (!entity || entity->type != CAD_TEXT) return -1;
+
+    char old[sizeof(entity->geom.label.text)];
+    memcpy(old, entity->geom.label.text, sizeof(old));
+    snprintf(entity->geom.label.text, sizeof(entity->geom.label.text), "%s", text);
+
+    int rc = isogl_string_list_update_by_pick_id(
+        &doc->strings, entity_id, entity->geom.label.text, doc->font,
+        entity->geom.label.x, entity->geom.label.y,
+        entity->geom.label.height, doc->sheet_scale,
+        entity->geom.label.angle);
+
+    if (rc != 0) {
+        memcpy(entity->geom.label.text, old, sizeof(old));
+        return -1;
+    }
+    return 0;
+}
+
+int cad_set_text_transform(CadDocument *doc, uint32_t entity_id,
+                           float x, float y, float height, float angle) {
+    if (!doc) return -1;
+
+    CadEntity *entity = cad_find_entity(doc, entity_id);
+    if (!entity || entity->type != CAD_TEXT) return -1;
+
+    float old_x = entity->geom.label.x;
+    float old_y = entity->geom.label.y;
+    float old_height = entity->geom.label.height;
+    float old_angle = entity->geom.label.angle;
+
+    entity->geom.label.x = x;
+    entity->geom.label.y = y;
+    entity->geom.label.height = height;
+    entity->geom.label.angle = angle;
+
+    int rc = isogl_string_list_set_transform_by_pick_id(
+        &doc->strings, entity_id, doc->font, x, y, height,
+        doc->sheet_scale, angle);
+
+    if (rc != 0) {
+        entity->geom.label.x = old_x;
+        entity->geom.label.y = old_y;
+        entity->geom.label.height = old_height;
+        entity->geom.label.angle = old_angle;
+        return -1;
+    }
+    return 0;
 }
 
 void cad_document_rebuild_text(CadDocument *doc) {
     if (!doc || !doc->font) return;
 
-    /* Rebuilding frees the string list, so per-string selection flags are
-       lost.  Callers that keep a selection must reapply it by entity ID with
-       cad_selection_apply() after this function returns. */
+    /* Explicit global rebuild (font reload / load).  This frees the string
+       list, so per-string selection flags are lost; callers that keep a
+       selection must reapply it by entity ID.  Normal add/update paths do not
+       call this function. */
     isogl_string_list_free(&doc->strings);
 
     for (size_t i = 0; i < doc->count; ++i) {
         CadEntity *entity = &doc->entities[i];
-
-        if (entity->type == CAD_TEXT) {
-            isogl_glyph_string *string =
-                isogl_create_glyph_string(entity->geom.label.text, doc->font);
-            if (!string) continue;
-
-            isogl_string_list_append(&doc->strings, string,
-                                     entity->geom.label.x, entity->geom.label.y,
-                                     entity->geom.label.height, doc->sheet_scale,
-                                     entity->geom.label.angle, doc->font,
-                                     entity->id);
-        }
+        if (entity->type != CAD_TEXT) continue;
+        cad_text_append(doc, entity);
     }
 }

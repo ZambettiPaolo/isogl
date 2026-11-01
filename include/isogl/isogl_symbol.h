@@ -27,6 +27,18 @@ void isogl_symbol_cleanup(void);
 
 isogl_symbol_id isogl_symbol_create_dimension(const IsoglDimensionDesc *d);
 isogl_symbol_id isogl_symbol_create_center_mark(const IsoglCenterMarkDesc *d);
+
+/*
+ * Regenerate one symbol in place.  The symbol ID, pick ID and selection flag
+ * are preserved; only its geometry and text are updated.  Returns 0 on
+ * success, -1 on invalid/dead ID or generation failure (the symbol stays
+ * alive).
+ */
+int isogl_symbol_update_dimension(isogl_symbol_id id,
+                                  const IsoglDimensionDesc *d);
+int isogl_symbol_update_center_mark(isogl_symbol_id id,
+                                    const IsoglCenterMarkDesc *d);
+
 int isogl_symbol_destroy(isogl_symbol_id id);
 
 void isogl_symbol_draw_all(void);
@@ -48,6 +60,9 @@ int isogl_symbol_bounds(isogl_symbol_id id, isogl_box *out);
 
 /* Set the persistent selection flag on the symbol's VBO and text string. */
 int isogl_symbol_set_selected(isogl_symbol_id id, int selected);
+
+/* Return 1/0 for a live symbol, -1 for an invalid/dead ID. */
+int isogl_symbol_get_selected(isogl_symbol_id id);
 
 /*
  * Emit the symbol's render geometry (segments and text runs) and, on success,

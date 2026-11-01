@@ -638,6 +638,75 @@ int main(int argc, char **argv) {
                   "text flag cleared");
         }
 
+        // ---- Incremental string update -----------------------------------
+        isogl_string_list updates = {0};
+        isogl_glyph_string *u1 = isogl_create_glyph_string("AB", font);
+        isogl_glyph_string *u2 = isogl_create_glyph_string("CD", font);
+        check(u1 != NULL && u2 != NULL, "update glyph strings built");
+        if (u1 && u2) {
+            check(isogl_string_list_append(&updates, u1, 10.0f, 10.0f,
+                                           10.0f, 0.5f, 0.0f, font, 401),
+                  "update string 1 appended");
+            check(isogl_string_list_append(&updates, u2, 10.0f, 30.0f,
+                                           10.0f, 0.5f, 0.0f, font, 402),
+                  "update string 2 appended");
+
+            GLuint update_vbo1 = updates.glyph_strings[0].vbo;
+            GLuint update_vbo2 = updates.glyph_strings[1].vbo;
+            uint32_t update_selected = 401;
+            check(isogl_string_list_apply_selection(&updates,
+                                                    &update_selected, 1) == 0,
+                  "update selection applied");
+            check(updates.glyph_strings[0].selected == 1 &&
+                  updates.glyph_strings[1].selected == 0,
+                  "update selection flags correct");
+
+            check(isogl_string_list_update_by_pick_id(
+                      &updates, 401, "XYZ", font,
+                      10.0f, 10.0f, 10.0f, 0.5f, 0.0f) == 0,
+                  "string content update succeeds");
+            check(updates.glyph_strings[0].vbo != update_vbo1 &&
+                  updates.glyph_strings[0].vbo != 0,
+                  "content update creates a new string VBO");
+            check(strcmp(updates.glyph_strings[0].text, "XYZ") == 0,
+                  "content update replaces the text");
+            check(updates.glyph_strings[0].selected == 1,
+                  "content update preserves selection");
+            check(updates.glyph_strings[1].vbo == update_vbo2 &&
+                  strcmp(updates.glyph_strings[1].text, "CD") == 0 &&
+                  updates.glyph_strings[1].selected == 0,
+                  "content update leaves the other string untouched");
+
+            GLuint update_vbo1b = updates.glyph_strings[0].vbo;
+            float old_matrix_x = updates.glyph_strings[0].string_matrix[12];
+            check(isogl_string_list_set_transform_by_pick_id(
+                      &updates, 401, font, 25.0f, 10.0f,
+                      10.0f, 0.5f, 0.0f) == 0,
+                  "string transform update succeeds");
+            check(updates.glyph_strings[0].vbo == update_vbo1b,
+                  "transform update keeps the string VBO");
+            check(updates.glyph_strings[0].string_matrix[12] != old_matrix_x,
+                  "transform update changes the matrix");
+            check(updates.glyph_strings[0].selected == 1 &&
+                  updates.glyph_strings[1].vbo == update_vbo2,
+                  "transform update preserves selection and the other string");
+
+            check(isogl_string_list_update_by_pick_id(
+                      &updates, 401, "", font,
+                      10.0f, 10.0f, 10.0f, 0.5f, 0.0f) == 0,
+                  "empty string update succeeds");
+            check(updates.glyph_strings[0].vertex_count == 0 &&
+                  updates.glyph_strings[0].vbo == 0,
+                  "empty string has no VBO");
+            check(updates.glyph_strings[1].vbo == update_vbo2,
+                  "empty update leaves the other string untouched");
+
+            isogl_string_list_free(&updates);
+        } else {
+            if (u1) isogl_free_glyph_string(u1);
+            if (u2) isogl_free_glyph_string(u2);
+        }
+
         // Text pick: a single glyph at the pick center with its own ID.
         isogl_string_list pick_strings = {0};
         isogl_glyph_string *pick_text = isogl_create_glyph_string("I", font);
@@ -720,6 +789,65 @@ int main(int argc, char **argv) {
               cad.strings.glyph_strings[0].pick_id == text_id &&
               cad.strings.glyph_strings[0].selected == 1,
               "cad flags the contained text");
+
+        // ---- Incremental CAD text updates ---------------------------------
+        uint32_t text2_id = cad_add_text(&cad, 0, 30.0f, 20.0f, 3.0f, 0.0f,
+                                         "XYZ");
+        check(text2_id != 0, "second text added");
+
+        isogl_glyph_string *text1_str = NULL;
+        isogl_glyph_string *text2_str = NULL;
+        for (uint32_t i = 0; i < cad.strings.glyph_string_count; ++i) {
+            if (cad.strings.glyph_strings[i].pick_id == text_id) {
+                text1_str = &cad.strings.glyph_strings[i];
+            }
+            if (cad.strings.glyph_strings[i].pick_id == text2_id) {
+                text2_str = &cad.strings.glyph_strings[i];
+            }
+        }
+        check(text1_str && text2_str, "both text strings present");
+
+        if (text1_str && text2_str) {
+            GLuint text1_vbo = text1_str->vbo;
+            GLuint text2_vbo = text2_str->vbo;
+            check(text1_vbo != 0 && text2_vbo != 0, "text VBOs created");
+
+            check(cad_selection_apply(&cad, &text_id, 1) == 0,
+                  "select first text");
+            check(text1_str->selected == 1 && text2_str->selected == 0,
+                  "first text selected, second not");
+
+            check(cad_update_text(&cad, text2_id, "UVW") == 0,
+                  "update second text content");
+            check(strcmp(text2_str->text, "UVW") == 0 &&
+                  text2_str->vbo != text2_vbo,
+                  "second text content and VBO updated");
+            check(text1_str->vbo == text1_vbo && text1_str->selected == 1,
+                  "first text untouched by the second update");
+
+            text2_vbo = text2_str->vbo;
+            check(cad_update_text(&cad, text_id, "ABC2") == 0,
+                  "update first text content");
+            check(strcmp(text1_str->text, "ABC2") == 0 &&
+                  text1_str->vbo != text1_vbo,
+                  "first text content and VBO updated");
+            check(text1_str->selected == 1,
+                  "first text selection preserved by content update");
+            check(text2_str->vbo == text2_vbo && text2_str->selected == 0,
+                  "second text untouched by the first update");
+
+            text1_vbo = text1_str->vbo;
+            float old_matrix_x = text1_str->string_matrix[12];
+            check(cad_set_text_transform(&cad, text_id, 5.0f, 25.0f,
+                                         4.0f, 0.0f) == 0,
+                  "set first text transform");
+            check(text1_str->vbo == text1_vbo,
+                  "transform update keeps the text VBO");
+            check(text1_str->string_matrix[12] != old_matrix_x,
+                  "transform update changes the matrix");
+            check(text1_str->selected == 1 && text2_str->vbo == text2_vbo,
+                  "transform preserves selection and the other text");
+        }
 
         // A rectangle wholly inside the circle selects nothing: the interior
         // is not part of the entity.

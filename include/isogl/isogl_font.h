@@ -42,16 +42,16 @@ typedef struct {
 // string in RAM as a big glyph
 typedef struct {
     char* text;                      // Text of the string
-    uint32_t vertex_count;           // Total number of vertices
-    uint32_t polyline_count;         // Total number of polylines
+    uint32_t vertex_count;           // GL_LINES vertices (pairs); 0 = empty string
+    uint32_t polyline_count;         // Reserved (0 in the GL_LINES layout)
 
-    isogl_font_vertex* vertices;     // Pointer to vertices (optional if using only VBO)
-    isogl_font_index_polyline* polyline_indices; // Start and length indices for each polyline
+    isogl_font_vertex* vertices;     // Optional CPU copy (unused by the library)
+    isogl_font_index_polyline* polyline_indices; // Reserved (NULL in GL_LINES layout)
 
-    GLint* first;                    // Pre-compiled array for glMultiDrawArrays
-    GLsizei* count;                  // Pre-compiled array for glMultiDrawArrays
+    GLint* first;                    // Reserved (NULL in GL_LINES layout)
+    GLsizei* count;                  // Reserved (NULL in GL_LINES layout)
 
-    GLuint vbo;                      // VBO of vertices
+    GLuint vbo;                      // VBO of the complete string in GL_LINES pairs
     uint32_t pick_id;                // Opaque ID for the pick pass (0 = not pickable)
     int selected;                    // Persistent selection highlight (0/1)
     float string_matrix[16];         // String transformation matrix
@@ -108,6 +108,28 @@ bool isogl_string_list_append(isogl_string_list* list, isogl_glyph_string* glyph
                               float x, float y, float height, float global_scale,
                               float angle, isogl_font_data* font,
                               uint32_t pick_id);
+
+/*
+ * Replace the string whose pick_id matches, rebuilding only that glyph string
+ * (new VBO).  The pick_id and the persistent selection flag are preserved.
+ * Transactional: on failure the old string stays untouched.
+ */
+int isogl_string_list_update_by_pick_id(isogl_string_list* list,
+                                        uint32_t pick_id,
+                                        const char* text,
+                                        isogl_font_data* font,
+                                        float x, float y, float height,
+                                        float global_scale, float angle);
+
+/*
+ * Update only the placement/scale/rotation matrix of one string; the VBO is
+ * not touched.  The persistent selection flag is preserved.
+ */
+int isogl_string_list_set_transform_by_pick_id(isogl_string_list* list,
+                                               uint32_t pick_id,
+                                               isogl_font_data* font,
+                                               float x, float y, float height,
+                                               float global_scale, float angle);
 
 /*
  * Set the persistent selection flag on the strings whose pick_id is in

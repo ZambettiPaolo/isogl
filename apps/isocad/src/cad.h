@@ -70,6 +70,11 @@ uint32_t cad_add_rectangle(CadDocument *doc, int layer, isogl_line_type pattern,
 uint32_t cad_add_text(CadDocument *doc, int layer, float x, float y,
                       float height_mm, float angle, const char *text);
 
+/* Incremental text updates: only the entity's glyph string is rebuilt. */
+int cad_update_text(CadDocument *doc, uint32_t entity_id, const char *text);
+int cad_set_text_transform(CadDocument *doc, uint32_t entity_id,
+                           float x, float y, float height, float angle);
+
 /*
  * Create an isogl-owned symbol and store only its opaque reference in the
  * document.  The layer supplies pattern, weight and colour; sheet_scale comes
