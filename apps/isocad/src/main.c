@@ -62,7 +62,6 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     dim.text_height_mm = 2.5;
     dim.precision = 1;
     dim.pick_text = 1;
-    dim.mark_points = 1;
     dim.arrow_left = ISOGL_DIM_ARROW_CLOSED;
     dim.arrow_right = ISOGL_DIM_ARROW_CLOSED;
     snprintf(dim.text_left, sizeof(dim.text_left), "\xC3\x98 ");
@@ -83,7 +82,6 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     hdim.text_height_mm = 2.5;
     hdim.precision = 1;
     hdim.pick_text = 1;
-    hdim.mark_points = 1;
     hdim.arrow_left = ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
     hdim.arrow_right = ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
     snprintf(hdim.text_left, sizeof(hdim.text_left), "L ");
@@ -103,9 +101,8 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     vdim.text_height_mm = 2.5;
     vdim.precision = 1;
     vdim.pick_text = 1;
-    vdim.mark_points = 1;
-    vdim.arrow_left = ISOGL_DIM_ARROW_DOT;
-    vdim.arrow_right = ISOGL_DIM_ARROW_DOT;
+    vdim.arrow_left = ISOGL_DIM_ARROW_OPEN;
+    vdim.arrow_right = ISOGL_DIM_ARROW_OPEN;
     snprintf(vdim.text_left, sizeof(vdim.text_left), "H ");
     cad_add_dimension_symbol(doc, 2, &vdim);
 
@@ -123,7 +120,6 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     idim.text_height_mm = 2.5;
     idim.precision = 1;
     idim.pick_text = 1;
-    idim.mark_points = 1;
     idim.arrow_left = ISOGL_DIM_ARROW_OPEN;
     idim.arrow_right = ISOGL_DIM_ARROW_CLOSED;
     snprintf(idim.text_left, sizeof(idim.text_left), "L ");
