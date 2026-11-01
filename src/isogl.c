@@ -29,11 +29,14 @@ static isogl_point pan_all = {0.0f, 0.0f};
 static float scale = 1;
 static GLint colorThikness = 0;
 
+/* Active viewport, in framebuffer pixels, origin bottom-left (GL). */
+static isogl_viewport current_viewport = {0, 0, 0, 0};
+static int viewport_valid = 0;
+
 static int selection_active = 0;
 static int selection_crossing = 0;
 static int selection_preview = 1;
 static float selection_rect[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-static float selection_rect_ndc[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 static float selection_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
 // Variabili private per i buffer OpenGL
@@ -48,9 +51,10 @@ GLuint isogl_shader_program_font = 0;
 GLuint isogl_shader_program_pick = 0;
 GLuint isogl_shader_program_font_pick = 0;
 
-// Pick pass resources (lazy).
+// Pick pass resources (lazy; reallocated when the requested extent changes).
 static GLuint pick_fbo = 0;
 static GLuint pick_tex = 0;
+static int pick_extent = 0;
 
 // Selection rectangle overlay.
 static GLuint selection_program = 0;
@@ -152,12 +156,20 @@ static const char *isogl_choose_asset_root(const char *asset_dir) {
     return ".";
 }
 
-static int isogl_init_internal(void) {
+static void isogl_apply_draw_state(void) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_MULTISAMPLE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+}
+
+static int isogl_init_internal(void) {
+    isogl_apply_draw_state();
     glGenVertexArrays(1, &VAO_geometry);
 
     char vs[ISOGL_PATH_MAX];
@@ -269,6 +281,7 @@ void isogl_cleanup(void) {
     VBO_sheet = 0;
     pick_fbo = 0;
     pick_tex = 0;
+    pick_extent = 0;
     selection_vbo = 0;
     selection_vao = 0;
     selection_program = 0;
@@ -517,40 +530,60 @@ void isogl_toggle_color_thickness(void) {
 
 // ===== GESTIONE VIEWPORT E TRASFORMAZIONI =====
 
-void isogl_resize_viewport(SDL_Window* window) {
-    int w = 0, h = 0;
-    SDL_GetWindowSize(window, &w, &h);
-    glViewport(0, 0, w, h);
+isogl_viewport isogl_viewport_from_top_left(int x, int y, int width, int height,
+                                            int framebuffer_height) {
+    isogl_viewport vp;
+    vp.x = x;
+    vp.y = framebuffer_height - y - height;
+    vp.width = width;
+    vp.height = height;
+    return vp;
+}
 
-    if (w <= 0 || h <= 0) return;
+void isogl_set_viewport(const isogl_viewport *viewport) {
+    if (!viewport) {
+        viewport_valid = 0;
+        return;
+    }
+    if (viewport->width <= 0 || viewport->height <= 0) return;
 
-    if (w >= h) {
-        isogl_view_matrix[0] = (float)h / (float)w;
+    current_viewport = *viewport;
+    viewport_valid = 1;
+
+    glViewport(current_viewport.x, current_viewport.y,
+               current_viewport.width, current_viewport.height);
+
+    if (current_viewport.width >= current_viewport.height) {
+        isogl_view_matrix[0] = (float)current_viewport.height /
+                               (float)current_viewport.width;
         isogl_view_matrix[5] = 1.0f;
     } else {
         isogl_view_matrix[0] = 1.0f;
-        isogl_view_matrix[5] = (float)w / (float)h;
+        isogl_view_matrix[5] = (float)current_viewport.width /
+                               (float)current_viewport.height;
     }
 }
 
-// Returns normalised device coordinates (NDC), not world coordinates.
-void isogl_pixel_to_point(SDL_Window *window, isogl_point *pixelP, isogl_point *modelP) {
-    int w = 0, h = 0;
-    SDL_GetWindowSize(window, &w, &h);
+int isogl_get_viewport(isogl_viewport *out) {
+    if (!out || !viewport_valid) return -1;
+    *out = current_viewport;
+    return 0;
+}
 
-    if (w <= 0 || h <= 0) {
-        modelP->x = 0.0f;
-        modelP->y = 0.0f;
-        return;
-    }
+int isogl_begin_frame(void) {
+    if (!viewport_valid) return -1;
+    glViewport(current_viewport.x, current_viewport.y,
+               current_viewport.width, current_viewport.height);
+    isogl_apply_draw_state();
+    return 0;
+}
 
-    if (w >= h) {
-        modelP->x = 2.0f * pixelP->x / h - (float)w / h;
-        modelP->y = -(2.0f * pixelP->y / h - 1.0f);
-    } else {
-        modelP->x = 2.0f * pixelP->x / w - 1.0f;
-        modelP->y = -(2.0f * pixelP->y / w - (float)h / w);
-    }
+// Returns true normalised device coordinates (NDC).
+int isogl_pixel_to_point(float px, float py, isogl_point *ndc) {
+    if (!ndc || !viewport_valid) return -1;
+    ndc->x = 2.0f * px / (float)current_viewport.width - 1.0f;
+    ndc->y = 1.0f - 2.0f * py / (float)current_viewport.height;
+    return 0;
 }
 
 int isogl_ndc_to_world(float ndc_x, float ndc_y, isogl_point *world) {
@@ -571,23 +604,16 @@ int isogl_ndc_to_world(float ndc_x, float ndc_y, isogl_point *world) {
     return 0;
 }
 
-int isogl_screen_to_world(SDL_Window *window, float px, float py, isogl_point *world) {
-    int w = 0, h = 0;
-    SDL_GetWindowSize(window, &w, &h);
-    if (w <= 0 || h <= 0) return -1;
+int isogl_screen_to_world(float px, float py, isogl_point *world) {
+    if (!world || !viewport_valid) return -1;
 
-    float ndc_x = 2.0f * px / (float)w - 1.0f;
-    float ndc_y = 1.0f - 2.0f * py / (float)h;
+    float ndc_x = 2.0f * px / (float)current_viewport.width - 1.0f;
+    float ndc_y = 1.0f - 2.0f * py / (float)current_viewport.height;
     return isogl_ndc_to_world(ndc_x, ndc_y, world);
 }
 
-int isogl_world_to_screen(SDL_Window *window, float wx, float wy,
-                          isogl_point *screen) {
-    if (!screen) return -1;
-
-    int w = 0, h = 0;
-    SDL_GetWindowSize(window, &w, &h);
-    if (w <= 0 || h <= 0) return -1;
+int isogl_world_to_screen(float wx, float wy, isogl_point *screen) {
+    if (!screen || !viewport_valid) return -1;
 
     float ax = isogl_view_matrix[0];
     float ay = isogl_view_matrix[5];
@@ -602,8 +628,8 @@ int isogl_world_to_screen(SDL_Window *window, float wx, float wy,
     float ndc_x = (wx * zoom_x + isogl_model_matrix[12]) * ax;
     float ndc_y = (wy * zoom_y + isogl_model_matrix[13]) * ay;
 
-    screen->x = (ndc_x + 1.0f) * 0.5f * (float)w;
-    screen->y = (1.0f - ndc_y) * 0.5f * (float)h;
+    screen->x = (ndc_x + 1.0f) * 0.5f * (float)current_viewport.width;
+    screen->y = (1.0f - ndc_y) * 0.5f * (float)current_viewport.height;
     return 0;
 }
 
@@ -618,19 +644,6 @@ void isogl_set_selection_rect(float x0, float y0, float x1, float y1,
     selection_rect[3] = y1;
     selection_active = 1;
     selection_crossing = crossing ? 1 : 0;
-
-    GLint vp[4] = {0, 0, 0, 0};
-    glGetIntegerv(GL_VIEWPORT, vp);
-    if (vp[2] > 0 && vp[3] > 0) {
-        selection_rect_ndc[0] =
-            2.0f * (x0 - (float)vp[0]) / (float)vp[2] - 1.0f;
-        selection_rect_ndc[1] =
-            2.0f * (y0 - (float)vp[1]) / (float)vp[3] - 1.0f;
-        selection_rect_ndc[2] =
-            2.0f * (x1 - (float)vp[0]) / (float)vp[2] - 1.0f;
-        selection_rect_ndc[3] =
-            2.0f * (y1 - (float)vp[1]) / (float)vp[3] - 1.0f;
-    }
 
     if (crossing) {
         selection_color[0] = 1.0f;
@@ -676,22 +689,37 @@ int isogl_get_selection_preview(void) {
     return selection_preview;
 }
 
+/*
+ * Convert the viewport-local top-left selection rectangle to NDC
+ * (xmin, ymin, xmax, ymax), computed at draw time so a viewport change takes
+ * effect immediately.
+ */
+static int isogl_selection_rect_ndc(float out[4]) {
+    if (!out || !viewport_valid) return -1;
+
+    float x0 = selection_rect[0];
+    float y0 = selection_rect[1];
+    float x1 = selection_rect[2];
+    float y1 = selection_rect[3];
+
+    out[0] = 2.0f * x0 / (float)current_viewport.width - 1.0f;
+    out[1] = 1.0f - 2.0f * y1 / (float)current_viewport.height;
+    out[2] = 2.0f * x1 / (float)current_viewport.width - 1.0f;
+    out[3] = 1.0f - 2.0f * y0 / (float)current_viewport.height;
+    return 0;
+}
+
 void isogl_draw_selection_overlay(void) {
     if (!selection_active || selection_program == 0) return;
 
-    GLint viewport[4] = {0, 0, 0, 0};
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    if (viewport[2] <= 0 || viewport[3] <= 0) return;
+    float rect[4];
+    if (isogl_selection_rect_ndc(rect) != 0) return;
 
-    float x0 = 2.0f * selection_rect[0] / (float)viewport[2] - 1.0f;
-    float x1 = 2.0f * selection_rect[2] / (float)viewport[2] - 1.0f;
-    float y0 = 2.0f * selection_rect[1] / (float)viewport[3] - 1.0f;
-    float y1 = 2.0f * selection_rect[3] / (float)viewport[3] - 1.0f;
     float vertices[8] = {
-        x0, y0,
-        x1, y0,
-        x1, y1,
-        x0, y1
+        rect[0], rect[1],
+        rect[2], rect[1],
+        rect[2], rect[3],
+        rect[0], rect[3]
     };
 
     if (selection_vao == 0) {
@@ -720,10 +748,9 @@ void isogl_draw_selection_overlay(void) {
 
 // ===== GESTIONE ZOOM E PAN =====
 
-void isogl_handle_zoom(SDL_Window* window, int wheel_y, float mouseX, float mouseY) {
-    isogl_point pixelP = {mouseX, mouseY};
+void isogl_handle_zoom(int wheel_y, float px, float py) {
     isogl_point ndc;
-    isogl_pixel_to_point(window, &pixelP, &ndc);
+    if (isogl_pixel_to_point(px, py, &ndc) != 0) return;
 
     float zoom_old = isogl_model_matrix[0];
     float zoom_new = zoom_old;
@@ -761,34 +788,55 @@ void isogl_handle_zoom(SDL_Window* window, int wheel_y, float mouseX, float mous
     isogl_model_matrix[13] = pan.y;
 }
 
-void isogl_handle_pan(SDL_Window* window, int xrel, int yrel) {
-    int w = 0, h = 0;
-    SDL_GetWindowSize(window, &w, &h);
-    if (w <= 0 || h <= 0) return;
+void isogl_handle_pan(float dx, float dy) {
+    if (!viewport_valid) return;
 
-    float deltaX, deltaY;
+    float m = (float)(current_viewport.width < current_viewport.height
+                          ? current_viewport.width
+                          : current_viewport.height);
+    if (m <= 0.0f) return;
 
-    if (w >= h) {
-        deltaX = (2.0f * xrel) / h;
-        deltaY = -(2.0f * yrel) / h;
-    } else {
-        deltaX = (2.0f * xrel) / w;
-        deltaY = -(2.0f * yrel) / w;
-    }
-
-    isogl_model_matrix[12] += deltaX;
-    isogl_model_matrix[13] += deltaY;
+    isogl_model_matrix[12] += 2.0f * dx / m;
+    isogl_model_matrix[13] -= 2.0f * dy / m;
 }
 
 // ===== RENDERING =====
 
 void isogl_clear(float r, float g, float b, float a) {
-    glClearColor(r, g, b, a);
-    glClear(GL_COLOR_BUFFER_BIT);
-}
+    if (!viewport_valid) return;
 
-void isogl_swap_buffers(SDL_Window* window) {
-    SDL_GL_SwapWindow(window);
+    GLboolean scissor_was_enabled = glIsEnabled(GL_SCISSOR_TEST);
+    GLint scissor_box[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_SCISSOR_BOX, scissor_box);
+
+    int x0 = current_viewport.x;
+    int y0 = current_viewport.y;
+    int x1 = current_viewport.x + current_viewport.width;
+    int y1 = current_viewport.y + current_viewport.height;
+
+    if (scissor_was_enabled) {
+        if (scissor_box[0] > x0) x0 = scissor_box[0];
+        if (scissor_box[1] > y0) y0 = scissor_box[1];
+        int sx1 = scissor_box[0] + scissor_box[2];
+        int sy1 = scissor_box[1] + scissor_box[3];
+        if (sx1 < x1) x1 = sx1;
+        if (sy1 < y1) y1 = sy1;
+    }
+
+    glClearColor(r, g, b, a);
+    if (x1 > x0 && y1 > y0) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x0, y0, x1 - x0, y1 - y0);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+
+    if (scissor_was_enabled) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(scissor_box[0], scissor_box[1],
+                  scissor_box[2], scissor_box[3]);
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
 }
 
 //======================================================================================================
@@ -1281,13 +1329,16 @@ void isogl_draw_vbo_object(isogl_vbo_array *vbo_array, size_t index) {
         glUniform2f(isogl_seg_uniforms.pick_scale, 1.0f, 1.0f);
     if (isogl_seg_uniforms.pick_offset != -1)
         glUniform2f(isogl_seg_uniforms.pick_offset, 0.0f, 0.0f);
+    int sel_on = (selection_active && selection_preview) ? 1 : 0;
+    float sel_rect_ndc[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (sel_on && isogl_selection_rect_ndc(sel_rect_ndc) != 0) sel_on = 0;
+
     if (isogl_seg_uniforms.sel_active != -1)
-        glUniform1i(isogl_seg_uniforms.sel_active,
-                    selection_active && selection_preview);
+        glUniform1i(isogl_seg_uniforms.sel_active, sel_on);
     if (isogl_seg_uniforms.sel_crossing != -1)
         glUniform1i(isogl_seg_uniforms.sel_crossing, selection_crossing);
     if (isogl_seg_uniforms.sel_rect_ndc != -1)
-        glUniform4fv(isogl_seg_uniforms.sel_rect_ndc, 1, selection_rect_ndc);
+        glUniform4fv(isogl_seg_uniforms.sel_rect_ndc, 1, sel_rect_ndc);
     if (isogl_seg_uniforms.sel_color != -1)
         glUniform4fv(isogl_seg_uniforms.sel_color, 1, selection_color);
     if (isogl_seg_uniforms.selected != -1)
@@ -1392,8 +1443,20 @@ static void isogl_cache_pick_uniforms(GLuint program) {
     isogl_pick_u.pick_id = glGetUniformLocation(program, "uPickId");
 }
 
-static int isogl_pick_ensure_resources(void) {
-    if (pick_fbo != 0 && pick_tex != 0) return 0;
+static int isogl_pick_ensure_resources(int extent) {
+    int size = extent * ISOGL_PICK_TEXTURE_SCALE;
+    if (size <= 0) return -1;
+    if (pick_fbo != 0 && pick_tex != 0 && pick_extent == extent) return 0;
+
+    if (pick_fbo != 0) {
+        glDeleteFramebuffers(1, &pick_fbo);
+        pick_fbo = 0;
+    }
+    if (pick_tex != 0) {
+        glDeleteTextures(1, &pick_tex);
+        pick_tex = 0;
+    }
+    pick_extent = 0;
 
     glGenTextures(1, &pick_tex);
     if (pick_tex == 0) return -1;
@@ -1404,7 +1467,7 @@ static int isogl_pick_ensure_resources(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI,
-                 ISOGL_PICK_TEXTURE_SIZE, ISOGL_PICK_TEXTURE_SIZE,
+                 size, size,
                  0, GL_RED_INTEGER, GL_UNSIGNED_INT, NULL);
 
     glGenFramebuffers(1, &pick_fbo);
@@ -1426,6 +1489,7 @@ static int isogl_pick_ensure_resources(void) {
         return -1;
     }
 
+    pick_extent = extent;
     return 0;
 }
 
@@ -1480,19 +1544,18 @@ static size_t isogl_pick_scan_spiral(const GLuint *raw, int size,
     return count;
 }
 
-int isogl_pick_at(SDL_Window *window, isogl_vbo_array *vbo_array,
-                  isogl_string_list *strings,
-                  float px, float py,
+int isogl_pick_at(isogl_vbo_array *vbo_array, isogl_string_list *strings,
+                  float px, float py, int extent_px,
                   uint32_t *out_ids, size_t max_ids, size_t *out_count) {
-    if (!window || (!vbo_array && !strings) || !out_count) return -1;
+    if ((!vbo_array && !strings) || !out_count) return -1;
     if (max_ids > 0 && !out_ids) return -1;
     if (isogl_shader_program_pick == 0) return -1;
+    if (!viewport_valid || extent_px <= 0 || extent_px > 4096) return -1;
 
     *out_count = 0;
 
-    int window_w = 0, window_h = 0;
-    SDL_GetWindowSize(window, &window_w, &window_h);
-    if (window_w <= 0 || window_h <= 0) return -1;
+    const int extent = extent_px;
+    const int size = extent * ISOGL_PICK_TEXTURE_SCALE;
 
     // Save state touched by the offscreen pass.
     GLint prev_fbo = 0;
@@ -1502,12 +1565,16 @@ int isogl_pick_at(SDL_Window *window, isogl_vbo_array *vbo_array,
     GLint prev_array_buffer = 0;
     GLint prev_texture = 0;
     GLint prev_active_texture = GL_TEXTURE0;
+    GLint prev_draw_buffer = 0;
+    GLint prev_read_buffer = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
     glGetIntegerv(GL_VIEWPORT, prev_viewport);
     glGetIntegerv(GL_CURRENT_PROGRAM, &prev_program);
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prev_vao);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prev_array_buffer);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prev_active_texture);
+    glGetIntegerv(GL_DRAW_BUFFER, &prev_draw_buffer);
+    glGetIntegerv(GL_READ_BUFFER, &prev_read_buffer);
     glActiveTexture(GL_TEXTURE0);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_texture);
 
@@ -1517,19 +1584,23 @@ int isogl_pick_at(SDL_Window *window, isogl_vbo_array *vbo_array,
     GLboolean dither = glIsEnabled(GL_DITHER);
     GLboolean line_smooth = glIsEnabled(GL_LINE_SMOOTH);
 
+    GLuint *raw = NULL;
+    uint32_t *distinct = NULL;
     int rc = -1;
 
-    if (isogl_pick_ensure_resources() != 0) goto restore;
+    if (isogl_pick_ensure_resources(extent) != 0) goto restore;
 
-    /* The texture has 2x the resolution of the logical pick box: `extent`
-       screen pixels are stretched over `size` texels. */
-    const int extent = ISOGL_PICK_SIZE;
-    const int size = ISOGL_PICK_TEXTURE_SIZE;
-    float py_gl = (float)window_h - py;
-    float sx = (float)window_w / (float)extent;
-    float sy = (float)window_h / (float)extent;
-    float tx = ((float)window_w - 2.0f * px) / (float)extent;
-    float ty = ((float)window_h - 2.0f * py_gl) / (float)extent;
+    raw = malloc(sizeof(*raw) * (size_t)size * (size_t)size);
+    distinct = malloc(sizeof(*distinct) * (size_t)size * (size_t)size);
+    if (!raw || !distinct) goto restore;
+
+    /* The texture has ISOGL_PICK_TEXTURE_SCALE texels per box pixel: `extent`
+       framebuffer pixels are stretched over `size` texels. */
+    float py_gl = (float)current_viewport.height - py;
+    float sx = (float)current_viewport.width / (float)extent;
+    float sy = (float)current_viewport.height / (float)extent;
+    float tx = ((float)current_viewport.width - 2.0f * px) / (float)extent;
+    float ty = ((float)current_viewport.height - 2.0f * py_gl) / (float)extent;
 
     glBindFramebuffer(GL_FRAMEBUFFER, pick_fbo);
     glViewport(0, 0, size, size);
@@ -1614,13 +1685,11 @@ int isogl_pick_at(SDL_Window *window, isogl_vbo_array *vbo_array,
                                     identity, sx, sy, tx, ty);
     }
 
-    GLuint raw[ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE];
     glReadPixels(0, 0, size, size, GL_RED_INTEGER, GL_UNSIGNED_INT, raw);
 
-    uint32_t distinct[ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE];
+    size_t texels = (size_t)size * (size_t)size;
     size_t distinct_count =
-        isogl_pick_scan_spiral(raw, size, distinct,
-                               ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE);
+        isogl_pick_scan_spiral(raw, size, distinct, texels);
 
     size_t written = distinct_count < max_ids ? distinct_count : max_ids;
     for (size_t i = 0; i < written; ++i) out_ids[i] = distinct[i];
@@ -1629,6 +1698,8 @@ int isogl_pick_at(SDL_Window *window, isogl_vbo_array *vbo_array,
 
 restore:
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
+    glDrawBuffer((GLenum)prev_draw_buffer);
+    glReadBuffer((GLenum)prev_read_buffer);
     glViewport(prev_viewport[0], prev_viewport[1],
                prev_viewport[2], prev_viewport[3]);
     glUseProgram((GLuint)prev_program);
@@ -1643,5 +1714,7 @@ restore:
     if (dither) glEnable(GL_DITHER); else glDisable(GL_DITHER);
     if (line_smooth) glEnable(GL_LINE_SMOOTH); else glDisable(GL_LINE_SMOOTH);
 
+    free(raw);
+    free(distinct);
     return rc;
 }

@@ -506,11 +506,11 @@ void fake_drawing_draw(FakeDrawing *drawing) {
     isogl_symbol_draw_all();
 }
 
-int fake_drawing_pick_symbols(FakeDrawing *drawing, SDL_Window *win,
-                              float px, float py,
+int fake_drawing_pick_symbols(FakeDrawing *drawing,
+                              float px, float py, int extent_px,
                               uint32_t *ids, size_t max, size_t *count) {
     (void)drawing;
-    return isogl_symbol_pick_at(win, px, py, ids, max, count);
+    return isogl_symbol_pick_at(px, py, extent_px, ids, max, count);
 }
 
 int fake_drawing_select_symbols(FakeDrawing *drawing, const isogl_box *query,

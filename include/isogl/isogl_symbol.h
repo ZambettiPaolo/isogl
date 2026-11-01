@@ -43,8 +43,10 @@ int isogl_symbol_destroy(isogl_symbol_id id);
 
 void isogl_symbol_draw_all(void);
 
-/* Returns the distinct symbol IDs visible in the cursor box, centre-out. */
-int isogl_symbol_pick_at(SDL_Window *win, float px, float py,
+/* Returns the distinct symbol IDs visible in the cursor box, centre-out.
+ * px, py are viewport-local framebuffer pixels (origin top-left); extent_px
+ * is the pick box side in framebuffer pixels. */
+int isogl_symbol_pick_at(float px, float py, int extent_px,
                          uint32_t *ids, size_t max, size_t *count);
 
 /*

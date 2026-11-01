@@ -13,11 +13,23 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
   norme. Le tabelle normative stanno in `include/isogl/isogl_style.h`.
 - `apps/isocad`: CAD 2D minimale costruito sopra la libreria. Possiede
   finestra, contesto, documento (layer ed entità) e comandi.
-- C11, SDL2, OpenGL 3.3 core, glad, tomlc99. Nessuna dipendenza da FreeType o
-  Pango: i font sono vettoriali e caricati da TOML.
-- Contratto: l'applicazione crea e distrugge il contesto; la libreria non lo
-  fa. `gladLoadGLLoader()` prima di `isogl_init*`; un solo contesto corrente;
-  nessuna thread-safety; `isogl_cleanup()` idempotente.
+- C11, OpenGL 3.3 core, glad, tomlc99. **SDL2 non è una dipendenza del
+  core**: compare solo nel pacchetto opzionale `hosts/isogl-sdl`, nella demo e
+  nei test GL che hanno bisogno di un contesto. Nessuna dipendenza da FreeType
+  o Pango: i font sono vettoriali e caricati da TOML.
+- Contratto: l'applicazione crea e distrugge contesto e finestra, possiede lo
+  swap e rende corrente il contesto. `gladLoadGLLoader()` prima di
+  `isogl_init*`; un solo contesto corrente; nessuna thread-safety;
+  `isogl_cleanup()` idempotente.
+- Viewport: l'ospite chiama `isogl_set_viewport()` con un rettangolo in pixel
+  di framebuffer (origine GL, basso-sinistra) e `isogl_begin_frame()` dopo il
+  lavoro GL del toolkit. Tutte le altre coordinate in pixel sono **locali al
+  viewport, origine in alto a sinistra**. `isogl_pick_at()` prende anche
+  `extent_px`, in pixel di framebuffer; gli host HiDPI passano
+  `lround(ISOGL_PICK_DEFAULT_EXTENT * dpr)`.
+- Host verificati: SDL2 (`hosts/isogl-sdl`), GTK4 `GtkGLArea`
+  (`examples/gtk4`), Qt6 `QOpenGLWidget` (`examples/qt6`). GTK4 e Qt6 usano i
+  loro contesti EGL nativi: Wayland funziona senza `SDL_CreateWindowFrom`.
 
 Stato: Milestone A. Esistono foglio, linee, cerchi, rettangoli, testo, pattern
 e pesi ISO, zoom/pan, modalità colori-spessore, selezione d’area persistente e
@@ -183,22 +195,37 @@ Regole che ne derivano:
   ~0,5–0,8 KiB; 10.000 stringhe ~6–8 MB di VBO; a scala il limite sono i VBO e
   le draw call, non i byte.
 
-La quota è il caso guida: in memoria `p1`, `p2`, `p3` (orientamento e distanza
-dal primo punto), `testo_prima`, `testo_dopo`. Il valore non è memorizzato: si
-calcola da `|p1 − p2|`. Le coordinate del modello sono in unità documento; la
-scala del foglio governa le grandezze di carta (altezza testo, frecce,
-tolleranze), non il valore misurato. Il generatore produce linee di
-riferimento, linea di quota, punte e un run di testo.
+La quota è il caso guida: in memoria `p1` e `p2` (punti misurati), `p3`
+(punto direzione/lato), `distance` (offset della linea di quota in unità
+documento; 0 = ricavato da `p3`), `text_offset_mm` (posizione del testo
+rispetto al centro, in mm di carta e con segno lungo la linea),
+`text_left`/`text_right` (testo libero prima/dopo il valore) e
+`arrow_left`/`arrow_right` (`NONE`, `OPEN`, `CLOSED`, `TICK`, `DOT`,
+`OPEN_OUTSIDE`, `CLOSED_OUTSIDE`) e `mark_points`. Proporzioni di default:
+testo **2,5 mm**, frecce **2,2 mm** con ampiezza **30°**, pallino **1,5 mm**;
+le linee di riferimento partono **3 mm** dopo il punto misurato. Le varianti
+`*_OUTSIDE` hanno la punta sull’estremo e le gambe fuori dal tratto, quindi
+puntano all’interno; la linea di quota viene estesa di **5 mm** oltre
+quell’estremo per ospitare la freccia. `mark_points` aggiunge un segmento di
+riferimento da **0,5 mm** che parte da `p1`/`p2` verso la linea di quota, prima
+del distacco di 3 mm (circa un pixel alla scala di stampa; la pipeline a linee
+non disegna punti singoli). Il valore non è memorizzato: si calcola da
+`|p1 − p2|` e **non ha unità automatica**; chi vuole “ mm” lo mette in
+`text_right`. Le coordinate del modello sono in unità
+documento; la scala del foglio governa le grandezze di carta (altezza testo,
+frecce, tolleranze), non il valore misurato. Il generatore produce linee di
+riferimento, linea di quota, frecce secondo il tipo scelto e un run di testo.
 
 La prima entità reale è la quota allineata, ora **simbolo isogl**. Il CAD
-costruisce un `IsoglDimensionDesc` (`p1`, `p2`, `p3`, prefisso/unità/suffisso,
-precisione, altezza testo, `pick_text`), chiama
-`cad_add_dimension_symbol` e conserva solo l’`isogl_symbol_id`. La geometria
-pura (`isogl_symbol_geometry`) deriva render e pick; il registry
-(`isogl_symbol`) possiede VBO, stringa, hit/pick e explode. La vecchia
-`CAD_DIMENSION` è stata rimossa dal modello CAD. Il valore si formatta con la
-precisione richiesta; `pick_text = 0` esclude l’OBB del testo dal rettangolo
-lasciandolo cliccabile via pick GPU.
+costruisce ogni volta un `IsoglDimensionDesc` completo (`p1`, `p2`, `p3`,
+`distance`, `text_offset_mm`, `text_left`/`text_right`, `arrow_left`/`right`,
+precisione, altezza testo, `pick_text`), chiama `cad_add_dimension_symbol` e
+conserva solo l’`isogl_symbol_id`. La geometria pura
+(`isogl_symbol_geometry`) deriva render e pick; il registry (`isogl_symbol`)
+possiede VBO, stringa, hit/pick e explode. La vecchia `CAD_DIMENSION` è stata
+rimossa dal modello CAD. Il valore si formatta con la precisione richiesta;
+`pick_text = 0` esclude l’OBB del testo dal rettangolo lasciandolo cliccabile
+via pick GPU.
 
 ## Simboli isogl e confine con il CAD
 
@@ -334,18 +361,24 @@ typedef struct {
     uint32_t entity_id;     /* l'ID opaco che torna dal pick */
 } isogl_pick_item;
 
-int isogl_pick_at(SDL_Window *win, int px, int py,
-                  const isogl_pick_item *items, size_t count,
-                  int radius_px, int max_entities,
-                  uint32_t *out_ids, size_t out_capacity,
-                  size_t *out_count);
+typedef struct {
+    isogl_viewport viewport;      /* pixel di framebuffer, origine GL */
+    float px, py;                 /* locali al viewport, top-left     */
+    int extent_px;                /* lato del box, pixel fisici       */
+    const isogl_pick_item *items;
+    size_t count;
+    uint32_t *out_ids;
+    size_t out_capacity;
+    size_t *out_count;
+} isogl_pick_request;
 ```
 
 L'emitter scrive direttamente nello staging: nessuna display list intermedia.
 `isogl` resta il renderer e non conosce né il kernel né i simboli. Anche il
 pick è entity-agnostic: l'app fornisce i candidati e gli ID; la libreria
-possiede FBO e shader. `radius_px` e `max_entities` sono parametri, non
-costanti. Il `pick_id` è opaco; il testo ne ha uno.
+possiede FBO e shader. `extent_px` è un parametro, non una costante: su HiDPI
+l'host lo scala con il device pixel ratio. Il `pick_id` è opaco; il testo ne ha
+uno.
 
 ## Punti del codice attuale
 
@@ -367,7 +400,7 @@ Riferimenti al commit `05af29c`; verifica i numeri di riga prima di fidarti.
 | `include/isogl/isogl_font.h` | glyph string senza pick ID | campo `pick_id` (fatto) |
 | `shaders/fs_pick.glsl` | nuovo | fragment shader che scrive `uPickId` |
 | `shaders/fs_font_pick.glsl` | nuovo | pick del testo |
-| `src/isogl.c` `isogl_pick_at` | implementato | mancano pre-filtro e topmost |
+| `src/isogl.c` `isogl_pick_at` | implementato con `extent_px` | mancano pre-filtro e topmost |
 
 Nota: `isogl_vbo_array_set_transform()` esiste, ma `isocad` non lo usa; la
 matrice relativa è sempre identità. Con la geometria già in mm di carta, il
@@ -419,14 +452,30 @@ rimozione/undo delle entità e il modello gerarchico del CAD.
   dell'explode fallisce.
 - Copiare `data_structure/` alla lettera: ID globali fissi, primitive senza ID,
   stringhe non liberate e tabelle duplicate sono solo un riferimento.
+- Includere SDL o tipi `SDL_Window*` nel core (`include/isogl/`, `src/`): SDL
+  vive solo in `hosts/isogl-sdl`, nella demo e nei test.
+- Fare lo swap dentro la libreria: lo swap è dell'ospite.
+- Usare le coordinate della finestra invece di quelle locali al viewport.
+- Calcolare NDC della selezione una volta sola e cacharlo: va ricalcolato al
+  draw perché il viewport può cambiare.
+- Far dipendere il parsing del font dal locale del processo: tomlc99 usa
+  `strtod`, quindi in locale con virgola decimale gli `advance` diventano 0 e
+  i glifi si sovrappongono. `isogl_font_load_from_toml()` forza
+  `LC_NUMERIC=C` e ripristina; `test-viewport` copre il caso.
 
 ## Build e test
 
 ```sh
-make                        # build/libisogl.a + build/isogl-demo
+make                        # core + helper SDL + demo
+make lib                    # solo il core, senza SDL installato
+make sdl-host               # solo libisogl_sdl.a
 make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
-make test                   # symbol geometry + symbols + test-core
+make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
+make test                   # symbol geometry + symbols + viewport + test-core
+make check-sdl-free         # nessun riferimento SDL nel core
+make example-qt6            # host Qt6 (opzionale)
+make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)
 make -B SANITIZE=1 test
 ```
 

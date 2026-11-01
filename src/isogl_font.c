@@ -697,12 +697,25 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
         glUniform2f(isogl_font_u.pick_scale, 1.0f, 1.0f);
     if (isogl_font_u.pick_offset != -1)
         glUniform2f(isogl_font_u.pick_offset, 0.0f, 0.0f);
+    int sel_active = 0;
+    float sel_rect_fb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (isogl_get_selection_active() && isogl_get_selection_preview()) {
+        isogl_viewport vp;
+        if (isogl_get_viewport(&vp) == 0) {
+            const float *r = isogl_get_selection_rect();
+            sel_active = 1;
+            /* Local top-left -> framebuffer-absolute bottom-left, the space
+               gl_FragCoord uses in fs_font.glsl. */
+            sel_rect_fb[0] = (float)vp.x + r[0];
+            sel_rect_fb[1] = (float)vp.y + (float)vp.height - r[3];
+            sel_rect_fb[2] = (float)vp.x + r[2];
+            sel_rect_fb[3] = (float)vp.y + (float)vp.height - r[1];
+        }
+    }
     if (isogl_font_u.sel_active != -1)
-        glUniform1i(isogl_font_u.sel_active,
-                    isogl_get_selection_active() &&
-                    isogl_get_selection_preview());
+        glUniform1i(isogl_font_u.sel_active, sel_active);
     if (isogl_font_u.sel_rect != -1)
-        glUniform4fv(isogl_font_u.sel_rect, 1, isogl_get_selection_rect());
+        glUniform4fv(isogl_font_u.sel_rect, 1, sel_rect_fb);
     if (isogl_font_u.sel_color != -1)
         glUniform4fv(isogl_font_u.sel_color, 1, isogl_get_selection_color());
 

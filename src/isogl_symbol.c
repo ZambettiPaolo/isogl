@@ -370,14 +370,14 @@ void isogl_symbol_draw_all(void) {
                            isogl_model_matrix, isogl_view_matrix, identity);
 }
 
-int isogl_symbol_pick_at(SDL_Window *win, float px, float py,
+int isogl_symbol_pick_at(float px, float py, int extent_px,
                          uint32_t *ids, size_t max, size_t *count) {
     if (!symbol_initialized) {
         if (count) *count = 0;
         return -1;
     }
-    return isogl_pick_at(win, &symbol_parts, &symbol_strings,
-                         px, py, ids, max, count);
+    return isogl_pick_at(&symbol_parts, &symbol_strings,
+                         px, py, extent_px, ids, max, count);
 }
 
 int isogl_symbol_get_selected(isogl_symbol_id id) {
