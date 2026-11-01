@@ -52,18 +52,29 @@ colori-spessore e colori-stampa, come in AutoCAD).
   `isogl_init_with_asset_dir()`, dal default di build (`$(DATADIR)`) o da `"."`;
 - solo `ISOGL_VBO_SEGMENT` è implementato.
 
+## Simboli isogl
+
+`libisogl` possiede i simboli (quota, center mark): geometria pura in
+`isogl_symbol_geometry.*`, registry/render/pick in `isogl_symbol.*`. Il CAD
+conserva solo l’ID opaco del simbolo, usa `isogl_symbol_hit/bounds/pick` e, per
+manipolare, `isogl_symbol_explode`, che emette segmenti e run di testo e
+distrugge il simbolo. La geometria CAD resta del CAD: isogl riceve solo VBO e
+stringhe.
+
 ## Build e install
 
 ```sh
 make                     # build/libisogl.a + build/isogl-demo
-make test                # test FBO: stile, segmenti, update, font, cleanup
+make test-symbol-geometry # headless: geometria pura, niente GL/SDL
+make test-symbols         # GL: fake CAD gerarchico + fixture TOML
+make test                 # symbol geometry + symbols + test FBO
 make install PREFIX="$HOME/.local"
 ```
 
 Install layout:
 
 ```
-$PREFIX/include/isogl/{isogl.h,isogl_font.h,isogl_style.h,glad.h,khrplatform.h}
+$PREFIX/include/isogl/{isogl.h,isogl_font.h,isogl_style.h,isogl_symbol.h,isogl_symbol_geometry.h,glad.h,khrplatform.h}
 $PREFIX/lib/libisogl.a
 $PREFIX/lib/pkgconfig/isogl.pc
 $PREFIX/share/isogl/shaders/*.glsl

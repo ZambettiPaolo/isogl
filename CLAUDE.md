@@ -21,8 +21,10 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
 
 Stato: Milestone A. Esistono foglio, linee, cerchi, rettangoli, testo, pattern
 e pesi ISO, zoom/pan, modalità colori-spessore, selezione d’area persistente e
-quota allineata con geometria di render e di pick. Editing, archi, polilinee ed
-export non sono implementati.
+i primi simboli isogl (quota, center mark) con registry, hit/pick/explode.
+L’app usa già riferimenti simbolo al posto della vecchia `CAD_DIMENSION` e ID
+entità monotoni. Editing, archi, polilinee, export e modello CAD gerarchico
+non sono implementati.
 
 Il pick GPU è ora implementato in `isogl_pick_at` (`GL_R32UI`, box logico 8×8
 pixel, texture 16×16 per 2× di definizione, stesso VS/GS e `fs_pick.glsl` per
@@ -37,7 +39,10 @@ e modo dinamico (sinistra→destra window, destra→sinistra crossing). Durante 
 drag la CPU ricalcola il set esatto con `cad_select_rect()` a ogni movimento e
 lo applica al renderer come flag per entità (`cad_selection_apply`):
 `isogl_vbo_object.selected` e `isogl_glyph_string.selected`, tinti dal FS via
-`uSelected`. Il set resta evidenziato dopo il rilascio e nei frame successivi,
+`uSelected`. La selezione è taggata: entità CAD e simboli isogl hanno namespace
+distinti; per i simboli il rettangolo usa `isogl_symbol_hit` e il tint
+`isogl_symbol_set_selected`, senza leggere i loro VBO. Il set resta evidenziato
+dopo il rilascio e nei frame successivi,
 anche dopo pan/zoom; è stato UI, non documento, e va riapplicato per ID dopo un
 rebuild. Il rettangolo (`vs_selection.glsl`/`fs_selection.glsl`) è solo overlay
 rubber-band. Il predicato per segmento nel GS
@@ -52,9 +57,11 @@ per la selezione a rettangolo è calcolato dagli advance reali
 
 ## Decisione architetturale da rispettare
 
-Il generatore di simboli **non è ancora implementato**: è la direzione
-progettuale concordata. Il punto centrale è separare due consumatori del
-documento, invece di metterli in catena.
+Il generatore di simboli è implementato per i **simboli isogl** (quota,
+center mark): geometria pura in `isogl_symbol_geometry.*`, registry GL in
+`isogl_symbol.*`. Il modello CAD gerarchico (Drawing → Group → Primitive) e il
+poligono regolare CAD-side restano la direzione successiva. Il punto centrale è
+separare due consumatori del documento, invece di metterli in catena.
 
 ```
                          ┌──────────────────┐
@@ -157,7 +164,8 @@ Regole che ne derivano:
 - `CadLayer`: nome, colore di stampa, peso e tipo di linea ISO predefiniti.
 - `CadEntity`: linea, cerchio, rettangolo o testo; layer, pattern, peso,
   visibilità, `vbo_id`.
-- `CadDocument`: array di entità, specchio GPU (`isogl_vbo_array` per i
+- `CadDocument`: array di entità con `next_id` monotono, riferimenti ai simboli
+  isogl (`isogl_symbol_id *symbols`), specchio GPU (`isogl_vbo_array` per i
   segmenti, `isogl_string_list` per il testo), font, scala foglio.
 - Ogni entità geometrica ha oggi il proprio VBO. La modifica di un'entità
   ricostruisce solo la sua lista di segmenti e chiama
@@ -173,15 +181,51 @@ scala del foglio governa le grandezze di carta (altezza testo, frecce,
 tolleranze), non il valore misurato. Il generatore produce linee di
 riferimento, linea di quota, punte e un run di testo.
 
-La prima entità reale è la quota allineata (`CAD_DIMENSION`): `CadDimension`
-conserva `p1`, `p2`, `p3`, prefisso/unità/suffisso, precisione, altezza testo
-e `pick_text`. La stessa funzione in `cad.c` (`cad_dimension_geometry`) deriva
-dai parametri sia la geometria di render (linea di quota, riferimenti, punte,
-testo) sia quella di pick (le stesse linee/punte più l’OBB del testo). Il VBO
-e la stringa di testo condividono l’`entity_id`, quindi click e selezione a
-rettangolo restituiscono la quota intera. Il valore si formatta con la
+La prima entità reale è la quota allineata, ora **simbolo isogl**. Il CAD
+costruisce un `IsoglDimensionDesc` (`p1`, `p2`, `p3`, prefisso/unità/suffisso,
+precisione, altezza testo, `pick_text`), chiama
+`cad_add_dimension_symbol` e conserva solo l’`isogl_symbol_id`. La geometria
+pura (`isogl_symbol_geometry`) deriva render e pick; il registry
+(`isogl_symbol`) possiede VBO, stringa, hit/pick e explode. La vecchia
+`CAD_DIMENSION` è stata rimossa dal modello CAD. Il valore si formatta con la
 precisione richiesta; `pick_text = 0` esclude l’OBB del testo dal rettangolo
 lasciandolo cliccabile via pick GPU.
+
+## Simboli isogl e confine con il CAD
+
+Due domini separati:
+
+- **geometria CAD** (oggi flat, futuro Drawing → Group → Primitive): il CAD
+  possiede parametri, gruppi e trasformazioni; l'adapter di rendering produce un
+  VBO di segmenti; isogl non conosce il significato. Il poligono regolare sarà
+  CAD-side, con generatore ed explode del CAD.
+- **simboli isogl** (quota, center mark): isogl possiede record e geometria. Il
+  CAD conserva solo un `isogl_symbol_id` opaco; usa
+  `isogl_symbol_hit/bounds/pick` e, per manipolare, `isogl_symbol_explode`, che
+  emette segmenti e run di testo e distrugge il simbolo. Il CAD crea poi
+  primitive proprie; nessuna lettura dei VBO interni del simbolo.
+
+Implementazione:
+
+- `include/isogl/isogl_symbol_geometry.h`, `src/isogl_symbol_geometry.c`:
+  geometria pura senza GL/SDL per quota e center mark, emitter render e pick,
+  metrica della larghezza testo fornita dal chiamante.
+- `include/isogl/isogl_symbol.h`, `src/isogl_symbol.c`: registry GL con ID
+  monotoni non riusati, VBO/stringhe posseduti dal modulo, draw/pick/hit/
+  bounds/selected e explode transazionale (fallimento dell'emitter = simbolo
+  vivo). `isogl_string_list_remove_by_pick_id` libera la stringa del simbolo.
+- L'app `isocad` usa riferimenti simbolo: `CadDocument` conserva
+  `isogl_symbol_id *symbols`; `cad_add_dimension_symbol` /
+  `cad_add_center_mark_symbol` creano il simbolo e ne registrano l’ID. La
+  selezione è taggata (`CAD_SEL_ENTITY` / `CAD_SEL_SYMBOL`): le entità CAD
+  usano `cad_selection_apply`, i simboli `isogl_symbol_set_selected`, e il
+  rettangolo interroga i simboli con `isogl_symbol_hit`. La demo mostra quota e
+  center mark come simboli.
+- L'ambiente di verifica è `tests/fake_cad.*` (fake CAD gerarchico, non il CAD
+  di produzione) + il disegno strutturato
+  `tests/fixtures/test_drawing.toml`; `tests/test_symbols.c` verifica load,
+  render, pick, hit, selezione, explode e trasferimento al CAD.
+  `tests/test_symbol_geometry.c` è headless.
 
 ## Selezione
 
@@ -307,7 +351,7 @@ Riferimenti al commit `05af29c`; verifica i numeri di riga prima di fidarti.
 | `src/isogl.c:842` | remove con shift dell'array | handle stabili + free-list |
 | `src/isogl.c:954` | una draw call per entità | un draw per pagina; multi-draw solo per range invisibili |
 | `src/isogl.c:1038` | draw di tutti gli oggetti | batching quando il profilo lo chiede |
-| `apps/isocad/src/cad.h` | `CadEntity.id` `uint32_t` | ID stabile per il pick |
+| `apps/isocad/src/cad.h` | `CadEntity.id` `uint32_t` da `next_id` monotono | ID stabile per il pick (fatto) |
 | `include/isogl/isogl.h` | `isogl_vbo_object` senza pick ID | campo `pick_id` (fatto) |
 | `include/isogl/isogl_font.h` | glyph string senza pick ID | campo `pick_id` (fatto) |
 | `shaders/fs_pick.glsl` | nuovo | fragment shader che scrive `uPickId` |
@@ -319,9 +363,10 @@ matrice relativa è sempre identità. Con la geometria già in mm di carta, il
 batch statico non ha bisogno di una matrice per oggetto. La trasformazione
 serve solo per overlay e anteprime.
 
-`CadEntity.id` oggi è `count + 1`: va bene finché non si rimuovono entità. Con
-delete/undo serve un contatore monotono, altrimenti un ID può essere riusato e
-il pick restituisce l'entità sbagliata.
+`CadDocument.next_id` assegna ID monotoni alle entità CAD: non viene riusato e
+non dipende più da `count + 1`. I simboli isogl hanno un namespace separato
+(`isogl_symbol_id`, monotono con tombstones). Resta da implementare la
+rimozione/undo delle entità e il modello gerarchico del CAD.
 
 ## Ordine di lavoro consigliato
 
@@ -334,9 +379,10 @@ il pick restituisce l'entità sbagliata.
    drag sinistro con start in mm, highlight GPU e query CPU
    `cad_select_rect`. Test: interno del cerchio, angolo vuoto di una diagonale,
    tratteggio, due entità sovrapposte.
-5. Prima entità reale: la quota. La quota allineata è implementata in `cad.c`
-   (`cad_add_dimension`, `cad_dimension_geometry`); l’estrazione di un modulo
-   `symgen` separato e il testo incrementale restano da fare.
+5. Prima entità reale: la quota. È implementata come simbolo isogl, con
+   generatore puro condiviso, registry, explode e trasferimento al CAD. L'app
+   usa riferimenti simbolo e selezione taggata. Restano il modello CAD
+   gerarchico e il poligono regolare CAD-side.
 6. Pagine VBO solo quando il profilo mostra che le draw call per entità sono
    il collo di bottiglia. Fino ad allora resta un VBO per entità: il generatore
    non dipende dal backend. Il batching non è per stile (lo stile è per
@@ -355,18 +401,29 @@ il pick restituisce l'entità sbagliata.
 - Lasciare 96 segmenti fissi per ogni cerchio.
 - Introdurre FreeType/Pango o nuove dipendenze senza necessità.
 - Assumere thread-safety: lo stato è singleton e legato al contesto corrente.
+- Far leggere al CAD i VBO/segmenti interni di un simbolo isogl: solo
+  hit/bounds/pick/explode.
+- Mettere simboli nel CAD o semantica CAD in isogl.
+- Riusare l'ID di un simbolo distrutto o distruggerlo se l'emitter
+  dell'explode fallisce.
+- Copiare `data_structure/` alla lettera: ID globali fissi, primitive senza ID,
+  stringhe non liberate e tabelle duplicate sono solo un riferimento.
 
 ## Build e test
 
 ```sh
-make                 # build/libisogl.a + build/isogl-demo
-make test            # test FBO: richiede un contesto OpenGL
+make                        # build/libisogl.a + build/isogl-demo
+make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
+make test-symbols           # GL: fake CAD gerarchico + fixture TOML
+make test                   # symbol geometry + symbols + test-core
 make -B SANITIZE=1 test
 ```
 
-I test attuali di `tests/test_core.c` richiedono un contesto GL. I nuovi test
-del kernel e del generatore devono poter girare senza finestra: è un vantaggio
-della separazione, non un dettaglio.
+`tests/test_symbol_geometry.c` gira senza finestra e senza linkare SDL/GL.
+`tests/test_symbols.c` usa un contesto GL (Xvfb in CI) e il disegno
+strutturato `tests/fixtures/test_drawing.toml`; il fake CAD
+`tests/fake_cad.*` non è il CAD di produzione. I test di `tests/test_core.c`
+richiedono ancora un contesto GL.
 
 ## Riferimenti
 

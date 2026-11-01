@@ -40,6 +40,14 @@ typedef struct {
     float y;
 } isogl_point;
 
+/* Axis-aligned box in model/document units. */
+typedef struct {
+    double xmin;
+    double ymin;
+    double xmax;
+    double ymax;
+} isogl_box;
+
 
 typedef struct {
     int num;

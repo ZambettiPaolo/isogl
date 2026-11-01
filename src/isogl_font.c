@@ -669,6 +669,29 @@ void isogl_draw_string_list_pick(isogl_string_list* string_list, GLuint shader_p
     glUseProgram(0);
 }
 
+int isogl_string_list_remove_by_pick_id(isogl_string_list *list,
+                                        uint32_t pick_id) {
+    if (!list) return -1;
+
+    for (uint32_t i = 0; i < list->glyph_string_count; ++i) {
+        if (list->glyph_strings[i].pick_id != pick_id) continue;
+
+        isogl_glyph_string *s = &list->glyph_strings[i];
+        free(s->text);
+        free(s->polyline_indices);
+        free(s->first);
+        free(s->count);
+        if (s->vbo != 0) glDeleteBuffers(1, &s->vbo);
+
+        for (uint32_t j = i; j + 1 < list->glyph_string_count; ++j) {
+            list->glyph_strings[j] = list->glyph_strings[j + 1];
+        }
+        list->glyph_string_count--;
+        return 0;
+    }
+    return 1;
+}
+
 void isogl_free_glyph_string(isogl_glyph_string* glyph_string) {
     if (!glyph_string) return;
 

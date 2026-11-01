@@ -912,7 +912,7 @@ glReadPixels(0, 0, 5, 5, GL_RED_INTEGER, GL_UNSIGNED_INT, ids);</code></pre>
     </div>
     <p>Una quota è il caso che giustifica tutto lo strato: cinque campi in memoria, decine di segmenti a video. Il generatore calcola il valore misurato da <code>|p1 − p2|</code> in unità documento (la scala del foglio governa testo, pesi e tolleranze); compone <code>testo_prima + valore + testo_dopo</code>, dispone le linee di riferimento con gli scostamenti ISO, e mette il testo in un run separato.</p>
     <p>Il testo non è un insieme di segmenti: è un oggetto della pipeline font. Per questo il contratto dell’emitter ha due callback, <code>polyline</code> e <code>text</code>, e non una sola lista di vertici. La quota inoltre deve poter assegnare uno stile diverso ai suoi sotto-elementi: la linea di quota segue il layer, le punte e il testo hanno vincoli propri. Oggi <code>cad_vertex()</code> prende pattern e peso dall’entità per tutti i vertici; va spostato a un parametro per polilinea.</p>
-    <p><strong>Stato:</strong> la quota allineata è implementata in <code>cad.c</code> (<code>CAD_DIMENSION</code>). La stessa funzione (<code>cad_dimension_geometry</code>) deriva dai parametri il render (linea di quota, riferimenti, punte, testo) e la geometria di pick (le stesse linee/punte più l’OBB del testo). Il VBO e la stringa condividono l’<code>entity_id</code>; la selezione a rettangolo usa window = tutte le primitive contenute, crossing = almeno una, e <code>pick_text = 0</code> esclude l’OBB del testo dal rettangolo lasciandolo cliccabile. Restano da estrarre un modulo <code>symgen</code> separato e il testo incrementale.</p>
+    <p><strong>Stato:</strong> la geometria della quota è nel modulo puro condiviso <code>isogl_symbol_geometry.*</code>; il registry/render/pick/explode dei simboli isogl è in <code>isogl_symbol.*</code>. L’app usa già riferimenti simbolo (<code>CadDocument.symbols</code>) e selezione taggata; la vecchia <code>CAD_DIMENSION</code> è stata rimossa. Il VBO e la stringa del simbolo condividono il suo ID; la selezione a rettangolo usa window = tutte le primitive contenute, crossing = almeno una, e <code>pick_text = 0</code> esclude l’OBB del testo dal rettangolo lasciandolo cliccabile. L’ambiente <code>tests/fake_cad.*</code> + <code>tests/fixtures/test_drawing.toml</code> verifica il trasferimento al CAD; il poligono attende il modello gerarchico.</p>
 
     <figure>
       <span class="fig-label">Fig. 07 · dati e disegno</span>
@@ -999,7 +999,7 @@ int isogl_pick_at(SDL_Window *win, int px, int py,
       <li><span><strong><code>entity_bounds</code> e indice AABB</strong>Grid sul foglio in mm; broad phase misurabile.</span></li>
       <li><span><strong><code>entity_hit</code> per tipo</strong>Contenuta e attraversante, con test dedicati per cerchio, arco, testo e quota.</span></li>
       <li><span><strong>Pick click/hover</strong>FBO 16×16 (box 8×8) <code>GL_R32UI</code>, <code>pick_id</code> per draw item, pre-filtro di distanza dal layout, raggio e soglia configurabili. Test: interno del cerchio, angolo vuoto di una diagonale, tratteggio, due entità sovrapposte.</span></li>
-      <li><span><strong>Prima entità reale: la quota</strong>Quota allineata implementata in <code>cad.c</code> con geometria di render e di pick; restano l’estrazione di un modulo <code>symgen</code> separato e il testo incrementale al posto del rebuild globale.</span></li>
+      <li><span><strong>Prima entità reale: la quota</strong>Quota allineata implementata come simbolo isogl, con geometria pura condivisa, registry, pick e explode; l’app usa riferimenti simbolo e selezione taggata. Restano il modello CAD gerarchico, il poligono CAD-side e il testo incrementale.</span></li>
       <li><span><strong>Pagine VBO</strong>Solo quando il profilo mostra che le draw call per entità sono il collo di bottiglia. Il batching non è per stile e non fonde le entità: tiene solo i loro range in un pool.</span></li>
     </ol>
 
@@ -1029,14 +1029,14 @@ int isogl_pick_at(SDL_Window *win, int px, int py,
           <tr><td>cad.c:237</td><td>Rebuild globale del testo</td><td>Testo aggiornato per entità</td></tr>
           <tr><td>isogl.c:954</td><td>Una draw call per entità</td><td>Un draw per pagina; multi-draw solo per range invisibili</td></tr>
           <tr><td>isogl.c:842</td><td>Rimozione con shift dell’array</td><td>Handle stabili e free-list</td></tr>
-          <tr><td>cad.h</td><td><code>CadEntity.id</code> <code>uint32_t</code></td><td>ID stabile per il pick</td></tr>
+          <tr><td>cad.h</td><td><code>CadEntity.id</code> da <code>next_id</code> monotono</td><td>ID stabile per il pick (fatto)</td></tr>
           <tr><td>isogl.h</td><td><code>isogl_vbo_object</code> senza pick ID</td><td>Campo <code>pick_id</code> opaco</td></tr>
           <tr><td>isogl_font.h</td><td>Glyph string senza pick ID</td><td>Campo <code>pick_id</code></td></tr>
           <tr><td>isogl.c</td><td>Draw a colore</td><td>FBO 16×16 + <code>uPickMode</code></td></tr>
         </tbody>
       </table>
     </div>
-    <p><code>CadEntity.id</code> oggi è <code>count + 1</code>: va bene finché non si rimuovono entità. Con delete/undo serve un contatore monotono, altrimenti un ID può essere riusato e il pick restituisce l’entità sbagliata.</p>
+    <p><code>CadDocument.next_id</code> assegna ID monotoni alle entità CAD, senza riuso. I simboli isogl hanno un namespace separato (<code>isogl_symbol_id</code>, monotono con tombstones). Restano da implementare removal/undo delle entità e il modello CAD gerarchico.</p>
   </section>
 </main>
 

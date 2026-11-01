@@ -23,7 +23,8 @@ static CadEntity *cad_push_entity(CadDocument *doc, CadEntityType type, int laye
 
     CadEntity *entity = &doc->entities[doc->count];
     memset(entity, 0, sizeof(*entity));
-    entity->id = (uint32_t)doc->count + 1;
+    if (doc->next_id == 0) doc->next_id = 1;
+    entity->id = doc->next_id++;
     entity->type = type;
     if (layer < 0) layer = 0;
     if (doc->layer_count > 0 && layer >= doc->layer_count) layer = doc->layer_count - 1;
@@ -156,25 +157,7 @@ static void cad_obb_corners(float x, float y, float w, float h, float angle,
     }
 }
 
-/* ---- Dimension geometry: parameters -> render and pick primitives ------- */
-
-#define CAD_DIM_ARROW_MM 3.5
-#define CAD_DIM_EXT_MM 2.0
-#define CAD_DIM_TEXT_GAP_MM 1.0
-
-typedef struct {
-    double ax, ay;          /* dimension line A */
-    double bx, by;          /* dimension line B */
-    double e1x, e1y;        /* extension line 1 end (p1 -> beyond A) */
-    double e2x, e2y;        /* extension line 2 end (p2 -> beyond B) */
-    double arrow[4][4];     /* four arrow legs */
-    int arrow_count;
-    double text_x, text_y;  /* centred baseline origin */
-    double text_angle;
-    double text_width;      /* model units */
-    double text_height;     /* model units */
-    char text[128];
-} CadDimensionGeometry;
+/* ---- CAD dimension adapter around the shared symbol geometry ----------- */
 
 static double cad_text_model_width(const CadDocument *doc, const char *text,
                                    double height_mm) {
@@ -187,121 +170,6 @@ static double cad_text_model_width(const CadDocument *doc, const char *text,
 
     double advance = isogl_font_text_advance(doc->font, text);
     return advance * height_mm / (font_height * global_scale);
-}
-
-static void cad_dimension_text(const CadDimension *d, char *out,
-                               size_t out_size) {
-    double len = hypot(d->x1 - d->x0, d->y1 - d->y0);
-    int precision = d->precision;
-    if (precision < 0) precision = 0;
-    if (precision > 6) precision = 6;
-    snprintf(out, out_size, "%s%.*f%s%s", d->prefix, precision, len,
-             d->unit, d->suffix);
-}
-
-static int cad_dimension_geometry(const CadDocument *doc,
-                                  const CadDimension *d,
-                                  CadDimensionGeometry *g) {
-    if (!doc || !d || !g) return -1;
-
-    double dx = d->x1 - d->x0;
-    double dy = d->y1 - d->y0;
-    double len = hypot(dx, dy);
-    if (len <= 1e-9) return -1;
-
-    double ux = dx / len;
-    double uy = dy / len;
-    double nx = -uy;
-    double ny = ux;
-
-    /* Project p1 and p2 on the line through p3 parallel to p1-p2. */
-    double t1 = (d->x0 - d->px) * ux + (d->y0 - d->py) * uy;
-    double t2 = (d->x1 - d->px) * ux + (d->y1 - d->py) * uy;
-    double ax = d->px + t1 * ux;
-    double ay = d->py + t1 * uy;
-    double bx = d->px + t2 * ux;
-    double by = d->py + t2 * uy;
-
-    /* p3 side decides the extension-line direction. */
-    double side = (d->px - d->x0) * nx + (d->py - d->y0) * ny;
-    double sign = side >= 0.0 ? 1.0 : -1.0;
-
-    double scale = doc->sheet_scale > 0.0 ? (double)doc->sheet_scale : 1.0;
-    double overshoot = CAD_DIM_EXT_MM / scale;
-    double arrow = CAD_DIM_ARROW_MM / scale;
-    double max_arrow = len * 0.45;
-    if (arrow > max_arrow) arrow = max_arrow;
-    double text_gap = CAD_DIM_TEXT_GAP_MM / scale;
-    double text_height_mm = d->text_height_mm > 0.0 ? d->text_height_mm : 3.5;
-
-    g->ax = ax;
-    g->ay = ay;
-    g->bx = bx;
-    g->by = by;
-    g->e1x = ax + sign * overshoot * nx;
-    g->e1y = ay + sign * overshoot * ny;
-    g->e2x = bx + sign * overshoot * nx;
-    g->e2y = by + sign * overshoot * ny;
-
-    double ca = cos(M_PI / 6.0);
-    double sa = sin(M_PI / 6.0);
-    g->arrow[0][0] = ax;
-    g->arrow[0][1] = ay;
-    g->arrow[0][2] = ax + arrow * (ca * ux + sa * nx);
-    g->arrow[0][3] = ay + arrow * (ca * uy + sa * ny);
-    g->arrow[1][0] = ax;
-    g->arrow[1][1] = ay;
-    g->arrow[1][2] = ax + arrow * (ca * ux - sa * nx);
-    g->arrow[1][3] = ay + arrow * (ca * uy - sa * ny);
-    g->arrow[2][0] = bx;
-    g->arrow[2][1] = by;
-    g->arrow[2][2] = bx - arrow * (ca * ux + sa * nx);
-    g->arrow[2][3] = by - arrow * (ca * uy + sa * ny);
-    g->arrow[3][0] = bx;
-    g->arrow[3][1] = by;
-    g->arrow[3][2] = bx - arrow * (ca * ux - sa * nx);
-    g->arrow[3][3] = by - arrow * (ca * uy - sa * ny);
-    g->arrow_count = 4;
-
-    cad_dimension_text(d, g->text, sizeof(g->text));
-    g->text_height = text_height_mm / scale;
-    g->text_width = cad_text_model_width(doc, g->text, text_height_mm);
-
-    double mx = 0.5 * (ax + bx);
-    double my = 0.5 * (ay + by);
-    double angle = atan2(uy, ux);
-    if (angle > M_PI / 2.0) angle -= M_PI;
-    if (angle < -M_PI / 2.0) angle += M_PI;
-    g->text_angle = angle;
-
-    double tx = cos(angle);
-    double ty = sin(angle);
-    double tnx = -ty;
-    double tny = tx;
-    g->text_x = mx - 0.5 * g->text_width * tx + text_gap * tnx;
-    g->text_y = my - 0.5 * g->text_width * ty + text_gap * tny;
-    return 0;
-}
-
-/* One pick segment: it must be contained for window, it may intersect for
- * crossing.  The caller starts `contained` at 1. */
-static void cad_pick_segment(double ax, double ay, double bx, double by,
-                             double xmin, double ymin, double xmax, double ymax,
-                             int *contained, int *intersects) {
-    if (*contained &&
-        (!cad_point_in_rect((float)ax, (float)ay, (float)xmin, (float)ymin,
-                            (float)xmax, (float)ymax) ||
-         !cad_point_in_rect((float)bx, (float)by, (float)xmin, (float)ymin,
-                            (float)xmax, (float)ymax))) {
-        *contained = 0;
-    }
-    if (!*intersects &&
-        cad_segment_intersects_rect((float)ax, (float)ay,
-                                    (float)bx, (float)by,
-                                    (float)xmin, (float)ymin,
-                                    (float)xmax, (float)ymax)) {
-        *intersects = 1;
-    }
 }
 
 static int cad_point_in_obb(float px, float py, const float c[4][2]) {
@@ -447,51 +315,6 @@ void cad_select_rect(const CadDocument *doc,
                 }
                 break;
             }
-            case CAD_DIMENSION: {
-                CadDimensionGeometry g;
-                if (cad_dimension_geometry(doc, &e->geom.dimension, &g) != 0) {
-                    break;
-                }
-
-                is_contained = 1;
-                intersects = 0;
-
-                cad_pick_segment(g.ax, g.ay, g.bx, g.by,
-                                 xmin, ymin, xmax, ymax,
-                                 &is_contained, &intersects);
-                cad_pick_segment(e->geom.dimension.x0, e->geom.dimension.y0,
-                                 g.e1x, g.e1y,
-                                 xmin, ymin, xmax, ymax,
-                                 &is_contained, &intersects);
-                cad_pick_segment(e->geom.dimension.x1, e->geom.dimension.y1,
-                                 g.e2x, g.e2y,
-                                 xmin, ymin, xmax, ymax,
-                                 &is_contained, &intersects);
-                for (int k = 0; k < g.arrow_count; ++k) {
-                    cad_pick_segment(g.arrow[k][0], g.arrow[k][1],
-                                     g.arrow[k][2], g.arrow[k][3],
-                                     xmin, ymin, xmax, ymax,
-                                     &is_contained, &intersects);
-                }
-
-                if (e->geom.dimension.pick_text) {
-                    float corners[4][2];
-                    cad_obb_corners((float)g.text_x, (float)g.text_y,
-                                    (float)g.text_width, (float)g.text_height,
-                                    (float)g.text_angle, corners);
-                    for (int k = 0; k < 4; ++k) {
-                        if (!cad_point_in_rect(corners[k][0], corners[k][1],
-                                               xmin, ymin, xmax, ymax)) {
-                            is_contained = 0;
-                        }
-                    }
-                    if (cad_obb_intersects_rect(corners, xmin, ymin,
-                                                xmax, ymax)) {
-                        intersects = 1;
-                    }
-                }
-                break;
-            }
             default:
                 break;
         }
@@ -521,6 +344,7 @@ void cad_selection_clear(CadDocument *doc) {
 int cad_document_init(CadDocument *doc, isogl_font_data *font, float sheet_scale) {
     if (!doc) return -1;
     memset(doc, 0, sizeof(*doc));
+    doc->next_id = 1;
     doc->font = font;
     doc->sheet_scale = sheet_scale > 0.0f ? sheet_scale : 1.0f;
 
@@ -565,12 +389,95 @@ int cad_document_init(CadDocument *doc, isogl_font_data *font, float sheet_scale
 
 void cad_document_free(CadDocument *doc) {
     if (!doc) return;
+
+    /* Symbols are isogl-owned; the document owns only their references. */
+    for (size_t i = 0; i < doc->symbol_count; ++i) {
+        isogl_symbol_destroy(doc->symbols[i]);
+    }
+    free(doc->symbols);
+    doc->symbols = NULL;
+    doc->symbol_count = 0;
+    doc->symbol_capacity = 0;
+
     isogl_string_list_free(&doc->strings);
     isogl_vbo_array_free(&doc->parts);
     free(doc->entities);
     doc->entities = NULL;
     doc->count = 0;
     doc->capacity = 0;
+}
+
+int cad_document_add_symbol(CadDocument *doc, isogl_symbol_id symbol) {
+    if (!doc || symbol == 0) return -1;
+
+    if (doc->symbol_count == doc->symbol_capacity) {
+        size_t capacity = doc->symbol_capacity ? doc->symbol_capacity * 2 : 8;
+        isogl_symbol_id *grown =
+            realloc(doc->symbols, capacity * sizeof(*grown));
+        if (!grown) return -1;
+        doc->symbols = grown;
+        doc->symbol_capacity = capacity;
+    }
+
+    doc->symbols[doc->symbol_count++] = symbol;
+    return 0;
+}
+
+static int cad_symbol_style(CadDocument *doc, int layer,
+                            uint8_t *pattern, uint8_t *weight,
+                            uint8_t *layer_out, float color[4]) {
+    if (!doc || doc->layer_count <= 0) return -1;
+
+    int index = layer;
+    if (index < 0) index = 0;
+    if (index >= doc->layer_count) index = doc->layer_count - 1;
+
+    const CadLayer *l = &doc->layers[index];
+    *pattern = (uint8_t)l->default_pattern;
+    *weight = (uint8_t)l->default_weight;
+    *layer_out = (uint8_t)index;
+    memcpy(color, l->color, sizeof(float) * 4);
+    return index;
+}
+
+isogl_symbol_id cad_add_dimension_symbol(CadDocument *doc, int layer,
+                                         const IsoglDimensionDesc *desc) {
+    if (!doc || !desc) return 0;
+
+    IsoglDimensionDesc d = *desc;
+    if (cad_symbol_style(doc, layer, &d.pattern, &d.weight, &d.layer,
+                         d.color) < 0) {
+        return 0;
+    }
+    d.sheet_scale = doc->sheet_scale;
+
+    isogl_symbol_id id = isogl_symbol_create_dimension(&d);
+    if (id == 0) return 0;
+    if (cad_document_add_symbol(doc, id) != 0) {
+        isogl_symbol_destroy(id);
+        return 0;
+    }
+    return id;
+}
+
+isogl_symbol_id cad_add_center_mark_symbol(CadDocument *doc, int layer,
+                                           const IsoglCenterMarkDesc *desc) {
+    if (!doc || !desc) return 0;
+
+    IsoglCenterMarkDesc d = *desc;
+    if (cad_symbol_style(doc, layer, &d.pattern, &d.weight, &d.layer,
+                         d.color) < 0) {
+        return 0;
+    }
+    d.sheet_scale = doc->sheet_scale;
+
+    isogl_symbol_id id = isogl_symbol_create_center_mark(&d);
+    if (id == 0) return 0;
+    if (cad_document_add_symbol(doc, id) != 0) {
+        isogl_symbol_destroy(id);
+        return 0;
+    }
+    return id;
 }
 
 uint32_t cad_add_line(CadDocument *doc, int layer, isogl_line_type pattern,
@@ -700,90 +607,6 @@ void cad_document_rebuild_text(CadDocument *doc) {
                                      entity->geom.label.height, doc->sheet_scale,
                                      entity->geom.label.angle, doc->font,
                                      entity->id);
-        } else if (entity->type == CAD_DIMENSION) {
-            CadDimensionGeometry g;
-            if (cad_dimension_geometry(doc, &entity->geom.dimension, &g) != 0) {
-                continue;
-            }
-
-            isogl_glyph_string *string =
-                isogl_create_glyph_string(g.text, doc->font);
-            if (!string) continue;
-
-            double height_mm = entity->geom.dimension.text_height_mm > 0.0
-                             ? entity->geom.dimension.text_height_mm : 3.5;
-            isogl_string_list_append(&doc->strings, string,
-                                     (float)g.text_x, (float)g.text_y,
-                                     (float)height_mm, doc->sheet_scale,
-                                     (float)g.text_angle, doc->font,
-                                     entity->id);
         }
     }
-}
-
-void cad_dimension_init(CadDimension *dim) {
-    if (!dim) return;
-    memset(dim, 0, sizeof(*dim));
-    dim->text_height_mm = 3.5;
-    dim->precision = 1;
-    snprintf(dim->unit, sizeof(dim->unit), " mm");
-    dim->pick_text = 1;
-}
-
-static void cad_push_dimension_segment(isogl_vertex *vertices, size_t *count,
-                                       const CadDocument *doc,
-                                       const CadEntity *entity,
-                                       double x0, double y0,
-                                       double x1, double y1) {
-    if (*count + 2 > 14) return;
-
-    double len = hypot(x1 - x0, y1 - y0);
-    vertices[*count] = cad_vertex(doc, entity, (float)x0, (float)y0, 0.0f);
-    vertices[*count + 1] = cad_vertex(doc, entity, (float)x1, (float)y1,
-                                      (float)len);
-    *count += 2;
-}
-
-uint32_t cad_add_dimension(CadDocument *doc, int layer,
-                           const CadDimension *dim) {
-    if (!doc || !dim) return 0;
-
-    CadDimensionGeometry g;
-    if (cad_dimension_geometry(doc, dim, &g) != 0) return 0;
-
-    int layer_index = layer;
-    if (layer_index < 0) layer_index = 0;
-    if (doc->layer_count > 0 && layer_index >= doc->layer_count) {
-        layer_index = doc->layer_count - 1;
-    }
-
-    /* Dimension and extension lines follow the layer. */
-    isogl_line_type pattern = doc->layers[layer_index].default_pattern;
-    isogl_line_weight weight = doc->layers[layer_index].default_weight;
-
-    CadEntity *entity = cad_push_entity(doc, CAD_DIMENSION, layer_index,
-                                        pattern, weight);
-    if (!entity) return 0;
-
-    entity->geom.dimension = *dim;
-
-    /* 7 segments: dimension line, 2 extension lines, 4 arrow legs. */
-    isogl_vertex vertices[14];
-    size_t count = 0;
-
-    cad_push_dimension_segment(vertices, &count, doc, entity,
-                               g.ax, g.ay, g.bx, g.by);
-    cad_push_dimension_segment(vertices, &count, doc, entity,
-                               dim->x0, dim->y0, g.e1x, g.e1y);
-    cad_push_dimension_segment(vertices, &count, doc, entity,
-                               dim->x1, dim->y1, g.e2x, g.e2y);
-    for (int i = 0; i < g.arrow_count; ++i) {
-        cad_push_dimension_segment(vertices, &count, doc, entity,
-                                   g.arrow[i][0], g.arrow[i][1],
-                                   g.arrow[i][2], g.arrow[i][3]);
-    }
-
-    cad_upload_entity(doc, entity, vertices, count);
-    cad_document_rebuild_text(doc);
-    return entity->id;
 }

@@ -117,6 +117,13 @@ bool isogl_string_list_append(isogl_string_list* list, isogl_glyph_string* glyph
 int isogl_string_list_apply_selection(isogl_string_list* list,
                                       const uint32_t* entity_ids, size_t count);
 
+/*
+ * Remove the string whose pick_id matches, freeing its CPU arrays and VBO.
+ * Returns 0 on success, 1 if not found, -1 on invalid arguments.
+ */
+int isogl_string_list_remove_by_pick_id(isogl_string_list* list,
+                                        uint32_t pick_id);
+
 // Free every string in the list, including their CPU arrays and VBOs.
 void isogl_string_list_free(isogl_string_list* list);
 

@@ -16,6 +16,7 @@
 static void shutdown_all(SDL_Window *window, SDL_GLContext context,
                          CadDocument *doc, isogl_font_data *font) {
     if (doc) cad_document_free(doc);
+    isogl_symbol_cleanup();
     isogl_font_free_data(font);
     isogl_cleanup();
     if (context) SDL_GL_DeleteContext(context);
@@ -48,9 +49,10 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     cad_add_text(doc, 3, sheet_w - margin - 80.0f, margin + 35.0f, 5.0f, 0.0f,
                  "isocad - A3 1:1");
 
-    /* Aligned dimension of the circle diameter, below the circle. */
-    CadDimension dim;
-    cad_dimension_init(&dim);
+    /* Aligned dimension of the circle diameter, below the circle.
+       This is an isogl-owned symbol, not a CAD entity. */
+    IsoglDimensionDesc dim;
+    memset(&dim, 0, sizeof(dim));
     dim.x0 = sheet_w * 0.5f - 60.0f;
     dim.y0 = sheet_h * 0.5f;
     dim.x1 = sheet_w * 0.5f + 60.0f;
@@ -59,8 +61,18 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     dim.py = dim.y0 - 55.0f;
     dim.text_height_mm = 5.0;
     dim.precision = 1;
+    dim.pick_text = 1;
     snprintf(dim.prefix, sizeof(dim.prefix), "\xC3\x98 ");
-    cad_add_dimension(doc, 2, &dim);
+    snprintf(dim.unit, sizeof(dim.unit), " mm");
+    cad_add_dimension_symbol(doc, 2, &dim);
+
+    /* Center mark at the circle centre: a second isogl symbol type. */
+    IsoglCenterMarkDesc mark;
+    memset(&mark, 0, sizeof(mark));
+    mark.cx = sheet_w * 0.5f;
+    mark.cy = sheet_h * 0.5f;
+    mark.size_mm = 8.0;
+    cad_add_center_mark_symbol(doc, 0, &mark);
 }
 
 static void pick_and_print(CadDocument *doc, SDL_Window *window, int x, int y,
@@ -70,26 +82,43 @@ static void pick_and_print(CadDocument *doc, SDL_Window *window, int x, int y,
 
     if (isogl_pick_at(window, &doc->parts, &doc->strings,
                       (float)x, (float)y,
-                      ids, sizeof(ids) / sizeof(ids[0]), &count) != 0) {
-        printf("pick at (%d,%d): errore\n", x, y);
-        fflush(stdout);
-        return;
+                      ids, sizeof(ids) / sizeof(ids[0]), &count) == 0) {
+        printf("pick at (%d,%d): %zu entity id(s):", x, y, count);
+        for (size_t i = 0; i < count; ++i) printf(" %u", ids[i]);
+        if (count > max_entities) {
+            printf(" — ambiguo (> %zu), zoom in", max_entities);
+        }
+        printf("\n");
+    } else {
+        printf("pick at (%d,%d): errore entità\n", x, y);
     }
 
-    printf("pick at (%d,%d): %zu id(s):", x, y, count);
-    for (size_t i = 0; i < count; ++i) {
-        printf(" %u", ids[i]);
-    }
-    if (count > max_entities) {
-        printf(" — ambiguo (> %zu), zoom in\n", max_entities);
-    } else {
+    uint32_t symbol_ids[64];
+    size_t symbol_count = 0;
+    if (isogl_symbol_pick_at(window, (float)x, (float)y,
+                             symbol_ids, 64, &symbol_count) == 0 &&
+        symbol_count > 0) {
+        printf("pick at (%d,%d): %zu symbol id(s):", x, y, symbol_count);
+        for (size_t i = 0; i < symbol_count; ++i) {
+            printf(" %u", symbol_ids[i]);
+        }
         printf("\n");
     }
     fflush(stdout);
 }
 
+typedef enum {
+    CAD_SEL_ENTITY = 0,
+    CAD_SEL_SYMBOL = 1
+} CadSelKind;
+
 typedef struct {
-    uint32_t *ids;
+    CadSelKind kind;
+    uint32_t id;
+} CadSelRef;
+
+typedef struct {
+    CadSelRef *refs;
     size_t count;
     size_t capacity;
 } CadSelection;
@@ -120,22 +149,19 @@ static int selection_work_reserve(size_t count) {
     return 0;
 }
 
-static void selection_set_assign(CadSelection *set, const uint32_t *ids,
-                                 size_t count) {
+static void selection_set_append(CadSelection *set, CadSelKind kind,
+                                 uint32_t id) {
     if (!set) return;
-    if (count > set->capacity) {
-        size_t capacity = set->capacity ? set->capacity : 32;
-        while (capacity < count) {
-            if (capacity > SIZE_MAX / 2) return;
-            capacity *= 2;
-        }
-        uint32_t *grown = realloc(set->ids, capacity * sizeof(uint32_t));
+    if (set->count == set->capacity) {
+        size_t capacity = set->capacity ? set->capacity * 2 : 32;
+        CadSelRef *grown = realloc(set->refs, capacity * sizeof(*grown));
         if (!grown) return;
-        set->ids = grown;
+        set->refs = grown;
         set->capacity = capacity;
     }
-    if (count > 0) memcpy(set->ids, ids, count * sizeof(uint32_t));
-    set->count = count;
+    set->refs[set->count].kind = kind;
+    set->refs[set->count].id = id;
+    set->count++;
 }
 
 static void selection_set_clear(CadSelection *set) {
@@ -144,10 +170,19 @@ static void selection_set_clear(CadSelection *set) {
 
 static void selection_set_free(CadSelection *set) {
     if (!set) return;
-    free(set->ids);
-    set->ids = NULL;
+    free(set->refs);
+    set->refs = NULL;
     set->count = 0;
     set->capacity = 0;
+}
+
+static void selection_clear_all(CadDocument *doc, CadSelection *set) {
+    selection_set_clear(set);
+    if (!doc) return;
+    cad_selection_clear(doc);
+    for (size_t i = 0; i < doc->symbol_count; ++i) {
+        isogl_symbol_set_selected(doc->symbols[i], 0);
+    }
 }
 
 static int selection_compute(SDL_Window *window, isogl_point start_world,
@@ -200,8 +235,28 @@ static void selection_apply_rect(CadDocument *doc, isogl_point start_world,
     const uint32_t *ids = crossing ? selection_hit : selection_contained;
     size_t count = crossing ? n_hit : n_contained;
 
-    selection_set_assign(set, ids, count);
     cad_selection_apply(doc, ids, count);
+    selection_set_clear(set);
+    for (size_t i = 0; i < count; ++i) {
+        selection_set_append(set, CAD_SEL_ENTITY, ids[i]);
+    }
+
+    /* isogl symbols use their own ID namespace and pick geometry. */
+    isogl_box query = {
+        fmin((double)start_world.x, (double)end_world.x),
+        fmin((double)start_world.y, (double)end_world.y),
+        fmax((double)start_world.x, (double)end_world.x),
+        fmax((double)start_world.y, (double)end_world.y)
+    };
+
+    for (size_t i = 0; i < doc->symbol_count; ++i) {
+        isogl_symbol_id symbol = doc->symbols[i];
+        isogl_symbol_set_selected(symbol, 0);
+        if (isogl_symbol_hit(symbol, &query, crossing) == 1) {
+            isogl_symbol_set_selected(symbol, 1);
+            selection_set_append(set, CAD_SEL_SYMBOL, symbol);
+        }
+    }
 }
 
 static int selection_update(CadDocument *doc, SDL_Window *window,
@@ -227,9 +282,13 @@ static void selection_finish(CadDocument *doc, SDL_Window *window,
     int crossing = selection_update(doc, window, start_world, x, y, 1, set);
 
     if (crossing >= 0) {
-        printf("select %s: %zu id(s):", crossing ? "crossing" : "window",
+        printf("select %s: %zu ref(s):", crossing ? "crossing" : "window",
                set->count);
-        for (size_t i = 0; i < set->count; ++i) printf(" %u", set->ids[i]);
+        for (size_t i = 0; i < set->count; ++i) {
+            printf(" %c%u",
+                   set->refs[i].kind == CAD_SEL_ENTITY ? 'E' : 'S',
+                   set->refs[i].id);
+        }
         printf("\n");
         fflush(stdout);
     }
@@ -310,6 +369,12 @@ int main(int argc, char **argv) {
     }
     isogl_font_init_vao();
 
+    if (isogl_symbol_init(font) != 0) {
+        fprintf(stderr, "Failed to initialize symbol registry\n");
+        shutdown_all(window, context, NULL, font);
+        return 1;
+    }
+
     float sheet_w = 0.0f, sheet_h = 0.0f;
     isogl_sheet_size(ISOGL_SHEET_A3, ISOGL_ORIENTATION_LANDSCAPE, &sheet_w, &sheet_h);
 
@@ -375,8 +440,7 @@ int main(int argc, char **argv) {
                                 selecting = 0;
                                 sel_moved = 0;
                                 isogl_clear_selection_rect();
-                                selection_set_clear(&selection);
-                                cad_selection_clear(&doc);
+                                selection_clear_all(&doc, &selection);
                             }
                             break;
                         case SDLK_q:
@@ -472,8 +536,7 @@ int main(int argc, char **argv) {
                             abs(event.motion.x - sel_start_px_x) +
                             abs(event.motion.y - sel_start_px_y) > 4) {
                             sel_moved = 1;
-                            selection_set_clear(&selection);
-                            cad_selection_clear(&doc);
+                            selection_clear_all(&doc, &selection);
                         }
                         if (sel_moved) {
                             selection_update(&doc, window, sel_start_world,
@@ -493,6 +556,7 @@ int main(int argc, char **argv) {
         isogl_draw_all_vbo_objects(&doc.parts);
         isogl_draw_string_list(&doc.strings, isogl_shader_program_font,
                                isogl_model_matrix, isogl_view_matrix, identity);
+        isogl_symbol_draw_all();
         isogl_draw_selection_overlay();
         isogl_swap_buffers(window);
     }
