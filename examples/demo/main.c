@@ -3,9 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "isogl.h"
-#include "glad.h"
-#include "khrplatform.h"
-#include "primitive.h" 
+#include "isogl-sdl/isogl_sdl.h"
+#include "primitive.h"
 #include <math.h>
 #include <string.h>
 #include "isogl_font.h"
@@ -183,65 +182,32 @@ void append_primitive(isogl_segment_list *segment_list, Primitive *primitive) {
 int main(int argc, char **argv) {
     printf("start\n");
 
-    // Inizializzazione SDL
+    // Inizializzazione SDL e contesto GL tramite l'helper isogl-sdl.
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         printf("SDL Init error: %s\n", SDL_GetError());
         return 1;
     }
-    
+
     SDL_DisplayMode dm;
     if (SDL_GetCurrentDisplayMode(0, &dm) != 0) {
         printf("SDL Get Current Display Mode: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
-    
-    // Imposta attributi OpenGL 4.3
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    
-    // Debug    
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
-    
-    // Double buffering
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);   
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    // SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-    // SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4); 
-    
-    // Creazione finestra
-    SDL_Window* window = SDL_CreateWindow(
-        "ISO CAD",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        dm.w / 2,
-        dm.h / 2,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
-    );
-    
-    if (window == NULL) {
-        printf("Error creating window: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
-    
-    // Creazione contesto OpenGL
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    if (gl_context == NULL) {
-        printf("Error GL context creation: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
-    }
-    
-    // Inizializzazione GLAD
-    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-        printf("Failed to initialize GLAD\n");
-        SDL_GL_DeleteContext(gl_context);
-        SDL_DestroyWindow(window);
+
+    isogl_sdl_host host;
+    isogl_sdl_host_desc desc = {
+        .title = "ISO CAD",
+        .width = dm.w / 2,
+        .height = dm.h / 2,
+        .gl_major = 3,
+        .gl_minor = 3,
+        .multisample = 0,
+        .vsync = 1,
+        .hidden = 0
+    };
+    if (isogl_sdl_host_init(&host, &desc) != 0) {
+        printf("Error creating SDL/GL host: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
@@ -264,13 +230,11 @@ int main(int argc, char **argv) {
     // Inizializzazione ISOGL
     if (isogl_init_with_asset_dir(asset_dir) != 0) {
         printf("Failed to initialize ISOGL\n");
-        SDL_GL_DeleteContext(gl_context);
-        SDL_DestroyWindow(window);
+        isogl_sdl_host_shutdown(&host);
         SDL_Quit();
         return 1;
     }
-    glEnable(GL_MULTISAMPLE); 
-    
+
     // Setup geometrie
     isogl_scale scale = {1, 2};
     isogl_set_sheet(210.0f, 297.0f, scale);
@@ -278,8 +242,7 @@ int main(int argc, char **argv) {
     if (isogl_segment_list_init(&segment_list, 100) != 0) {
         fprintf(stderr, "Failed to allocate segment list\n");
         isogl_cleanup();
-        SDL_GL_DeleteContext(gl_context);
-        SDL_DestroyWindow(window);
+        isogl_sdl_host_shutdown(&host);
         SDL_Quit();
         return 1;
     }
@@ -295,13 +258,7 @@ int main(int argc, char **argv) {
     isogl_segment_list_free(&segment_list);
 
     isogl_zoom_all_sheet();
-    
-    // Setup viewport
-    isogl_resize_viewport(window);
-    
-    // Disabilita VSync per test
-    SDL_GL_SetSwapInterval(1);
-    
+
     // Font setup
     char font_path[4096];
     if (isogl_asset_path("fonts/ReliefSingleLineLinear.toml",
@@ -335,7 +292,7 @@ int main(int argc, char **argv) {
             switch (event.type) {
                 case SDL_WINDOWEVENT:
                     if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-                        isogl_resize_viewport(window);
+                        isogl_sdl_host_update(&host);
                     }
                     break;
                 
@@ -348,11 +305,14 @@ int main(int argc, char **argv) {
                     }
                     break;
                 
-                case SDL_MOUSEWHEEL:
-                    isogl_handle_zoom(window, event.wheel.y, 
-                                     (float)event.wheel.mouseX, 
-                                     (float)event.wheel.mouseY);
-                    break;                                                                               
+                case SDL_MOUSEWHEEL: {
+                    float px = 0.0f, py = 0.0f;
+                    isogl_sdl_host_local_to_pixels(&host,
+                        (float)event.wheel.mouseX,
+                        (float)event.wheel.mouseY, &px, &py);
+                    isogl_handle_zoom(event.wheel.y, px, py);
+                    break;
+                }
                 
                 case SDL_MOUSEBUTTONDOWN:
                     if (event.button.button == SDL_BUTTON_LEFT) {
@@ -368,7 +328,11 @@ int main(int argc, char **argv) {
                 
                 case SDL_MOUSEMOTION:
                     if (drag) {
-                        isogl_handle_pan(window, event.motion.xrel, event.motion.yrel);
+                        float dx = 0.0f, dy = 0.0f;
+                        isogl_sdl_host_delta_to_pixels(&host,
+                            (float)event.motion.xrel,
+                            (float)event.motion.yrel, &dx, &dy);
+                        isogl_handle_pan(dx, dy);
                     }
                     break;
                 
@@ -379,6 +343,7 @@ int main(int argc, char **argv) {
         }
         
         // Rendering
+        isogl_sdl_host_begin_frame(&host);
         isogl_clear(0.1f, 0.1f, 0.1f, 1.0f);
         isogl_draw_sheet();
         isogl_draw_all_vbo_objects(&vbo_array);
@@ -396,7 +361,7 @@ int main(int argc, char **argv) {
                               isogl_view_matrix,       // Aspect ratio
                               relative_matrix);        // Blocco → Mondo
 
-        isogl_swap_buffers(window);
+        isogl_sdl_host_swap(&host);
         SDL_Delay(20);
     }
    
@@ -405,8 +370,7 @@ int main(int argc, char **argv) {
     isogl_vbo_array_free(&vbo_array);
     isogl_cleanup();
     isogl_font_free_data(font_data);
-    SDL_GL_DeleteContext(gl_context);
-    SDL_DestroyWindow(window);
+    isogl_sdl_host_shutdown(&host);
     SDL_Quit();
     
     return 0;

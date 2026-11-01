@@ -10,8 +10,8 @@ BIN     := $(BUILD)/isocad
 
 CFLAGS   ?= -O2 -g
 CFLAGS   += -std=c11 -Wall -Wextra -MMD -MP
-CPPFLAGS += $(shell $(PKG_CONFIG) --cflags isogl sdl2)
-LDLIBS   := $(shell $(PKG_CONFIG) --libs --static isogl sdl2) -lm
+CPPFLAGS += $(shell $(PKG_CONFIG) --cflags isogl-sdl)
+LDLIBS   := $(shell $(PKG_CONFIG) --libs --static isogl-sdl) -lm
 
 all: $(BIN)
 

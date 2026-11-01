@@ -1,0 +1,11 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: isogl-sdl
+Description: Optional SDL2 host helper for isogl
+Version: @VERSION@
+Requires: isogl sdl2
+Cflags: -I${includedir}
+Libs: -L${libdir} -lisogl_sdl

@@ -6,6 +6,10 @@
 #include <stddef.h>
 #include "glad.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // ============================================================================
 // CPU-SIDE STRUCTURES
 // ============================================================================
@@ -130,5 +134,9 @@ void isogl_string_list_free(isogl_string_list* list);
 void isogl_font_init_vao(void);
 void isogl_font_cleanup(void);
 void isogl_free_glyph_string(isogl_glyph_string* glyph_string);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif // ISOGL_FONT_H

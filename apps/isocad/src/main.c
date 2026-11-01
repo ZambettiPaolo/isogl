@@ -1,5 +1,5 @@
 #include <isogl/isogl.h>
-#include <isogl/glad.h>
+#include <isogl-sdl/isogl_sdl.h>
 
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -13,14 +13,13 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-static void shutdown_all(SDL_Window *window, SDL_GLContext context,
-                         CadDocument *doc, isogl_font_data *font) {
+static void shutdown_all(isogl_sdl_host *host, CadDocument *doc,
+                         isogl_font_data *font) {
     if (doc) cad_document_free(doc);
     isogl_symbol_cleanup();
     isogl_font_free_data(font);
     isogl_cleanup();
-    if (context) SDL_GL_DeleteContext(context);
-    if (window) SDL_DestroyWindow(window);
+    if (host) isogl_sdl_host_shutdown(host);
     SDL_Quit();
 }
 
@@ -75,30 +74,36 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     cad_add_center_mark_symbol(doc, 0, &mark);
 }
 
-static void pick_and_print(CadDocument *doc, SDL_Window *window, int x, int y,
-                           size_t max_entities) {
-    uint32_t ids[ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE];
-    size_t count = 0;
+static int isocad_pick_extent(const isogl_sdl_host *host) {
+    double s = host->scale_x > host->scale_y ? host->scale_x : host->scale_y;
+    if (s < 1.0) s = 1.0;
+    return (int)lround((double)ISOGL_PICK_DEFAULT_EXTENT * s);
+}
 
-    if (isogl_pick_at(window, &doc->parts, &doc->strings,
-                      (float)x, (float)y,
+static void pick_and_print(CadDocument *doc, isogl_sdl_host *host,
+                           float px, float py, size_t max_entities) {
+    uint32_t ids[4096];
+    size_t count = 0;
+    int extent = isocad_pick_extent(host);
+
+    if (isogl_pick_at(&doc->parts, &doc->strings, px, py, extent,
                       ids, sizeof(ids) / sizeof(ids[0]), &count) == 0) {
-        printf("pick at (%d,%d): %zu entity id(s):", x, y, count);
+        printf("pick at (%.1f,%.1f): %zu entity id(s):", px, py, count);
         for (size_t i = 0; i < count; ++i) printf(" %u", ids[i]);
         if (count > max_entities) {
             printf(" — ambiguo (> %zu), zoom in", max_entities);
         }
         printf("\n");
     } else {
-        printf("pick at (%d,%d): errore entità\n", x, y);
+        printf("pick at (%.1f,%.1f): errore entità\n", px, py);
     }
 
     uint32_t symbol_ids[64];
     size_t symbol_count = 0;
-    if (isogl_symbol_pick_at(window, (float)x, (float)y,
+    if (isogl_symbol_pick_at(px, py, extent,
                              symbol_ids, 64, &symbol_count) == 0 &&
         symbol_count > 0) {
-        printf("pick at (%d,%d): %zu symbol id(s):", x, y, symbol_count);
+        printf("pick at (%.1f,%.1f): %zu symbol id(s):", px, py, symbol_count);
         for (size_t i = 0; i < symbol_count; ++i) {
             printf(" %u", symbol_ids[i]);
         }
@@ -185,28 +190,28 @@ static void selection_clear_all(CadDocument *doc, CadSelection *set) {
     }
 }
 
-static int selection_compute(SDL_Window *window, isogl_point start_world,
+static int selection_compute(isogl_sdl_host *host, isogl_point start_world,
                              int x, int y, isogl_point *end_world,
                              int *crossing, int update_highlight) {
+    float px = 0.0f, py = 0.0f;
+    isogl_sdl_host_local_to_pixels(host, (float)x, (float)y, &px, &py);
+
     isogl_point start_screen;
-    if (isogl_world_to_screen(window, start_world.x, start_world.y,
+    if (isogl_world_to_screen(start_world.x, start_world.y,
                               &start_screen) != 0) {
         return -1;
     }
-    if (isogl_screen_to_world(window, (float)x, (float)y, end_world) != 0) {
+    if (isogl_screen_to_world(px, py, end_world) != 0) {
         return -1;
     }
 
-    *crossing = ((float)x < start_screen.x);
+    *crossing = (px < start_screen.x);
 
     if (update_highlight) {
-        int w = 0, h = 0;
-        SDL_GetWindowSize(window, &w, &h);
-
-        float gx0 = fminf(start_screen.x, (float)x);
-        float gx1 = fmaxf(start_screen.x, (float)x);
-        float gy0 = fminf((float)(h - start_screen.y), (float)(h - y));
-        float gy1 = fmaxf((float)(h - start_screen.y), (float)(h - y));
+        float gx0 = fminf(start_screen.x, px);
+        float gx1 = fmaxf(start_screen.x, px);
+        float gy0 = fminf(start_screen.y, py);
+        float gy1 = fmaxf(start_screen.y, py);
         isogl_set_selection_rect(gx0, gy0, gx1, gy1, *crossing);
     }
 
@@ -259,13 +264,13 @@ static void selection_apply_rect(CadDocument *doc, isogl_point start_world,
     }
 }
 
-static int selection_update(CadDocument *doc, SDL_Window *window,
+static int selection_update(CadDocument *doc, isogl_sdl_host *host,
                             isogl_point start_world, int x, int y,
                             int update_highlight, CadSelection *set) {
     isogl_point end_world = start_world;
     int crossing = 0;
 
-    if (selection_compute(window, start_world, x, y, &end_world,
+    if (selection_compute(host, start_world, x, y, &end_world,
                           &crossing, update_highlight) != 0) {
         return -1;
     }
@@ -274,12 +279,12 @@ static int selection_update(CadDocument *doc, SDL_Window *window,
     return crossing;
 }
 
-static void selection_finish(CadDocument *doc, SDL_Window *window,
+static void selection_finish(CadDocument *doc, isogl_sdl_host *host,
                              isogl_point start_world, int x, int y,
                              CadSelection *set) {
     /* Update the rectangle too, so the persistent colour matches the final
        window/crossing mode; the overlay is cleared immediately after. */
-    int crossing = selection_update(doc, window, start_world, x, y, 1, set);
+    int crossing = selection_update(doc, host, start_world, x, y, 1, set);
 
     if (crossing >= 0) {
         printf("select %s: %zu ref(s):", crossing ? "crossing" : "window",
@@ -308,44 +313,27 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
-        return 1;
-    }
-
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-
-    SDL_Window *window = SDL_CreateWindow("isocad", SDL_WINDOWPOS_CENTERED,
-                                          SDL_WINDOWPOS_CENTERED, 1280, 800,
-                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-    if (!window) {
-        fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
+    isogl_sdl_host host;
+    isogl_sdl_host_desc desc = {
+        .title = "isocad",
+        .width = 1280,
+        .height = 800,
+        .gl_major = 3,
+        .gl_minor = 3,
+        .multisample = 0,
+        .vsync = 1,
+        .hidden = 0
+    };
+    if (isogl_sdl_host_init(&host, &desc) != 0) {
+        fprintf(stderr, "isogl_sdl_host_init: %s\n", SDL_GetError());
         SDL_Quit();
-        return 1;
-    }
-
-    SDL_GLContext context = SDL_GL_CreateContext(window);
-    if (!context) {
-        fprintf(stderr, "SDL_GL_CreateContext: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
-    }
-
-    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-        fprintf(stderr, "Failed to initialize GLAD\n");
-        shutdown_all(window, context, NULL, NULL);
         return 1;
     }
 
     if (isogl_init_with_asset_dir(asset_dir) != 0) {
         fprintf(stderr, "Failed to initialize isogl (assets: %s)\n",
                 asset_dir ? asset_dir : isogl_asset_dir());
-        shutdown_all(window, context, NULL, NULL);
+        shutdown_all(&host, NULL, NULL);
         return 1;
     }
 
@@ -357,21 +345,21 @@ int main(int argc, char **argv) {
     if (isogl_asset_path("fonts/ReliefSingleLineLinear.toml",
                          font_path, sizeof(font_path)) != 0) {
         fprintf(stderr, "Font asset path too long\n");
-        shutdown_all(window, context, NULL, NULL);
+        shutdown_all(&host, NULL, NULL);
         return 1;
     }
 
     isogl_font_data *font = isogl_font_load_from_toml(font_path);
     if (!font) {
         fprintf(stderr, "Failed to load font: %s\n", font_path);
-        shutdown_all(window, context, NULL, NULL);
+        shutdown_all(&host, NULL, NULL);
         return 1;
     }
     isogl_font_init_vao();
 
     if (isogl_symbol_init(font) != 0) {
         fprintf(stderr, "Failed to initialize symbol registry\n");
-        shutdown_all(window, context, NULL, font);
+        shutdown_all(&host, NULL, font);
         return 1;
     }
 
@@ -380,16 +368,16 @@ int main(int argc, char **argv) {
 
     if (isogl_set_sheet(sheet_w, sheet_h, (isogl_scale){1, 1}) != 0) {
         fprintf(stderr, "Failed to create sheet\n");
-        shutdown_all(window, context, NULL, font);
+        shutdown_all(&host, NULL, font);
         return 1;
     }
     isogl_zoom_all_sheet();
-    isogl_resize_viewport(window);
+    isogl_sdl_host_update(&host);
 
     CadDocument doc;
     if (cad_document_init(&doc, font, 1.0f) != 0) {
         fprintf(stderr, "Failed to create document\n");
-        shutdown_all(window, context, NULL, font);
+        shutdown_all(&host, NULL, font);
         return 1;
     }
 
@@ -421,11 +409,11 @@ int main(int argc, char **argv) {
 
                 case SDL_WINDOWEVENT:
                     if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-                        isogl_resize_viewport(window);
+                        isogl_sdl_host_update(&host);
                         if (selecting && sel_moved) {
                             int mx = 0, my = 0;
                             SDL_GetMouseState(&mx, &my);
-                            selection_update(&doc, window, sel_start_world,
+                            selection_update(&doc, &host, sel_start_world,
                                              mx, my, 1, &selection);
                         }
                     }
@@ -451,7 +439,7 @@ int main(int argc, char **argv) {
                             if (selecting && sel_moved) {
                                 int mx = 0, my = 0;
                                 SDL_GetMouseState(&mx, &my);
-                                selection_update(&doc, window, sel_start_world,
+                                selection_update(&doc, &host, sel_start_world,
                                                  mx, my, 1, &selection);
                             }
                             break;
@@ -464,23 +452,28 @@ int main(int argc, char **argv) {
                     }
                     break;
 
-                case SDL_MOUSEWHEEL:
-                    isogl_handle_zoom(window, event.wheel.y,
-                                      (float)event.wheel.mouseX,
-                                      (float)event.wheel.mouseY);
+                case SDL_MOUSEWHEEL: {
+                    float px = 0.0f, py = 0.0f;
+                    isogl_sdl_host_local_to_pixels(&host,
+                        (float)event.wheel.mouseX,
+                        (float)event.wheel.mouseY, &px, &py);
+                    isogl_handle_zoom(event.wheel.y, px, py);
                     if (selecting && sel_moved) {
                         int mx = 0, my = 0;
                         SDL_GetMouseState(&mx, &my);
-                        selection_update(&doc, window, sel_start_world,
+                        selection_update(&doc, &host, sel_start_world,
                                          mx, my, 1, &selection);
                     }
                     break;
+                }
 
                 case SDL_MOUSEBUTTONDOWN:
                     if (event.button.button == SDL_BUTTON_LEFT) {
-                        if (isogl_screen_to_world(window,
-                                                  (float)event.button.x,
-                                                  (float)event.button.y,
+                        float px = 0.0f, py = 0.0f;
+                        isogl_sdl_host_local_to_pixels(&host,
+                            (float)event.button.x, (float)event.button.y,
+                            &px, &py);
+                        if (isogl_screen_to_world(px, py,
                                                   &sel_start_world) == 0) {
                             selecting = 1;
                             sel_moved = 0;
@@ -489,8 +482,11 @@ int main(int argc, char **argv) {
                             isogl_clear_selection_rect();
                         }
                     } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                        pick_and_print(&doc, window,
-                                       event.button.x, event.button.y,
+                        float px = 0.0f, py = 0.0f;
+                        isogl_sdl_host_local_to_pixels(&host,
+                            (float)event.button.x, (float)event.button.y,
+                            &px, &py);
+                        pick_and_print(&doc, &host, px, py,
                                        pick_max_entities);
                     } else if (event.button.button == SDL_BUTTON_MIDDLE) {
                         panning = 1;
@@ -500,12 +496,15 @@ int main(int argc, char **argv) {
                 case SDL_MOUSEBUTTONUP:
                     if (event.button.button == SDL_BUTTON_LEFT && selecting) {
                         if (!sel_moved) {
-                            pick_and_print(&doc, window,
-                                           event.button.x, event.button.y,
+                            float px = 0.0f, py = 0.0f;
+                            isogl_sdl_host_local_to_pixels(&host,
+                                (float)event.button.x,
+                                (float)event.button.y, &px, &py);
+                            pick_and_print(&doc, &host, px, py,
                                            pick_max_entities);
                             isogl_clear_selection_rect();
                         } else {
-                            selection_finish(&doc, window, sel_start_world,
+                            selection_finish(&doc, &host, sel_start_world,
                                              event.button.x, event.button.y,
                                              &selection);
                         }
@@ -515,7 +514,7 @@ int main(int argc, char **argv) {
                         if (selecting && sel_moved) {
                             int mx = 0, my = 0;
                             SDL_GetMouseState(&mx, &my);
-                            selection_update(&doc, window, sel_start_world,
+                            selection_update(&doc, &host, sel_start_world,
                                              mx, my, 1, &selection);
                         }
                     }
@@ -523,11 +522,13 @@ int main(int argc, char **argv) {
 
                 case SDL_MOUSEMOTION:
                     if (panning) {
-                        isogl_handle_pan(window,
-                                         event.motion.xrel,
-                                         event.motion.yrel);
+                        float dx = 0.0f, dy = 0.0f;
+                        isogl_sdl_host_delta_to_pixels(&host,
+                            (float)event.motion.xrel,
+                            (float)event.motion.yrel, &dx, &dy);
+                        isogl_handle_pan(dx, dy);
                         if (selecting && sel_moved) {
-                            selection_update(&doc, window, sel_start_world,
+                            selection_update(&doc, &host, sel_start_world,
                                              event.motion.x, event.motion.y,
                                              1, &selection);
                         }
@@ -539,7 +540,7 @@ int main(int argc, char **argv) {
                             selection_clear_all(&doc, &selection);
                         }
                         if (sel_moved) {
-                            selection_update(&doc, window, sel_start_world,
+                            selection_update(&doc, &host, sel_start_world,
                                              event.motion.x, event.motion.y,
                                              1, &selection);
                         }
@@ -551,6 +552,7 @@ int main(int argc, char **argv) {
             }
         }
 
+        isogl_sdl_host_begin_frame(&host);
         isogl_clear(0.08f, 0.09f, 0.10f, 1.0f);
         isogl_draw_sheet();
         isogl_draw_all_vbo_objects(&doc.parts);
@@ -558,7 +560,7 @@ int main(int argc, char **argv) {
                                isogl_model_matrix, isogl_view_matrix, identity);
         isogl_symbol_draw_all();
         isogl_draw_selection_overlay();
-        isogl_swap_buffers(window);
+        isogl_sdl_host_swap(&host);
     }
 
     selection_set_free(&selection);
@@ -567,6 +569,6 @@ int main(int argc, char **argv) {
     selection_contained = NULL;
     selection_hit = NULL;
 
-    shutdown_all(window, context, &doc, font);
+    shutdown_all(&host, &doc, font);
     return 0;
 }

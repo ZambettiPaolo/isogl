@@ -13,11 +13,23 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
   norme. Le tabelle normative stanno in `include/isogl/isogl_style.h`.
 - `apps/isocad`: CAD 2D minimale costruito sopra la libreria. Possiede
   finestra, contesto, documento (layer ed entità) e comandi.
-- C11, SDL2, OpenGL 3.3 core, glad, tomlc99. Nessuna dipendenza da FreeType o
-  Pango: i font sono vettoriali e caricati da TOML.
-- Contratto: l'applicazione crea e distrugge il contesto; la libreria non lo
-  fa. `gladLoadGLLoader()` prima di `isogl_init*`; un solo contesto corrente;
-  nessuna thread-safety; `isogl_cleanup()` idempotente.
+- C11, OpenGL 3.3 core, glad, tomlc99. **SDL2 non è una dipendenza del
+  core**: compare solo nel pacchetto opzionale `hosts/isogl-sdl`, nella demo e
+  nei test GL che hanno bisogno di un contesto. Nessuna dipendenza da FreeType
+  o Pango: i font sono vettoriali e caricati da TOML.
+- Contratto: l'applicazione crea e distrugge contesto e finestra, possiede lo
+  swap e rende corrente il contesto. `gladLoadGLLoader()` prima di
+  `isogl_init*`; un solo contesto corrente; nessuna thread-safety;
+  `isogl_cleanup()` idempotente.
+- Viewport: l'ospite chiama `isogl_set_viewport()` con un rettangolo in pixel
+  di framebuffer (origine GL, basso-sinistra) e `isogl_begin_frame()` dopo il
+  lavoro GL del toolkit. Tutte le altre coordinate in pixel sono **locali al
+  viewport, origine in alto a sinistra**. `isogl_pick_at()` prende anche
+  `extent_px`, in pixel di framebuffer; gli host HiDPI passano
+  `lround(ISOGL_PICK_DEFAULT_EXTENT * dpr)`.
+- Host verificati: SDL2 (`hosts/isogl-sdl`), GTK4 `GtkGLArea`
+  (`examples/gtk4`), Qt6 `QOpenGLWidget` (`examples/qt6`). GTK4 e Qt6 usano i
+  loro contesti EGL nativi: Wayland funziona senza `SDL_CreateWindowFrom`.
 
 Stato: Milestone A. Esistono foglio, linee, cerchi, rettangoli, testo, pattern
 e pesi ISO, zoom/pan, modalità colori-spessore, selezione d’area persistente e
@@ -323,18 +335,24 @@ typedef struct {
     uint32_t entity_id;     /* l'ID opaco che torna dal pick */
 } isogl_pick_item;
 
-int isogl_pick_at(SDL_Window *win, int px, int py,
-                  const isogl_pick_item *items, size_t count,
-                  int radius_px, int max_entities,
-                  uint32_t *out_ids, size_t out_capacity,
-                  size_t *out_count);
+typedef struct {
+    isogl_viewport viewport;      /* pixel di framebuffer, origine GL */
+    float px, py;                 /* locali al viewport, top-left     */
+    int extent_px;                /* lato del box, pixel fisici       */
+    const isogl_pick_item *items;
+    size_t count;
+    uint32_t *out_ids;
+    size_t out_capacity;
+    size_t *out_count;
+} isogl_pick_request;
 ```
 
 L'emitter scrive direttamente nello staging: nessuna display list intermedia.
 `isogl` resta il renderer e non conosce né il kernel né i simboli. Anche il
 pick è entity-agnostic: l'app fornisce i candidati e gli ID; la libreria
-possiede FBO e shader. `radius_px` e `max_entities` sono parametri, non
-costanti. Il `pick_id` è opaco; il testo ne ha uno.
+possiede FBO e shader. `extent_px` è un parametro, non una costante: su HiDPI
+l'host lo scala con il device pixel ratio. Il `pick_id` è opaco; il testo ne ha
+uno.
 
 ## Punti del codice attuale
 
@@ -356,7 +374,7 @@ Riferimenti al commit `05af29c`; verifica i numeri di riga prima di fidarti.
 | `include/isogl/isogl_font.h` | glyph string senza pick ID | campo `pick_id` (fatto) |
 | `shaders/fs_pick.glsl` | nuovo | fragment shader che scrive `uPickId` |
 | `shaders/fs_font_pick.glsl` | nuovo | pick del testo |
-| `src/isogl.c` `isogl_pick_at` | implementato | mancano pre-filtro e topmost |
+| `src/isogl.c` `isogl_pick_at` | implementato con `extent_px` | mancano pre-filtro e topmost |
 
 Nota: `isogl_vbo_array_set_transform()` esiste, ma `isocad` non lo usa; la
 matrice relativa è sempre identità. Con la geometria già in mm di carta, il
@@ -408,14 +426,26 @@ rimozione/undo delle entità e il modello gerarchico del CAD.
   dell'explode fallisce.
 - Copiare `data_structure/` alla lettera: ID globali fissi, primitive senza ID,
   stringhe non liberate e tabelle duplicate sono solo un riferimento.
+- Includere SDL o tipi `SDL_Window*` nel core (`include/isogl/`, `src/`): SDL
+  vive solo in `hosts/isogl-sdl`, nella demo e nei test.
+- Fare lo swap dentro la libreria: lo swap è dell'ospite.
+- Usare le coordinate della finestra invece di quelle locali al viewport.
+- Calcolare NDC della selezione una volta sola e cacharlo: va ricalcolato al
+  draw perché il viewport può cambiare.
 
 ## Build e test
 
 ```sh
-make                        # build/libisogl.a + build/isogl-demo
+make                        # core + helper SDL + demo
+make lib                    # solo il core, senza SDL installato
+make sdl-host               # solo libisogl_sdl.a
 make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
-make test                   # symbol geometry + symbols + test-core
+make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
+make test                   # symbol geometry + symbols + viewport + test-core
+make check-sdl-free         # nessun riferimento SDL nel core
+make example-qt6            # host Qt6 (opzionale)
+make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)
 make -B SANITIZE=1 test
 ```
 

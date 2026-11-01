@@ -126,7 +126,8 @@ int main(int argc, char **argv) {
     isogl_set_sheet(420.0f, 297.0f, (isogl_scale){1, 1});
     isogl_zoom_all_sheet();
     isogl_font_init_vao();
-    isogl_resize_viewport(window);
+    isogl_viewport vp = {0, 0, FB_SIZE, FB_SIZE};
+    isogl_set_viewport(&vp);
 
     GLuint fbo = 0, color_tex = 0;
     glGenFramebuffers(1, &fbo);
@@ -224,22 +225,24 @@ int main(int argc, char **argv) {
           "fake CAD and symbols draw pixels");
 
     isogl_point dim_screen = {0.0f, 0.0f};
-    check(isogl_world_to_screen(window, 100.0f, 90.0f, &dim_screen) == 0,
+    check(isogl_world_to_screen(100.0f, 90.0f, &dim_screen) == 0,
           "dimension screen conversion");
     uint32_t pick_ids[64];
     size_t pick_count = 0;
-    check(fake_drawing_pick_symbols(&fake, window,
+    check(fake_drawing_pick_symbols(&fake,
                                     dim_screen.x, dim_screen.y,
+                                    ISOGL_PICK_DEFAULT_EXTENT,
                                     pick_ids, 64, &pick_count) == 0,
           "symbol pick succeeds");
     check(pick_count == 1 && pick_ids[0] == dim_id,
           "pick returns the dimension symbol ID");
 
     isogl_point center_screen = {0.0f, 0.0f};
-    check(isogl_world_to_screen(window, 150.0f, 60.0f, &center_screen) == 0,
+    check(isogl_world_to_screen(150.0f, 60.0f, &center_screen) == 0,
           "center mark screen conversion");
-    check(fake_drawing_pick_symbols(&fake, window,
+    check(fake_drawing_pick_symbols(&fake,
                                     center_screen.x, center_screen.y,
+                                    ISOGL_PICK_DEFAULT_EXTENT,
                                     pick_ids, 64, &pick_count) == 0,
           "center mark pick succeeds");
     check(pick_count == 1 && pick_ids[0] == center_id,
@@ -247,10 +250,11 @@ int main(int argc, char **argv) {
 
     // The fake CAD primitive at world y=160 proves the group transform.
     isogl_point child_screen = {0.0f, 0.0f};
-    check(isogl_world_to_screen(window, 45.0f, 160.0f, &child_screen) == 0,
+    check(isogl_world_to_screen(45.0f, 160.0f, &child_screen) == 0,
           "child group screen conversion");
-    check(isogl_pick_at(window, &fake.parts, &fake.strings,
+    check(isogl_pick_at(&fake.parts, &fake.strings,
                         child_screen.x, child_screen.y,
+                        ISOGL_PICK_DEFAULT_EXTENT,
                         pick_ids, 64, &pick_count) == 0,
           "CAD primitive pick succeeds");
     check(pick_count >= 1 &&
@@ -315,8 +319,9 @@ int main(int argc, char **argv) {
           "exploded geometry renders through the fake CAD");
 
     // The exploded dimension line is now CAD geometry, not a symbol.
-    check(isogl_pick_at(window, &fake.parts, &fake.strings,
+    check(isogl_pick_at(&fake.parts, &fake.strings,
                         dim_screen.x, dim_screen.y,
+                        ISOGL_PICK_DEFAULT_EXTENT,
                         pick_ids, 64, &pick_count) == 0,
           "exploded geometry pick succeeds");
     check(pick_count >= 1 &&

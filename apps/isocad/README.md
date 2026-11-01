@@ -22,8 +22,16 @@ make PREFIX="$PWD/_install" all install
 make -C apps/isocad PKG_CONFIG_PATH="$PWD/_install/lib/pkgconfig"
 ```
 
-L'app consuma la libreria **solo** via `pkg-config`; non compila i sorgenti di
-isogl né `glad.c`.
+L'app consuma la libreria e l'helper SDL **solo** via `pkg-config`
+(`isogl-sdl`); non compila i sorgenti di isogl né `glad.c`.
+
+L'helper `hosts/isogl-sdl` possiede finestra, contesto e swap. A ogni frame
+isocad chiama `isogl_sdl_host_begin_frame()`, che aggiorna il drawable con
+`SDL_GetWindowSizeInPixels`, imposta il viewport e riasserisce lo stato GL. Gli
+eventi SDL sono in punti logici: `isogl_sdl_host_local_to_pixels()` li converte
+in pixel di framebuffer prima di pick, conversione world e zoom/pan. Il box di
+pick è `ISOGL_PICK_DEFAULT_EXTENT * dpr` pixel fisici, quindi resta costante in
+punti logici su display HiDPI.
 
 ## Run
 
@@ -33,20 +41,20 @@ isogl né `glad.c`.
 ./apps/isocad/build/isocad --assets DIR --pick-max N
 ```
 
-`--pick-max N` (default 5) è la soglia di ambiguità: se il box logico 8×8
-(texture 16×16) contiene più di N ID, l’app stampa “ambiguo” e invita a
-ingrandire. A zoom basso molti oggetti cadono negli stessi pochi pixel: il
-pre-filtro di distanza non li può separare, perché sono davvero vicini. La
-soglia è la politica; il filtro serve solo a scartare i falsi positivi
-geometrici.
+`--pick-max N` (default 5) è la soglia di ambiguità: se il box di pick
+(8 punti logici, convertiti in pixel fisici; texture `2×extent`) contiene più
+di N ID, l’app stampa “ambiguo” e invita a ingrandire. A zoom basso molti
+oggetti cadono negli stessi pochi pixel: il pre-filtro di distanza non li può
+separare, perché sono davvero vicini. La soglia è la politica; il filtro serve
+solo a scartare i falsi positivi geometrici.
 
 Comandi:
 
 - rotella: zoom ancorato al cursore
-- clic sinistro senza trascinare: pick 8×8 (texture 16×16) e stampa degli ID
+- clic sinistro senza trascinare: pick (box 8 punti logici) e stampa degli ID
 - drag sinistro: selezione d’area; sinistra→destra = window, destra→sinistra = crossing
 - drag con tasto centrale: pan
-- clic destro: pick 8×8 (texture 16×16) e stampa degli ID (scorciatoia)
+- clic destro: pick e stampa degli ID (scorciatoia)
 - `F`: fit del foglio
 - `T`: alterna colori-spessore / colori-stampa
 - `Esc`: annulla il drag e svuota la selezione
@@ -76,9 +84,9 @@ testo e i simboli isogl. Il testo viene disegnato nel pick pass con un
 programma font dedicato; i simboli hanno un programma/pick IDs propri. Gli ID
 delle entità CAD sono `CadEntity.id`, assegnati da un contatore monotono
 (`CadDocument.next_id`), non più dall’ordine di creazione; gli ID dei simboli
-sono un namespace separato (`isogl_symbol_id`). La texture 16×16 viene letta a
-spirale dal centro verso l’esterno, quindi il primo ID stampato è il candidato
-più vicino al cursore.
+sono un namespace separato (`isogl_symbol_id`). La texture di pick
+(`2×extent` per lato) viene letta a spirale dal centro verso l’esterno, quindi
+il primo ID stampato è il candidato più vicino al cursore.
 
 ## Quota
 

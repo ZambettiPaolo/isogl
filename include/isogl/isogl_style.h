@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Normative tables for technical drawing.
  *
@@ -114,5 +118,9 @@ bool isogl_text_height_valid(int height);
 // Sheet size in mm for a normalised format and orientation.
 void isogl_sheet_size(isogl_sheet_format format, isogl_sheet_orientation orientation,
                       float *width_mm, float *height_mm);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif // ISOGL_STYLE_H

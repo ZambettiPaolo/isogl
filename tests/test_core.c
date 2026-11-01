@@ -8,6 +8,9 @@
 #include <string.h>
 
 #define FB_SIZE 256
+#define PICK_EXTENT ISOGL_PICK_DEFAULT_EXTENT
+#define PICK_TEXELS ((PICK_EXTENT * ISOGL_PICK_TEXTURE_SCALE) * \
+                     (PICK_EXTENT * ISOGL_PICK_TEXTURE_SCALE))
 
 static int failures = 0;
 
@@ -169,12 +172,13 @@ int main(int argc, char **argv) {
     isogl_set_sheet(210.0f, 297.0f, (isogl_scale){1, 2});
     isogl_zoom_all_sheet();
     isogl_font_init_vao();
-    isogl_resize_viewport(window);
+    isogl_viewport vp = {0, 0, FB_SIZE, FB_SIZE};
+    isogl_set_viewport(&vp);
 
     isogl_point rt_world = {0.0f, 0.0f};
     isogl_point rt_screen = {0.0f, 0.0f};
-    check(isogl_screen_to_world(window, 100.0f, 120.0f, &rt_world) == 0 &&
-          isogl_world_to_screen(window, rt_world.x, rt_world.y,
+    check(isogl_screen_to_world(100.0f, 120.0f, &rt_world) == 0 &&
+          isogl_world_to_screen(rt_world.x, rt_world.y,
                                 &rt_screen) == 0 &&
           fabsf(rt_screen.x - 100.0f) < 0.01f &&
           fabsf(rt_screen.y - 120.0f) < 0.01f,
@@ -272,9 +276,9 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < sizeof(sel_lines) / sizeof(sel_lines[0]); ++i) {
         isogl_point a = {0.0f, 0.0f};
         isogl_point b = {0.0f, 0.0f};
-        isogl_screen_to_world(window, (float)sel_lines[i].x0,
+        isogl_screen_to_world((float)sel_lines[i].x0,
                               (float)sel_lines[i].y0, &a);
-        isogl_screen_to_world(window, (float)sel_lines[i].x1,
+        isogl_screen_to_world((float)sel_lines[i].x1,
                               (float)sel_lines[i].y1, &b);
 
         sel_segments.size = 0;
@@ -289,8 +293,7 @@ int main(int argc, char **argv) {
               "selection VBO added");
     }
 
-    isogl_set_selection_rect(50.0f, (float)(FB_SIZE - 50),
-                             150.0f, (float)(FB_SIZE - 150), 1);
+    isogl_set_selection_rect(50.0f, 50.0f, 150.0f, 150.0f, 1);
     isogl_clear(0.05f, 0.05f, 0.05f, 1.0f);
     isogl_draw_all_vbo_objects(&sel_objects);
     glReadPixels(0, 0, FB_SIZE, FB_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
@@ -301,8 +304,7 @@ int main(int argc, char **argv) {
     check(!pixel_is_yellow(pixels, 25, 25),
           "crossing excludes the outside segment");
 
-    isogl_set_selection_rect(50.0f, (float)(FB_SIZE - 50),
-                             150.0f, (float)(FB_SIZE - 150), 0);
+    isogl_set_selection_rect(50.0f, 50.0f, 150.0f, 150.0f, 0);
     isogl_clear(0.05f, 0.05f, 0.05f, 1.0f);
     isogl_draw_all_vbo_objects(&sel_objects);
     glReadPixels(0, 0, FB_SIZE, FB_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
@@ -334,8 +336,8 @@ int main(int argc, char **argv) {
     isogl_point pb = {0.0f, 0.0f};
 
     /* A crosses the test rectangle: its first part is outside it. */
-    isogl_screen_to_world(window, 30.0f, 30.0f, &pa);
-    isogl_screen_to_world(window, 130.0f, 130.0f, &pb);
+    isogl_screen_to_world(30.0f, 30.0f, &pa);
+    isogl_screen_to_world(130.0f, 130.0f, &pb);
     isogl_segment_list_push_pair(
         &persist_segments,
         make_vertex(pa.x, pa.y, LINE_THICKNESS_0_5, LINE_TYPE_CONTINUOUS, 0.0f),
@@ -346,8 +348,8 @@ int main(int argc, char **argv) {
 
     /* B is entirely inside the test rectangle but is not selected. */
     persist_segments.size = 0;
-    isogl_screen_to_world(window, 70.0f, 130.0f, &pa);
-    isogl_screen_to_world(window, 130.0f, 70.0f, &pb);
+    isogl_screen_to_world(70.0f, 130.0f, &pa);
+    isogl_screen_to_world(130.0f, 70.0f, &pb);
     isogl_segment_list_push_pair(
         &persist_segments,
         make_vertex(pa.x, pa.y, LINE_THICKNESS_0_5, LINE_TYPE_CONTINUOUS, 0.0f),
@@ -378,8 +380,7 @@ int main(int argc, char **argv) {
 
     /* Preview off: only the persistent flag may tint the object, and it
        tints the whole entity, including the part outside the rectangle. */
-    isogl_set_selection_rect(50.0f, (float)(FB_SIZE - 50),
-                             150.0f, (float)(FB_SIZE - 150), 1);
+    isogl_set_selection_rect(50.0f, 50.0f, 150.0f, 150.0f, 1);
     isogl_clear(0.05f, 0.05f, 0.05f, 1.0f);
     isogl_draw_all_vbo_objects(&persist_objects);
     glReadPixels(0, 0, FB_SIZE, FB_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
@@ -412,7 +413,7 @@ int main(int argc, char **argv) {
 
     // ---- Pick pass (8x8 box, 16x16 texture) --------------------------------
     isogl_point pick_center = {0.0f, 0.0f};
-    check(isogl_screen_to_world(window, FB_SIZE / 2.0f, FB_SIZE / 2.0f,
+    check(isogl_screen_to_world(FB_SIZE / 2.0f, FB_SIZE / 2.0f,
                                 &pick_center) == 0,
           "pick center world conversion");
 
@@ -454,12 +455,12 @@ int main(int argc, char **argv) {
               "pick ID set");
     }
 
-    uint32_t picked_ids[ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE];
+    uint32_t picked_ids[PICK_TEXELS];
     size_t picked_count = 0;
-    int pick_rc = isogl_pick_at(window, &pick_objects, NULL,
-                                FB_SIZE / 2.0f, FB_SIZE / 2.0f,
+    int pick_rc = isogl_pick_at(&pick_objects, NULL,
+                                FB_SIZE / 2.0f, FB_SIZE / 2.0f, PICK_EXTENT,
                                 picked_ids,
-                                ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE,
+                                PICK_TEXELS,
                                 &picked_count);
     check(pick_rc == 0, "pick pass succeeds");
 
@@ -485,7 +486,7 @@ int main(int argc, char **argv) {
     // Off-center pick: validates the pick matrix translation, not just the
     // scale with the cursor in the middle of the window.
     isogl_point off_center = {0.0f, 0.0f};
-    check(isogl_screen_to_world(window, FB_SIZE / 4.0f, FB_SIZE / 4.0f,
+    check(isogl_screen_to_world(FB_SIZE / 4.0f, FB_SIZE / 4.0f,
                                 &off_center) == 0,
           "off-center world conversion");
 
@@ -502,12 +503,12 @@ int main(int argc, char **argv) {
     check(isogl_vbo_array_set_pick_id(&pick_objects, off_vbo, 105) == 0,
           "off-center pick ID set");
 
-    uint32_t off_ids[ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE];
+    uint32_t off_ids[PICK_TEXELS];
     size_t off_count = 0;
-    pick_rc = isogl_pick_at(window, &pick_objects, NULL,
-                           FB_SIZE / 4.0f, FB_SIZE / 4.0f,
+    pick_rc = isogl_pick_at(&pick_objects, NULL,
+                           FB_SIZE / 4.0f, FB_SIZE / 4.0f, PICK_EXTENT,
                            off_ids,
-                           ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE,
+                           PICK_TEXELS,
                            &off_count);
     check(pick_rc == 0, "off-center pick succeeds");
     printf("pick at (%d,%d): %zu id(s):", FB_SIZE / 4, FB_SIZE / 4, off_count);
@@ -521,7 +522,7 @@ int main(int argc, char **argv) {
     // Spiral order: a line through the centre must be returned before a line
     // three screen pixels away, even though both are inside the 8x8 box.
     isogl_point offset_center = {0.0f, 0.0f};
-    check(isogl_screen_to_world(window, FB_SIZE / 2.0f, FB_SIZE / 2.0f + 3.0f,
+    check(isogl_screen_to_world(FB_SIZE / 2.0f, FB_SIZE / 2.0f + 3.0f,
                                 &offset_center) == 0,
           "spiral offset world conversion");
 
@@ -551,12 +552,12 @@ int main(int argc, char **argv) {
     check(isogl_vbo_array_set_pick_id(&pick_objects, offset_vbo, 107) == 0,
           "spiral offset ID set");
 
-    uint32_t order_ids[ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE];
+    uint32_t order_ids[PICK_TEXELS];
     size_t order_count = 0;
-    pick_rc = isogl_pick_at(window, &pick_objects, NULL,
-                           FB_SIZE / 2.0f, FB_SIZE / 2.0f,
+    pick_rc = isogl_pick_at(&pick_objects, NULL,
+                           FB_SIZE / 2.0f, FB_SIZE / 2.0f, PICK_EXTENT,
                            order_ids,
-                           ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE,
+                           PICK_TEXELS,
                            &order_count);
     check(pick_rc == 0, "spiral pick succeeds");
     printf("spiral pick: %zu id(s):", order_count);
@@ -654,12 +655,12 @@ int main(int argc, char **argv) {
                                            20.0f, 0.5f, 0.0f, font, 201),
                   "pick text appended");
 
-            uint32_t text_ids[ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE];
+            uint32_t text_ids[PICK_TEXELS];
             size_t text_count = 0;
-            int text_rc = isogl_pick_at(window, NULL, &pick_strings,
-                                        FB_SIZE / 2.0f, FB_SIZE / 2.0f,
+            int text_rc = isogl_pick_at(NULL, &pick_strings,
+                                        FB_SIZE / 2.0f, FB_SIZE / 2.0f, PICK_EXTENT,
                                         text_ids,
-                                        ISOGL_PICK_TEXTURE_SIZE * ISOGL_PICK_TEXTURE_SIZE,
+                                        PICK_TEXELS,
                                         &text_count);
             check(text_rc == 0, "text pick succeeds");
             printf("pick text at (%d,%d): %zu id(s):",

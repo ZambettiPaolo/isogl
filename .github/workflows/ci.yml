@@ -14,10 +14,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev xvfb libgtk-4-dev \
+            qt6-base-dev libegl1-mesa-dev
 
       - name: Build library and demo
         run: make -j"$(nproc)" PREFIX="$ISOGL_PREFIX"
+
+      - name: Core must stay SDL-free
+        run: make check-sdl-free
 
       - name: Run tests
         run: xvfb-run -a -s "-screen 0 1280x720x24" make test
@@ -26,7 +32,10 @@ jobs:
         run: |
           make PREFIX="$ISOGL_PREFIX" install
           test -f "$ISOGL_PREFIX/lib/pkgconfig/isogl.pc"
+          test -f "$ISOGL_PREFIX/lib/pkgconfig/isogl-sdl.pc"
           PKG_CONFIG_PATH="$ISOGL_PREFIX/lib/pkgconfig" pkg-config --modversion isogl
+          ! PKG_CONFIG_PATH="$ISOGL_PREFIX/lib/pkgconfig" \
+            pkg-config --cflags --libs isogl | grep -qi sdl
 
       - name: Build isocad
         env:
@@ -37,3 +46,16 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1280x720x24" \
             timeout 3 ./apps/isocad/build/isocad || [ $? -eq 124 ]
+
+      - name: Build GTK4 example
+        run: make example-gtk4
+
+      - name: Build Qt6 example
+        run: make example-qt6
+
+      - name: Smoke-run Qt6 example
+        env:
+          ISOGL_ASSET_DIR: ${{ github.workspace }}
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            timeout 3 ./examples/qt6/build/isogl-qt6-host || [ $? -eq 124 ]

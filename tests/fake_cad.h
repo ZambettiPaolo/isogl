@@ -96,8 +96,8 @@ void fake_drawing_draw(FakeDrawing *drawing);
 void fake_drawing_rebuild_graphics(FakeDrawing *drawing);
 void fake_drawing_free(FakeDrawing *drawing);
 
-int fake_drawing_pick_symbols(FakeDrawing *drawing, SDL_Window *win,
-                              float px, float py,
+int fake_drawing_pick_symbols(FakeDrawing *drawing,
+                              float px, float py, int extent_px,
                               uint32_t *ids, size_t max, size_t *count);
 
 int fake_drawing_select_symbols(FakeDrawing *drawing, const isogl_box *query,
