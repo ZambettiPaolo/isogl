@@ -10,6 +10,7 @@
 
 #define SYM_DIM_ARROW_MM 2.2
 #define SYM_DIM_DOT_MM 1.5
+#define SYM_DIM_OUTSIDE_EXT_MM 5.0
 #define SYM_DIM_EXT_MM 2.0
 #define SYM_DIM_TEXT_GAP_MM 1.0
 #define SYM_DIM_TEXT_MM 2.5
@@ -38,6 +39,11 @@ static int sym_finite(double v) {
 
 static double sym_scale(double s) {
     return (s > 0.0 && isfinite(s)) ? s : 1.0;
+}
+
+static int sym_arrow_is_outside(IsoglDimensionArrow type) {
+    return type == ISOGL_DIM_ARROW_OPEN_OUTSIDE ||
+           type == ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
 }
 
 static void sym_obb_corners(double x, double y, double w, double h,
@@ -198,10 +204,10 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
                                          : fabs(side_proj);
     if (!sym_finite(lateral)) return -1;
 
-    double ax = d->x0 + sign * lateral * nx;
-    double ay = d->y0 + sign * lateral * ny;
-    double bx = d->x1 + sign * lateral * nx;
-    double by = d->y1 + sign * lateral * ny;
+    double a0x = d->x0 + sign * lateral * nx;
+    double a0y = d->y0 + sign * lateral * ny;
+    double b0x = d->x1 + sign * lateral * nx;
+    double b0y = d->y1 + sign * lateral * ny;
 
     double scale = sym_scale(d->sheet_scale);
     double overshoot = SYM_DIM_EXT_MM / scale;
@@ -214,23 +220,35 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
                                                    : SYM_DIM_TEXT_MM;
     if (!sym_finite(text_height_mm) || !(dot_radius > 0.0)) return -1;
 
+    /* Outside heads need room beyond the extension lines; extend only the
+       dimension line, not the measured points or the extension lines. */
+    double outside_ext = SYM_DIM_OUTSIDE_EXT_MM / scale;
+    double ext_left = sym_arrow_is_outside(d->arrow_left) ? outside_ext : 0.0;
+    double ext_right = sym_arrow_is_outside(d->arrow_right) ? outside_ext : 0.0;
+    if (!sym_finite(outside_ext) || !(outside_ext > 0.0)) return -1;
+
+    double ax = a0x - ext_left * ux;
+    double ay = a0y - ext_left * uy;
+    double bx = b0x + ext_right * ux;
+    double by = b0y + ext_right * uy;
+
     g->ax = ax;
     g->ay = ay;
     g->bx = bx;
     g->by = by;
-    g->e1x = ax + sign * overshoot * nx;
-    g->e1y = ay + sign * overshoot * ny;
-    g->e2x = bx + sign * overshoot * nx;
-    g->e2y = by + sign * overshoot * ny;
+    g->e1x = a0x + sign * overshoot * nx;
+    g->e1y = a0y + sign * overshoot * ny;
+    g->e2x = b0x + sign * overshoot * nx;
+    g->e2y = b0y + sign * overshoot * ny;
 
     int left_count = 0;
     int right_count = 0;
-    if (sym_arrow_segments(ax, ay, ux, uy, nx, ny, arrow, dot_radius,
+    if (sym_arrow_segments(a0x, a0y, ux, uy, nx, ny, arrow, dot_radius,
                            d->arrow_left, g->arrow, &left_count,
                            SYM_DIM_DOT_SEGMENTS) != 0) {
         return -1;
     }
-    if (sym_arrow_segments(bx, by, -ux, -uy, nx, ny, arrow, dot_radius,
+    if (sym_arrow_segments(b0x, b0y, -ux, -uy, nx, ny, arrow, dot_radius,
                            d->arrow_right, g->arrow + left_count,
                            &right_count, SYM_DIM_DOT_SEGMENTS) != 0) {
         return -1;
@@ -252,8 +270,8 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     if (!sym_finite(width) || width < 0.0) width = 0.0;
     g->text_width = width;
 
-    double mx = 0.5 * (ax + bx);
-    double my = 0.5 * (ay + by);
+    double mx = 0.5 * (a0x + b0x);
+    double my = 0.5 * (a0y + b0y);
     double angle = atan2(uy, ux);
     if (angle > M_PI / 2.0) angle -= M_PI;
     if (angle < -M_PI / 2.0) angle += M_PI;

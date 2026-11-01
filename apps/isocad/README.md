@@ -103,7 +103,7 @@ ogni volta un `IsoglDimensionDesc` completo:
 - `arrow_left`/`arrow_right`: `NONE`, `OPEN`, `CLOSED`, `TICK`, `DOT`,
   `OPEN_OUTSIDE`, `CLOSED_OUTSIDE`; testo 2,5 mm, frecce 2,2 mm con ampiezza
   30°, pallino 1,5 mm. Le varianti `*_OUTSIDE` puntano all’interno da fuori
-  del tratto;
+  del tratto; la linea di quota è estesa di 5 mm oltre l’estremo interessato;
 - precisione, altezza testo e `pick_text`.
 
 Poi chiama `cad_add_dimension_symbol()` e conserva solo l’`isogl_symbol_id` nel

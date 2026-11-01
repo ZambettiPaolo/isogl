@@ -309,6 +309,8 @@ int main(void) {
         check(near(c.items[3].x1, 2.2) &&
               near(c.items[3].y1, 20.0 + 2.2 * tan(M_PI / 12.0)),
               "open arrow is 2.2 mm long with a 30-degree included angle");
+        check(near(c.items[0].x0, 0.0) && near(c.items[0].x1, 100.0),
+              "inside arrows leave the dimension line on the span");
     }
 
     geom.arrow_left = ISOGL_DIM_ARROW_OPEN_OUTSIDE;
@@ -319,6 +321,12 @@ int main(void) {
     if (c.count >= 4) {
         check(near(c.items[3].x1, -2.2),
               "outside arrow points inward from beyond the span");
+        check(near(c.items[0].x0, -5.0) && near(c.items[0].x1, 100.0),
+              "outside arrow extends the dimension line by 5 mm");
+        check(near(c.items[1].x1, 0.0) && near(c.items[2].x1, 100.0),
+              "outside arrow leaves the extension lines on the measured points");
+        check(near(c.items[c.count - 1].x, 44.0),
+              "outside arrow keeps the text centred on the measured span");
     }
     check(c.count == 6, "OPEN_OUTSIDE emits one head + text");
 
@@ -328,12 +336,29 @@ int main(void) {
     check(isogl_dimension_geometry(&geom, &metrics, &emitter) == 0,
           "outside closed arrow succeeds");
     check(c.count == 7, "CLOSED_OUTSIDE emits a triangle + text");
+    if (c.count >= 1) {
+        check(near(c.items[0].x0, -5.0) && near(c.items[0].x1, 100.0),
+              "outside closed arrow extends the dimension line");
+    }
+
+    geom.arrow_right = ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&geom, &metrics, &emitter) == 0,
+          "two outside closed arrows succeed");
+    check(c.count == 10, "two CLOSED_OUTSIDE heads emit two triangles + text");
+    if (c.count >= 1) {
+        check(near(c.items[0].x0, -5.0) && near(c.items[0].x1, 105.0),
+              "both outside ends extend the dimension line by 5 mm");
+    }
 
     geom.arrow_left = ISOGL_DIM_ARROW_DOT;
+    geom.arrow_right = ISOGL_DIM_ARROW_NONE;
     memset(&c, 0, sizeof(c));
     c.fail_on_call = -1;
     check(isogl_dimension_geometry(&geom, &metrics, &emitter) == 0,
           "dot arrow succeeds");
+    check(c.count == 16, "DOT with one head emits 12 segments + text");
     if (c.count >= 4) {
         double r0 = hypot(c.items[3].x0 - 0.0, c.items[3].y0 - 20.0);
         double r1 = hypot(c.items[3].x1 - 0.0, c.items[3].y1 - 20.0);

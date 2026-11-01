@@ -195,8 +195,10 @@ rispetto al centro, in mm di carta e con segno lungo la linea),
 `OPEN_OUTSIDE`, `CLOSED_OUTSIDE`). Proporzioni di default: testo **2,5 mm**,
 frecce **2,2 mm** con ampiezza **30°**, pallino **1,5 mm**. Le varianti
 `*_OUTSIDE` hanno la punta sull’estremo e le gambe fuori dal tratto, quindi
-puntano all’interno. Il valore non è memorizzato: si calcola da `|p1 − p2|` e
-**non ha unità automatica**; chi vuole “ mm” lo mette in `text_right`. Le coordinate del modello sono in unità
+puntano all’interno; la linea di quota viene estesa di **5 mm** oltre
+quell’estremo per ospitare la freccia. Il valore non è memorizzato: si calcola
+da `|p1 − p2|` e **non ha unità automatica**; chi vuole “ mm” lo mette in
+`text_right`. Le coordinate del modello sono in unità
 documento; la scala del foglio governa le grandezze di carta (altezza testo,
 frecce, tolleranze), non il valore misurato. Il generatore produce linee di
 riferimento, linea di quota, frecce secondo il tipo scelto e un run di testo.
