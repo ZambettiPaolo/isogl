@@ -104,7 +104,8 @@ ogni volta un `IsoglDimensionDesc` completo:
   `OPEN_OUTSIDE`, `CLOSED_OUTSIDE`; testo 2,5 mm, frecce 2,2 mm con ampiezza
   30°, pallino 1,5 mm. Le varianti `*_OUTSIDE` puntano all’interno da fuori
   del tratto; la linea di quota è estesa di 5 mm oltre l’estremo interessato;
-- `mark_points`: disegna un segmento di riferimento da 0,5 mm su `p1` e `p2`;
+- `mark_points`: disegna un segmento di riferimento da 0,5 mm che parte da
+  `p1`/`p2` verso la linea di quota, prima del distacco di 3 mm;
 - le linee di riferimento partono 3 mm dopo il punto misurato;
 - precisione, altezza testo e `pick_text`.
 

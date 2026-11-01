@@ -198,10 +198,11 @@ le linee di riferimento partono **3 mm** dopo il punto misurato. Le varianti
 `*_OUTSIDE` hanno la punta sull’estremo e le gambe fuori dal tratto, quindi
 puntano all’interno; la linea di quota viene estesa di **5 mm** oltre
 quell’estremo per ospitare la freccia. `mark_points` aggiunge un segmento di
-riferimento da **0,5 mm** su `p1` e `p2` (circa un pixel alla scala di stampa;
-la pipeline a linee non disegna punti singoli). Il valore non è memorizzato: si
-calcola da `|p1 − p2|` e **non ha unità automatica**; chi vuole “ mm” lo mette
-in `text_right`. Le coordinate del modello sono in unità
+riferimento da **0,5 mm** che parte da `p1`/`p2` verso la linea di quota, prima
+del distacco di 3 mm (circa un pixel alla scala di stampa; la pipeline a linee
+non disegna punti singoli). Il valore non è memorizzato: si calcola da
+`|p1 − p2|` e **non ha unità automatica**; chi vuole “ mm” lo mette in
+`text_right`. Le coordinate del modello sono in unità
 documento; la scala del foglio governa le grandezze di carta (altezza testo,
 frecce, tolleranze), non il valore misurato. Il generatore produce linee di
 riferimento, linea di quota, frecce secondo il tipo scelto e un run di testo.

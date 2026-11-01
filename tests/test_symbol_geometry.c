@@ -379,12 +379,14 @@ int main(void) {
     if (c.count == 6) {
         check(c.items[3].kind == ISOGL_SYM_TEXT,
               "text stays before the reference segments");
-        check(near(c.items[4].x0, -0.25) && near(c.items[4].y0, 0.0) &&
-              near(c.items[4].x1, 0.25) && near(c.items[4].y1, 0.0),
-              "reference segment at p1 is 0.5 mm long");
-        check(near(c.items[5].x0, 99.75) && near(c.items[5].y0, 0.0) &&
-              near(c.items[5].x1, 100.25) && near(c.items[5].y1, 0.0),
-              "reference segment at p2 is 0.5 mm long");
+        check(near(c.items[4].x0, 0.0) && near(c.items[4].y0, 0.0) &&
+              near(c.items[4].x1, 0.0) && near(c.items[4].y1, 0.5),
+              "reference segment starts at p1 toward the dimension line");
+        check(near(c.items[5].x0, 100.0) && near(c.items[5].y0, 0.0) &&
+              near(c.items[5].x1, 100.0) && near(c.items[5].y1, 0.5),
+              "reference segment starts at p2 toward the dimension line");
+        check(c.items[4].y1 < c.items[1].y0 && c.items[5].y1 < c.items[2].y0,
+              "reference segments leave a gap before the extension lines");
     }
 
     memset(&p, 0, sizeof(p));

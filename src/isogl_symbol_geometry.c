@@ -256,16 +256,16 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     g->e1y = a0y + sign * overshoot * ny;
     g->e2x = b0x + sign * overshoot * nx;
     g->e2y = b0y + sign * overshoot * ny;
-    double point_half = 0.5 * SYM_DIM_POINT_MM / scale;
-    if (!sym_finite(point_half) || !(point_half > 0.0)) return -1;
-    g->point[0][0] = d->x0 - point_half * ux;
-    g->point[0][1] = d->y0 - point_half * uy;
-    g->point[0][2] = d->x0 + point_half * ux;
-    g->point[0][3] = d->y0 + point_half * uy;
-    g->point[1][0] = d->x1 - point_half * ux;
-    g->point[1][1] = d->y1 - point_half * uy;
-    g->point[1][2] = d->x1 + point_half * ux;
-    g->point[1][3] = d->y1 + point_half * uy;
+    double point_len = SYM_DIM_POINT_MM / scale;
+    if (!sym_finite(point_len) || !(point_len > 0.0)) return -1;
+    g->point[0][0] = d->x0;
+    g->point[0][1] = d->y0;
+    g->point[0][2] = d->x0 + sign * point_len * nx;
+    g->point[0][3] = d->y0 + sign * point_len * ny;
+    g->point[1][0] = d->x1;
+    g->point[1][1] = d->y1;
+    g->point[1][2] = d->x1 + sign * point_len * nx;
+    g->point[1][3] = d->y1 + sign * point_len * ny;
 
     int left_count = 0;
     int right_count = 0;
