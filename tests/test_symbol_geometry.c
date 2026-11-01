@@ -154,13 +154,13 @@ int main(void) {
               near(c.items[0].x1, 100.0) && near(c.items[0].y1, 20.0),
               "dimension line endpoints");
         check(c.items[1].kind == ISOGL_SYM_SEGMENT &&
-              near(c.items[1].x0, 0.0) && near(c.items[1].y0, 0.0) &&
+              near(c.items[1].x0, 0.0) && near(c.items[1].y0, 3.0) &&
               near(c.items[1].x1, 0.0) && near(c.items[1].y1, 22.0),
-              "first extension line");
+              "first extension line starts 3 mm from the measured point");
         check(c.items[2].kind == ISOGL_SYM_SEGMENT &&
-              near(c.items[2].x0, 100.0) && near(c.items[2].y0, 0.0) &&
+              near(c.items[2].x0, 100.0) && near(c.items[2].y0, 3.0) &&
               near(c.items[2].x1, 100.0) && near(c.items[2].y1, 22.0),
-              "second extension line");
+              "second extension line starts 3 mm from the measured point");
         check(c.items[7].kind == ISOGL_SYM_TEXT,
               "dimension text item kind");
         check(strcmp(c.items[7].text, "100.0 mm") == 0,
@@ -256,8 +256,8 @@ int main(void) {
     check(isogl_dimension_geometry(&scaled, &metrics, &emitter) == 0,
           "scaled dimension geometry succeeds");
     if (c.count == 8) {
-        check(near(c.items[1].y1, 24.0),
-              "extension overshoot is paper-space at 1:2");
+        check(near(c.items[1].y0, 6.0) && near(c.items[1].y1, 24.0),
+              "extension gap and overshoot are paper-space at 1:2");
         check(near(c.items[7].height_mm, 2.5) &&
               near(c.items[7].x, 44.0),
               "text remains paper-size and is centred in model units");
@@ -365,6 +365,30 @@ int main(void) {
         check(near(r0, 0.75) && near(r1, 0.75),
               "dot is a 1.5 mm diameter circle");
     }
+
+    /* ---- Reference point dots -------------------------------------------- */
+    IsoglDimensionDesc md = make_dimension();
+    md.arrow_left = ISOGL_DIM_ARROW_NONE;
+    md.arrow_right = ISOGL_DIM_ARROW_NONE;
+    md.mark_points = 1;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&md, &metrics, &emitter) == 0,
+          "reference point geometry succeeds");
+    check(c.count == 28, "reference points add two 12-segment dots");
+    if (c.count == 28) {
+        check(c.items[3].kind == ISOGL_SYM_TEXT,
+              "text stays before the reference dots");
+        double rp1 = hypot(c.items[4].x0 - 0.0, c.items[4].y0 - 0.0);
+        double rp2 = hypot(c.items[16].x0 - 100.0, c.items[16].y0 - 0.0);
+        check(near(rp1, 0.75) && near(rp2, 0.75),
+              "reference dots are 1.5 mm circles at p1 and p2");
+    }
+
+    memset(&p, 0, sizeof(p));
+    check(isogl_dimension_pick_geometry(&md, &metrics, &pick_emitter) == 0,
+          "reference point pick geometry succeeds");
+    check(p.count == 28, "reference points are pickable");
 
     /* ---- Explicit distance ---------------------------------------------- */
     IsoglDimensionDesc dd = make_dimension();

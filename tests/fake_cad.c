@@ -296,6 +296,7 @@ int fake_drawing_load_toml(FakeDrawingSpec *spec, const char *path) {
                     t, "arrow_right", ISOGL_DIM_ARROW_OPEN);
                 d->precision = fake_int(t, "precision", 1);
                 d->pick_text = fake_int(t, "pick_text", 1);
+                d->mark_points = fake_int(t, "mark_points", 0);
                 fake_style(t, &d->pattern, &d->weight, &d->layer, d->color);
             } else if (strcmp(type, "center_mark") == 0 ||
                        strcmp(type, "center") == 0) {

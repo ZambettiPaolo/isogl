@@ -292,9 +292,9 @@ int main(int argc, char **argv) {
     prim_before = fake.spec.primitive_count;
     check(fake_drawing_explode_symbol(&fake, 0, &seg, &txt) == 0,
           "dimension explode succeeds");
-    check(seg == 7 && txt == 1, "dimension emits 7 segments + 1 text");
+    check(seg == 31 && txt == 1, "dimension emits 31 segments + 1 text (dots included)");
     check(fake.ref_count == 0, "dimension reference removed");
-    check(fake.spec.primitive_count == prim_before + 8,
+    check(fake.spec.primitive_count == prim_before + 32,
           "dimension geometry transferred to the CAD");
     check(isogl_symbol_hit(dim_id, &dim_all, 0) == -1,
           "exploded dimension ID is dead");
