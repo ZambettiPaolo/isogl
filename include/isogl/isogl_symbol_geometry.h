@@ -76,7 +76,7 @@ typedef enum {
  * text_right are free text placed before and after it; no unit of measure is
  * appended by the generator (a caller that wants " mm" puts it in
  * text_right).  Extension lines start 3 mm away from p1/p2; mark_points draws
- * a 1.5 mm reference dot at those points.
+ * a 0.5 mm reference segment at those points.
  */
 typedef struct {
     double x0, y0;          /* p1: first measured point */
@@ -95,7 +95,7 @@ typedef struct {
     int pick_text;          /* 1 = text OBB participates in rectangle pick */
     IsoglDimensionArrow arrow_left;   /* arrow at p1 */
     IsoglDimensionArrow arrow_right;  /* arrow at p2 */
-    int mark_points;        /* 1 = draw a 1.5 mm reference dot at p1 and p2 */
+    int mark_points;        /* 1 = draw a 0.5 mm reference segment at p1/p2 */
     uint8_t pattern, weight, layer;
     float color[4];
 } IsoglDimensionDesc;

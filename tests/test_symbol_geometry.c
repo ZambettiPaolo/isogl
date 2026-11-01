@@ -375,20 +375,22 @@ int main(void) {
     c.fail_on_call = -1;
     check(isogl_dimension_geometry(&md, &metrics, &emitter) == 0,
           "reference point geometry succeeds");
-    check(c.count == 28, "reference points add two 12-segment dots");
-    if (c.count == 28) {
+    check(c.count == 6, "reference points add one 0.5 mm segment each");
+    if (c.count == 6) {
         check(c.items[3].kind == ISOGL_SYM_TEXT,
-              "text stays before the reference dots");
-        double rp1 = hypot(c.items[4].x0 - 0.0, c.items[4].y0 - 0.0);
-        double rp2 = hypot(c.items[16].x0 - 100.0, c.items[16].y0 - 0.0);
-        check(near(rp1, 0.75) && near(rp2, 0.75),
-              "reference dots are 1.5 mm circles at p1 and p2");
+              "text stays before the reference segments");
+        check(near(c.items[4].x0, -0.25) && near(c.items[4].y0, 0.0) &&
+              near(c.items[4].x1, 0.25) && near(c.items[4].y1, 0.0),
+              "reference segment at p1 is 0.5 mm long");
+        check(near(c.items[5].x0, 99.75) && near(c.items[5].y0, 0.0) &&
+              near(c.items[5].x1, 100.25) && near(c.items[5].y1, 0.0),
+              "reference segment at p2 is 0.5 mm long");
     }
 
     memset(&p, 0, sizeof(p));
     check(isogl_dimension_pick_geometry(&md, &metrics, &pick_emitter) == 0,
           "reference point pick geometry succeeds");
-    check(p.count == 28, "reference points are pickable");
+    check(p.count == 6, "reference points are pickable");
 
     /* ---- Explicit distance ---------------------------------------------- */
     IsoglDimensionDesc dd = make_dimension();

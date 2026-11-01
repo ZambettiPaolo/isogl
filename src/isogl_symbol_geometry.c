@@ -10,6 +10,7 @@
 
 #define SYM_DIM_ARROW_MM 2.2
 #define SYM_DIM_DOT_MM 1.5
+#define SYM_DIM_POINT_MM 0.5
 #define SYM_DIM_OUTSIDE_EXT_MM 5.0
 #define SYM_DIM_EXT_MM 2.0
 #define SYM_DIM_REF_GAP_MM 3.0
@@ -28,7 +29,7 @@ typedef struct {
     double e2x, e2y;        /* extension line 2 end */
     double arrow[SYM_DIM_MAX_ARROW_SEGMENTS][4];
     int arrow_count;
-    double point_radius;    /* reference dot radius, model units */
+    double point[2][4];     /* reference point segments, model units */
     double text_x, text_y;  /* centred baseline origin */
     double text_angle;
     double text_width;      /* model units */
@@ -255,7 +256,16 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     g->e1y = a0y + sign * overshoot * ny;
     g->e2x = b0x + sign * overshoot * nx;
     g->e2y = b0y + sign * overshoot * ny;
-    g->point_radius = dot_radius;
+    double point_half = 0.5 * SYM_DIM_POINT_MM / scale;
+    if (!sym_finite(point_half) || !(point_half > 0.0)) return -1;
+    g->point[0][0] = d->x0 - point_half * ux;
+    g->point[0][1] = d->y0 - point_half * uy;
+    g->point[0][2] = d->x0 + point_half * ux;
+    g->point[0][3] = d->y0 + point_half * uy;
+    g->point[1][0] = d->x1 - point_half * ux;
+    g->point[1][1] = d->y1 - point_half * uy;
+    g->point[1][2] = d->x1 + point_half * ux;
+    g->point[1][3] = d->y1 + point_half * uy;
 
     int left_count = 0;
     int right_count = 0;
@@ -370,45 +380,6 @@ static int sym_emit_pick_obb(IsoglSymPickEmitter *out,
     return out->emit(out->user, &item);
 }
 
-static int sym_emit_dot(IsoglSymEmitter *out,
-                        uint8_t pattern, uint8_t weight, uint8_t layer,
-                        const float color[4],
-                        double cx, double cy, double radius) {
-    double seg[SYM_DIM_DOT_SEGMENTS][4];
-    int n = 0;
-    if (sym_arrow_segments(cx, cy, 1.0, 0.0, 0.0, 1.0, 0.0, radius,
-                           ISOGL_DIM_ARROW_DOT, seg, &n,
-                           SYM_DIM_DOT_SEGMENTS) != 0) {
-        return -1;
-    }
-    for (int i = 0; i < n; ++i) {
-        if (sym_emit_segment(out, pattern, weight, layer, color,
-                             seg[i][0], seg[i][1],
-                             seg[i][2], seg[i][3]) != 0) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static int sym_emit_pick_dot(IsoglSymPickEmitter *out,
-                             double cx, double cy, double radius) {
-    double seg[SYM_DIM_DOT_SEGMENTS][4];
-    int n = 0;
-    if (sym_arrow_segments(cx, cy, 1.0, 0.0, 0.0, 1.0, 0.0, radius,
-                           ISOGL_DIM_ARROW_DOT, seg, &n,
-                           SYM_DIM_DOT_SEGMENTS) != 0) {
-        return -1;
-    }
-    for (int i = 0; i < n; ++i) {
-        if (sym_emit_pick_segment(out, seg[i][0], seg[i][1],
-                                  seg[i][2], seg[i][3]) != 0) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
 int isogl_dimension_geometry(const IsoglDimensionDesc *d,
                              const IsoglSymMetrics *metrics,
                              IsoglSymEmitter *out) {
@@ -434,10 +405,13 @@ int isogl_dimension_geometry(const IsoglDimensionDesc *d,
         return -1;
     }
     if (d->mark_points) {
-        if (sym_emit_dot(out, d->pattern, d->weight, d->layer, d->color,
-                         d->x0, d->y0, g.point_radius) != 0) return -1;
-        if (sym_emit_dot(out, d->pattern, d->weight, d->layer, d->color,
-                         d->x1, d->y1, g.point_radius) != 0) return -1;
+        for (int i = 0; i < 2; ++i) {
+            if (sym_emit_segment(out, d->pattern, d->weight, d->layer,
+                                 d->color, g.point[i][0], g.point[i][1],
+                                 g.point[i][2], g.point[i][3]) != 0) {
+                return -1;
+            }
+        }
     }
     return 0;
 }
@@ -468,11 +442,11 @@ int isogl_dimension_pick_geometry(const IsoglDimensionDesc *d,
         }
     }
     if (d->mark_points) {
-        if (sym_emit_pick_dot(out, d->x0, d->y0, g.point_radius) != 0) {
-            return -1;
-        }
-        if (sym_emit_pick_dot(out, d->x1, d->y1, g.point_radius) != 0) {
-            return -1;
+        for (int i = 0; i < 2; ++i) {
+            if (sym_emit_pick_segment(out, g.point[i][0], g.point[i][1],
+                                      g.point[i][2], g.point[i][3]) != 0) {
+                return -1;
+            }
         }
     }
     return 0;
