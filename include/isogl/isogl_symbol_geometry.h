@@ -50,17 +50,43 @@ typedef struct {
     double (*text_width)(void *user, const char *utf8, double height_mm);
 } IsoglSymMetrics;
 
+/* Arrow style at one end of a dimension line. */
+typedef enum {
+    ISOGL_DIM_ARROW_NONE = 0,
+    ISOGL_DIM_ARROW_OPEN = 1,    /* two legs, open V */
+    ISOGL_DIM_ARROW_CLOSED = 2,  /* closed triangle outline */
+    ISOGL_DIM_ARROW_TICK = 3,    /* 45-degree slash */
+    ISOGL_DIM_ARROW_DOT = 4      /* small cross */
+} IsoglDimensionArrow;
+
+/*
+ * Aligned dimension.  p1 and p2 are the measured points, p3 chooses the side
+ * of the dimension line, and `distance` optionally overrides how far the
+ * dimension line sits from the p1-p2 line (in model units; 0 = derive it from
+ * p3).  The CAD fills every field on each call: there are no hidden defaults.
+ *
+ * The automatic value is formatted with `precision` decimals.  text_left and
+ * text_right are free text placed before and after it; no unit of measure is
+ * appended by the generator (a caller that wants " mm" puts it in
+ * text_right).
+ */
 typedef struct {
     double x0, y0;          /* p1: first measured point */
     double x1, y1;          /* p2: second measured point */
-    double px, py;          /* p3: point on the dimension line */
+    double px, py;          /* p3: direction/side point */
+    double distance;        /* dimension-line offset in model units;
+                               0 = use the p3 distance.  The side is chosen
+                               by p3. */
+    double text_offset_mm;  /* signed text-centre offset from the dimension
+                               line midpoint, in paper mm */
     double text_height_mm;  /* ISO 3098 height on paper */
     double sheet_scale;     /* paper/model scale; 0 or negative -> 1 */
-    char prefix[16];
-    char suffix[16];
-    char unit[8];
+    char text_left[32];     /* free text before the automatic value */
+    char text_right[32];    /* free text after the automatic value */
     int precision;          /* decimals in the value */
     int pick_text;          /* 1 = text OBB participates in rectangle pick */
+    IsoglDimensionArrow arrow_left;   /* arrow at p1 */
+    IsoglDimensionArrow arrow_right;  /* arrow at p2 */
     uint8_t pattern, weight, layer;
     float color[4];
 } IsoglDimensionDesc;

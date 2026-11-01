@@ -186,22 +186,28 @@ Regole che ne derivano:
   (`cad_document_rebuild_text`). Con le quote diventa una parte troppo grande
   del modello: va reso incrementale per entità.
 
-La quota è il caso guida: in memoria `p1`, `p2`, `p3` (orientamento e distanza
-dal primo punto), `testo_prima`, `testo_dopo`. Il valore non è memorizzato: si
-calcola da `|p1 − p2|`. Le coordinate del modello sono in unità documento; la
-scala del foglio governa le grandezze di carta (altezza testo, frecce,
-tolleranze), non il valore misurato. Il generatore produce linee di
-riferimento, linea di quota, punte e un run di testo.
+La quota è il caso guida: in memoria `p1` e `p2` (punti misurati), `p3`
+(punto direzione/lato), `distance` (offset della linea di quota in unità
+documento; 0 = ricavato da `p3`), `text_offset_mm` (posizione del testo
+rispetto al centro, in mm di carta e con segno lungo la linea),
+`text_left`/`text_right` (testo libero prima/dopo il valore) e
+`arrow_left`/`arrow_right` (`NONE`, `OPEN`, `CLOSED`, `TICK`, `DOT`). Il valore
+non è memorizzato: si calcola da `|p1 − p2|` e **non ha unità automatica**; chi
+vuole “ mm” lo mette in `text_right`. Le coordinate del modello sono in unità
+documento; la scala del foglio governa le grandezze di carta (altezza testo,
+frecce, tolleranze), non il valore misurato. Il generatore produce linee di
+riferimento, linea di quota, frecce secondo il tipo scelto e un run di testo.
 
 La prima entità reale è la quota allineata, ora **simbolo isogl**. Il CAD
-costruisce un `IsoglDimensionDesc` (`p1`, `p2`, `p3`, prefisso/unità/suffisso,
-precisione, altezza testo, `pick_text`), chiama
-`cad_add_dimension_symbol` e conserva solo l’`isogl_symbol_id`. La geometria
-pura (`isogl_symbol_geometry`) deriva render e pick; il registry
-(`isogl_symbol`) possiede VBO, stringa, hit/pick e explode. La vecchia
-`CAD_DIMENSION` è stata rimossa dal modello CAD. Il valore si formatta con la
-precisione richiesta; `pick_text = 0` esclude l’OBB del testo dal rettangolo
-lasciandolo cliccabile via pick GPU.
+costruisce ogni volta un `IsoglDimensionDesc` completo (`p1`, `p2`, `p3`,
+`distance`, `text_offset_mm`, `text_left`/`text_right`, `arrow_left`/`right`,
+precisione, altezza testo, `pick_text`), chiama `cad_add_dimension_symbol` e
+conserva solo l’`isogl_symbol_id`. La geometria pura
+(`isogl_symbol_geometry`) deriva render e pick; il registry (`isogl_symbol`)
+possiede VBO, stringa, hit/pick e explode. La vecchia `CAD_DIMENSION` è stata
+rimossa dal modello CAD. Il valore si formatta con la precisione richiesta;
+`pick_text = 0` esclude l’OBB del testo dal rettangolo lasciandolo cliccabile
+via pick GPU.
 
 ## Simboli isogl e confine con il CAD
 

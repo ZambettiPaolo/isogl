@@ -91,25 +91,37 @@ il primo ID stampato è il candidato più vicino al cursore.
 ## Quota
 
 La quota allineata è un **simbolo isogl**, non un’entità CAD. Il CAD costruisce
-un `IsoglDimensionDesc` con `p1` (primo punto misurato), `p2` (secondo) e `p3`
-(un punto sulla linea di quota: offset e lato), più prefisso, unità, suffisso,
-precisione, altezza testo e `pick_text`; poi chiama
-`cad_add_dimension_symbol()` e conserva solo l’`isogl_symbol_id` nel
+ogni volta un `IsoglDimensionDesc` completo:
+
+- `p1`, `p2`: punti misurati; il valore è `|p1-p2|`, senza unità automatica;
+- `p3`: punto direzione/lato della linea di quota;
+- `distance`: offset della linea di quota in unità documento (0 = ricavato da `p3`);
+- `text_offset_mm`: posizione del testo rispetto al centro, in mm di carta e con
+  segno lungo la linea;
+- `text_left`/`text_right`: testo libero prima/dopo il valore (per esempio `Ø `
+  a sinistra o ` mm` a destra);
+- `arrow_left`/`arrow_right`: `NONE`, `OPEN`, `CLOSED`, `TICK`, `DOT`;
+- precisione, altezza testo e `pick_text`.
+
+Poi chiama `cad_add_dimension_symbol()` e conserva solo l’`isogl_symbol_id` nel
 `CadDocument`.
 
-- **render**: linea di quota, due linee di riferimento, quattro tratti delle
-  punte e un run di testo; il VBO e la stringa condividono l’`entity_id`;
+- **render**: linea di quota, due linee di riferimento, frecce secondo il tipo
+  scelto (0–3 segmenti ciascuna) e un run di testo; il VBO e la stringa
+  condividono l’`entity_id`;
 - **valore**: calcolato da `|p1-p2|`, mai memorizzato; le coordinate sono in
   unità documento, mentre altezza testo, frecce e sporgenze sono grandezze di
   carta convertite con `doc->sheet_scale`;
-- **pick**: le stesse linee/punte più l’OBB del testo se `pick_text != 0`;
+- **pick**: le stesse linee/frecce più l’OBB del testo se `pick_text != 0`;
 - **selezione**: window = tutte le primitive contenute; crossing = almeno una
   contenuta o intersecante; `pick_text = 0` lascia il testo al solo click.
 
-La quota del documento demo misura il diametro del cerchio ed è centrata sotto
-il cerchio; il center mark è un secondo simbolo al centro del cerchio. La
-geometria arriva dal modulo puro condiviso `isogl_symbol_geometry`; il registry
-`isogl_symbol` possiede VBO, stringa, hit/pick ed explode. Per manipolare un
+Il documento demo contiene quattro quote: diametro con frecce chiuse,
+orizzontale con tacche, verticale con punti e testo spostato lungo la linea,
+inclinata con frecce miste e testo a destra. Il center mark è un secondo
+simbolo al centro del cerchio. La geometria arriva dal modulo puro condiviso
+`isogl_symbol_geometry`; il registry `isogl_symbol` possiede VBO, stringa,
+hit/pick ed explode. Per manipolare un
 simbolo il CAD usa `isogl_symbol_explode`, che trasferisce segmenti e testo al
 CAD e distrugge il simbolo.
 
