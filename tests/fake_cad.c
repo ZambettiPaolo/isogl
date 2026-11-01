@@ -284,9 +284,16 @@ int fake_drawing_load_toml(FakeDrawingSpec *spec, const char *path) {
                 d->text_height_mm = fake_double(t, "text_height_mm", 3.5);
                 d->sheet_scale = fake_double(t, "sheet_scale",
                                              spec->sheet_scale);
-                fake_string(t, "prefix", d->prefix, sizeof(d->prefix), "");
-                fake_string(t, "suffix", d->suffix, sizeof(d->suffix), "");
-                fake_string(t, "unit", d->unit, sizeof(d->unit), " mm");
+                d->distance = fake_double(t, "distance", 0.0);
+                d->text_offset_mm = fake_double(t, "text_offset_mm", 0.0);
+                fake_string(t, "text_left", d->text_left,
+                            sizeof(d->text_left), "");
+                fake_string(t, "text_right", d->text_right,
+                            sizeof(d->text_right), "");
+                d->arrow_left = (IsoglDimensionArrow)fake_int(
+                    t, "arrow_left", ISOGL_DIM_ARROW_OPEN);
+                d->arrow_right = (IsoglDimensionArrow)fake_int(
+                    t, "arrow_right", ISOGL_DIM_ARROW_OPEN);
                 d->precision = fake_int(t, "precision", 1);
                 d->pick_text = fake_int(t, "pick_text", 1);
                 fake_style(t, &d->pattern, &d->weight, &d->layer, d->color);

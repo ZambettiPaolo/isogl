@@ -11,20 +11,21 @@
 #define SYM_DIM_ARROW_MM 3.5
 #define SYM_DIM_EXT_MM 2.0
 #define SYM_DIM_TEXT_GAP_MM 1.0
+#define SYM_DIM_MAX_ARROW_SEGMENTS 6
 
 typedef struct {
     double ax, ay;          /* dimension line A */
     double bx, by;          /* dimension line B */
     double e1x, e1y;        /* extension line 1 end */
     double e2x, e2y;        /* extension line 2 end */
-    double arrow[4][4];     /* four arrow legs */
+    double arrow[SYM_DIM_MAX_ARROW_SEGMENTS][4];
     int arrow_count;
     double text_x, text_y;  /* centred baseline origin */
     double text_angle;
     double text_width;      /* model units */
     double text_height;     /* model units */
     double text_height_mm;  /* paper units */
-    char text[128];
+    char text[160];
 } SymDimLayout;
 
 static int sym_finite(double v) {
@@ -48,13 +49,125 @@ static void sym_obb_corners(double x, double y, double w, double h,
     }
 }
 
+static int sym_arrow_segments(double tipx, double tipy,
+                              double dirx, double diry,
+                              double nx, double ny,
+                              double length, IsoglDimensionArrow type,
+                              double out[][4], int *count, int max) {
+    if (!out || !count || max < 1) return -1;
+    if (!(length > 0.0)) return -1;
+
+    double ca = cos(M_PI / 6.0);
+    double sa = sin(M_PI / 6.0);
+    double seg[3][4];
+    int n = 0;
+
+    switch (type) {
+    case ISOGL_DIM_ARROW_NONE:
+        n = 0;
+        break;
+
+    case ISOGL_DIM_ARROW_OPEN: {
+        seg[0][0] = tipx;
+        seg[0][1] = tipy;
+        seg[0][2] = tipx + length * (ca * dirx + sa * nx);
+        seg[0][3] = tipy + length * (ca * diry + sa * ny);
+        seg[1][0] = tipx;
+        seg[1][1] = tipy;
+        seg[1][2] = tipx + length * (ca * dirx - sa * nx);
+        seg[1][3] = tipy + length * (ca * diry - sa * ny);
+        n = 2;
+        break;
+    }
+
+    case ISOGL_DIM_ARROW_CLOSED: {
+        double x0 = tipx + length * (ca * dirx + sa * nx);
+        double y0 = tipy + length * (ca * diry + sa * ny);
+        double x1 = tipx + length * (ca * dirx - sa * nx);
+        double y1 = tipy + length * (ca * diry - sa * ny);
+        seg[0][0] = tipx;
+        seg[0][1] = tipy;
+        seg[0][2] = x0;
+        seg[0][3] = y0;
+        seg[1][0] = tipx;
+        seg[1][1] = tipy;
+        seg[1][2] = x1;
+        seg[1][3] = y1;
+        seg[2][0] = x0;
+        seg[2][1] = y0;
+        seg[2][2] = x1;
+        seg[2][3] = y1;
+        n = 3;
+        break;
+    }
+
+    case ISOGL_DIM_ARROW_TICK: {
+        double dx = dirx + nx;
+        double dy = diry + ny;
+        double d = hypot(dx, dy);
+        if (!(d > 0.0)) return -1;
+        dx /= d;
+        dy /= d;
+        double half = 0.5 * length;
+        seg[0][0] = tipx - half * dx;
+        seg[0][1] = tipy - half * dy;
+        seg[0][2] = tipx + half * dx;
+        seg[0][3] = tipy + half * dy;
+        n = 1;
+        break;
+    }
+
+    case ISOGL_DIM_ARROW_DOT: {
+        double ax = dirx + nx;
+        double ay = diry + ny;
+        double bx = dirx - nx;
+        double by = diry - ny;
+        double da = hypot(ax, ay);
+        double db = hypot(bx, by);
+        if (!(da > 0.0) || !(db > 0.0)) return -1;
+        ax /= da;
+        ay /= da;
+        bx /= db;
+        by /= db;
+        double half = 0.25 * length;
+        seg[0][0] = tipx - half * ax;
+        seg[0][1] = tipy - half * ay;
+        seg[0][2] = tipx + half * ax;
+        seg[0][3] = tipy + half * ay;
+        seg[1][0] = tipx - half * bx;
+        seg[1][1] = tipy - half * by;
+        seg[1][2] = tipx + half * bx;
+        seg[1][3] = tipy + half * by;
+        n = 2;
+        break;
+    }
+
+    default:
+        return -1;
+    }
+
+    if (n > max) return -1;
+    for (int i = 0; i < n; ++i) {
+        memcpy(out[i], seg[i], sizeof(seg[i]));
+    }
+    *count = n;
+    return 0;
+}
+
 static int sym_dimension_layout(const IsoglDimensionDesc *d,
                                 const IsoglSymMetrics *metrics,
                                 SymDimLayout *g) {
     if (!d || !g) return -1;
     if (!sym_finite(d->x0) || !sym_finite(d->y0) ||
         !sym_finite(d->x1) || !sym_finite(d->y1) ||
-        !sym_finite(d->px) || !sym_finite(d->py)) {
+        !sym_finite(d->px) || !sym_finite(d->py) ||
+        !sym_finite(d->distance) || !sym_finite(d->text_offset_mm)) {
+        return -1;
+    }
+    if (d->arrow_left < ISOGL_DIM_ARROW_NONE ||
+        d->arrow_left > ISOGL_DIM_ARROW_DOT ||
+        d->arrow_right < ISOGL_DIM_ARROW_NONE ||
+        d->arrow_right > ISOGL_DIM_ARROW_DOT) {
         return -1;
     }
 
@@ -68,17 +181,17 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     double nx = -uy;
     double ny = ux;
 
-    /* Project p1 and p2 on the line through p3 parallel to p1-p2. */
-    double t1 = (d->x0 - d->px) * ux + (d->y0 - d->py) * uy;
-    double t2 = (d->x1 - d->px) * ux + (d->y1 - d->py) * uy;
-    double ax = d->px + t1 * ux;
-    double ay = d->py + t1 * uy;
-    double bx = d->px + t2 * ux;
-    double by = d->py + t2 * uy;
+    /* p3 chooses the side; distance overrides the offset magnitude. */
+    double side_proj = (d->px - d->x0) * nx + (d->py - d->y0) * ny;
+    double sign = side_proj >= 0.0 ? 1.0 : -1.0;
+    double lateral = d->distance != 0.0 ? fabs(d->distance)
+                                         : fabs(side_proj);
+    if (!sym_finite(lateral)) return -1;
 
-    /* p3 side decides the extension-line direction. */
-    double side = (d->px - d->x0) * nx + (d->py - d->y0) * ny;
-    double sign = side >= 0.0 ? 1.0 : -1.0;
+    double ax = d->x0 + sign * lateral * nx;
+    double ay = d->y0 + sign * lateral * ny;
+    double bx = d->x1 + sign * lateral * nx;
+    double by = d->y1 + sign * lateral * ny;
 
     double scale = sym_scale(d->sheet_scale);
     double overshoot = SYM_DIM_EXT_MM / scale;
@@ -98,31 +211,24 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     g->e2x = bx + sign * overshoot * nx;
     g->e2y = by + sign * overshoot * ny;
 
-    double ca = cos(M_PI / 6.0);
-    double sa = sin(M_PI / 6.0);
-    g->arrow[0][0] = ax;
-    g->arrow[0][1] = ay;
-    g->arrow[0][2] = ax + arrow * (ca * ux + sa * nx);
-    g->arrow[0][3] = ay + arrow * (ca * uy + sa * ny);
-    g->arrow[1][0] = ax;
-    g->arrow[1][1] = ay;
-    g->arrow[1][2] = ax + arrow * (ca * ux - sa * nx);
-    g->arrow[1][3] = ay + arrow * (ca * uy - sa * ny);
-    g->arrow[2][0] = bx;
-    g->arrow[2][1] = by;
-    g->arrow[2][2] = bx - arrow * (ca * ux + sa * nx);
-    g->arrow[2][3] = by - arrow * (ca * uy + sa * ny);
-    g->arrow[3][0] = bx;
-    g->arrow[3][1] = by;
-    g->arrow[3][2] = bx - arrow * (ca * ux - sa * nx);
-    g->arrow[3][3] = by - arrow * (ca * uy - sa * ny);
-    g->arrow_count = 4;
+    int left_count = 0;
+    int right_count = 0;
+    if (sym_arrow_segments(ax, ay, ux, uy, nx, ny, arrow,
+                           d->arrow_left, g->arrow, &left_count, 3) != 0) {
+        return -1;
+    }
+    if (sym_arrow_segments(bx, by, -ux, -uy, nx, ny, arrow,
+                           d->arrow_right, g->arrow + left_count,
+                           &right_count, 3) != 0) {
+        return -1;
+    }
+    g->arrow_count = left_count + right_count;
 
     int precision = d->precision;
     if (precision < 0) precision = 0;
     if (precision > 6) precision = 6;
-    snprintf(g->text, sizeof(g->text), "%.15s%.*f%.7s%.15s",
-             d->prefix, precision, len, d->unit, d->suffix);
+    snprintf(g->text, sizeof(g->text), "%.31s%.*f%.31s",
+             d->text_left, precision, len, d->text_right);
 
     g->text_height_mm = text_height_mm;
     g->text_height = text_height_mm / scale;
@@ -144,8 +250,11 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     double ty = sin(angle);
     double tnx = -ty;
     double tny = tx;
-    g->text_x = mx - 0.5 * g->text_width * tx + text_gap * tnx;
-    g->text_y = my - 0.5 * g->text_width * ty + text_gap * tny;
+    double text_offset = d->text_offset_mm / scale;
+    g->text_x = mx + text_offset * tx - 0.5 * g->text_width * tx
+                + text_gap * tnx;
+    g->text_y = my + text_offset * ty - 0.5 * g->text_width * ty
+                + text_gap * tny;
     return 0;
 }
 

@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #define MAX_ITEMS 32
 
 typedef struct {
@@ -110,7 +114,12 @@ static IsoglDimensionDesc make_dimension(void) {
     d.py = 20.0;
     d.text_height_mm = 5.0;
     d.sheet_scale = 1.0;
-    snprintf(d.unit, sizeof(d.unit), " mm");
+    d.distance = 0.0;
+    d.text_offset_mm = 0.0;
+    d.text_left[0] = '\0';
+    snprintf(d.text_right, sizeof(d.text_right), " mm");
+    d.arrow_left = ISOGL_DIM_ARROW_OPEN;
+    d.arrow_right = ISOGL_DIM_ARROW_OPEN;
     d.precision = 1;
     d.pick_text = 1;
     d.pattern = 0;
@@ -253,6 +262,168 @@ int main(void) {
               near(c.items[7].x, 38.0),
               "text remains paper-size and is centred in model units");
     }
+
+    /* ---- Arrow styles ---------------------------------------------------- */
+    IsoglDimensionDesc ad = make_dimension();
+    ad.arrow_left = ISOGL_DIM_ARROW_NONE;
+    ad.arrow_right = ISOGL_DIM_ARROW_NONE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&ad, &metrics, &emitter) == 0,
+          "dimension without arrows succeeds");
+    check(c.count == 4, "NONE arrows emit 3 lines + text");
+
+    ad.arrow_left = ISOGL_DIM_ARROW_TICK;
+    ad.arrow_right = ISOGL_DIM_ARROW_TICK;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&ad, &metrics, &emitter) == 0,
+          "tick arrows succeed");
+    check(c.count == 6, "TICK arrows emit one segment each");
+
+    ad.arrow_left = ISOGL_DIM_ARROW_CLOSED;
+    ad.arrow_right = ISOGL_DIM_ARROW_CLOSED;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&ad, &metrics, &emitter) == 0,
+          "closed arrows succeed");
+    check(c.count == 10, "CLOSED arrows emit three segments each");
+
+    ad.arrow_left = ISOGL_DIM_ARROW_DOT;
+    ad.arrow_right = ISOGL_DIM_ARROW_DOT;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&ad, &metrics, &emitter) == 0,
+          "dot arrows succeed");
+    check(c.count == 8, "DOT arrows emit two segments each");
+
+    /* ---- Explicit distance ---------------------------------------------- */
+    IsoglDimensionDesc dd = make_dimension();
+    dd.arrow_left = ISOGL_DIM_ARROW_NONE;
+    dd.arrow_right = ISOGL_DIM_ARROW_NONE;
+    dd.px = 0.0;
+    dd.py = 100.0;
+    dd.distance = 20.0;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&dd, &metrics, &emitter) == 0,
+          "explicit distance succeeds");
+    if (c.count > 0) {
+        check(near(c.items[0].y0, 20.0) && near(c.items[0].y1, 20.0),
+              "distance overrides the p3 offset");
+    }
+
+    dd.distance = 0.0;
+    dd.py = -30.0;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&dd, &metrics, &emitter) == 0,
+          "distance derived from p3 succeeds");
+    if (c.count > 0) {
+        check(near(c.items[0].y0, -30.0) && near(c.items[0].y1, -30.0),
+              "p3 chooses the dimension-line side");
+    }
+
+    /* ---- Text left/right, no automatic unit ----------------------------- */
+    IsoglDimensionDesc td = make_dimension();
+    snprintf(td.text_left, sizeof(td.text_left), "L ");
+    td.text_right[0] = '\0';
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&td, &metrics, &emitter) == 0,
+          "text left/right succeeds");
+    if (c.count > 0) {
+        check(strcmp(c.items[c.count - 1].text, "L 100.0") == 0,
+              "text_left precedes the value and no unit is appended");
+    }
+
+    snprintf(td.text_right, sizeof(td.text_right), " u");
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&td, &metrics, &emitter) == 0,
+          "text right succeeds");
+    if (c.count > 0) {
+        check(strcmp(c.items[c.count - 1].text, "L 100.0 u") == 0,
+              "text_right follows the value");
+    }
+
+    /* ---- Text offset ----------------------------------------------------- */
+    td.text_offset_mm = 10.0;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&td, &metrics, &emitter) == 0,
+          "text offset succeeds");
+    if (c.count > 0) {
+        /* "L 100.0 u" = 9 chars, stub width = 0.6*5*9 = 27. */
+        check(near(c.items[c.count - 1].x, 50.0 + 10.0 - 27.0 * 0.5) &&
+              near(c.items[c.count - 1].y, 21.0),
+              "text offset moves the text along the dimension line");
+    }
+
+    /* ---- Horizontal, vertical and inclined dimensions -------------------- */
+    IsoglDimensionDesc hd = make_dimension();
+    hd.arrow_left = ISOGL_DIM_ARROW_NONE;
+    hd.arrow_right = ISOGL_DIM_ARROW_NONE;
+    hd.text_left[0] = '\0';
+    hd.text_right[0] = '\0';
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&hd, &metrics, &emitter) == 0,
+          "horizontal dimension succeeds");
+    if (c.count > 0) {
+        check(near(c.items[0].x0, 0.0) && near(c.items[0].y0, 20.0) &&
+              near(c.items[0].x1, 100.0) && near(c.items[0].y1, 20.0),
+              "horizontal dimension line");
+        check(near(c.items[c.count - 1].angle, 0.0),
+              "horizontal text is upright");
+    }
+
+    IsoglDimensionDesc vd = make_dimension();
+    vd.x0 = 0.0; vd.y0 = 0.0;
+    vd.x1 = 0.0; vd.y1 = 100.0;
+    vd.px = 20.0; vd.py = 0.0;
+    vd.arrow_left = ISOGL_DIM_ARROW_NONE;
+    vd.arrow_right = ISOGL_DIM_ARROW_NONE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&vd, &metrics, &emitter) == 0,
+          "vertical dimension succeeds");
+    if (c.count > 0) {
+        check(near(c.items[0].x0, 20.0) && near(c.items[0].y0, 0.0) &&
+              near(c.items[0].x1, 20.0) && near(c.items[0].y1, 100.0),
+              "vertical dimension line");
+        check(near(c.items[c.count - 1].angle, M_PI / 2.0),
+              "vertical text is rotated");
+    }
+
+    IsoglDimensionDesc id = make_dimension();
+    id.x0 = 0.0; id.y0 = 0.0;
+    id.x1 = 100.0; id.y1 = 100.0;
+    id.px = -20.0; id.py = 20.0;
+    id.arrow_left = ISOGL_DIM_ARROW_NONE;
+    id.arrow_right = ISOGL_DIM_ARROW_NONE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&id, &metrics, &emitter) == 0,
+          "inclined dimension succeeds");
+    if (c.count > 0) {
+        check(near(c.items[0].x0, -20.0) && near(c.items[0].y0, 20.0) &&
+              near(c.items[0].x1, 80.0) && near(c.items[0].y1, 120.0),
+              "inclined dimension line");
+        check(near(c.items[c.count - 1].angle, M_PI / 4.0),
+              "inclined text follows the dimension line");
+    }
+
+    /* ---- Invalid new parameters ------------------------------------------ */
+    IsoglDimensionDesc bad_arrow = make_dimension();
+    bad_arrow.arrow_left = (IsoglDimensionArrow)99;
+    check(isogl_dimension_geometry(&bad_arrow, &metrics, &emitter) == -1,
+          "invalid arrow type rejected");
+
+    IsoglDimensionDesc bad_offset = make_dimension();
+    bad_offset.text_offset_mm = NAN;
+    check(isogl_dimension_geometry(&bad_offset, &metrics, &emitter) == -1,
+          "non-finite text offset rejected");
 
     if (failures == 0) {
         printf("PASSED: 0 failure(s)\n");

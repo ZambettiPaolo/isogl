@@ -49,8 +49,7 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     cad_add_text(doc, 3, sheet_w - margin - 80.0f, margin + 35.0f, 5.0f, 0.0f,
                  "isocad - A3 1:1");
 
-    /* Aligned dimension of the circle diameter, below the circle.
-       This is an isogl-owned symbol, not a CAD entity. */
+    /* Aligned diameter dimension below the circle. */
     IsoglDimensionDesc dim;
     memset(&dim, 0, sizeof(dim));
     dim.x0 = sheet_w * 0.5f - 60.0f;
@@ -58,13 +57,75 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     dim.x1 = sheet_w * 0.5f + 60.0f;
     dim.y1 = sheet_h * 0.5f;
     dim.px = dim.x0;
-    dim.py = dim.y0 - 55.0f;
+    dim.py = dim.y0 - 75.0f;
+    dim.distance = 75.0f;
+    dim.text_offset_mm = 0.0f;
     dim.text_height_mm = 5.0;
     dim.precision = 1;
     dim.pick_text = 1;
-    snprintf(dim.prefix, sizeof(dim.prefix), "\xC3\x98 ");
-    snprintf(dim.unit, sizeof(dim.unit), " mm");
+    dim.arrow_left = ISOGL_DIM_ARROW_CLOSED;
+    dim.arrow_right = ISOGL_DIM_ARROW_CLOSED;
+    snprintf(dim.text_left, sizeof(dim.text_left), "\xC3\x98 ");
+    snprintf(dim.text_right, sizeof(dim.text_right), "");
     cad_add_dimension_symbol(doc, 2, &dim);
+
+    /* Horizontal dimension with tick arrows. */
+    IsoglDimensionDesc hdim;
+    memset(&hdim, 0, sizeof(hdim));
+    hdim.x0 = 30.0f;
+    hdim.y0 = 250.0f;
+    hdim.x1 = 150.0f;
+    hdim.y1 = 250.0f;
+    hdim.px = 90.0f;
+    hdim.py = 230.0f;
+    hdim.distance = 20.0f;
+    hdim.text_offset_mm = 0.0f;
+    hdim.text_height_mm = 4.0;
+    hdim.precision = 1;
+    hdim.pick_text = 1;
+    hdim.arrow_left = ISOGL_DIM_ARROW_TICK;
+    hdim.arrow_right = ISOGL_DIM_ARROW_TICK;
+    snprintf(hdim.text_left, sizeof(hdim.text_left), "L ");
+    cad_add_dimension_symbol(doc, 1, &hdim);
+
+    /* Vertical dimension with dot arrows and the text shifted along the line. */
+    IsoglDimensionDesc vdim;
+    memset(&vdim, 0, sizeof(vdim));
+    vdim.x0 = 330.0f;
+    vdim.y0 = 60.0f;
+    vdim.x1 = 330.0f;
+    vdim.y1 = 180.0f;
+    vdim.px = 360.0f;
+    vdim.py = 120.0f;
+    vdim.distance = 30.0f;
+    vdim.text_offset_mm = 8.0f;
+    vdim.text_height_mm = 4.0;
+    vdim.precision = 1;
+    vdim.pick_text = 1;
+    vdim.arrow_left = ISOGL_DIM_ARROW_DOT;
+    vdim.arrow_right = ISOGL_DIM_ARROW_DOT;
+    snprintf(vdim.text_left, sizeof(vdim.text_left), "H ");
+    cad_add_dimension_symbol(doc, 2, &vdim);
+
+    /* Inclined dimension with mixed arrows and text on both sides. */
+    IsoglDimensionDesc idim;
+    memset(&idim, 0, sizeof(idim));
+    idim.x0 = 60.0f;
+    idim.y0 = 60.0f;
+    idim.x1 = 120.0f;
+    idim.y1 = 120.0f;
+    idim.px = 40.0f;
+    idim.py = 100.0f;
+    idim.distance = 10.0f;
+    idim.text_offset_mm = 12.0f;
+    idim.text_height_mm = 4.0;
+    idim.precision = 1;
+    idim.pick_text = 1;
+    idim.arrow_left = ISOGL_DIM_ARROW_OPEN;
+    idim.arrow_right = ISOGL_DIM_ARROW_CLOSED;
+    snprintf(idim.text_left, sizeof(idim.text_left), "L ");
+    snprintf(idim.text_right, sizeof(idim.text_right), " 45\xC2\xB0");
+    cad_add_dimension_symbol(doc, 1, &idim);
 
     /* Center mark at the circle centre: a second isogl symbol type. */
     IsoglCenterMarkDesc mark;
