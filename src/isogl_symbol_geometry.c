@@ -8,10 +8,14 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define SYM_DIM_ARROW_MM 3.5
+#define SYM_DIM_ARROW_MM 2.2
+#define SYM_DIM_DOT_MM 1.5
 #define SYM_DIM_EXT_MM 2.0
 #define SYM_DIM_TEXT_GAP_MM 1.0
-#define SYM_DIM_MAX_ARROW_SEGMENTS 6
+#define SYM_DIM_TEXT_MM 2.5
+#define SYM_DIM_ARROW_HALF_ANGLE (M_PI / 12.0) /* 30 degrees included */
+#define SYM_DIM_DOT_SEGMENTS 12
+#define SYM_DIM_MAX_ARROW_SEGMENTS (2 * SYM_DIM_DOT_SEGMENTS)
 
 typedef struct {
     double ax, ay;          /* dimension line A */
@@ -52,14 +56,30 @@ static void sym_obb_corners(double x, double y, double w, double h,
 static int sym_arrow_segments(double tipx, double tipy,
                               double dirx, double diry,
                               double nx, double ny,
-                              double length, IsoglDimensionArrow type,
+                              double length, double dot_radius,
+                              IsoglDimensionArrow type,
                               double out[][4], int *count, int max) {
     if (!out || !count || max < 1) return -1;
-    if (!(length > 0.0)) return -1;
 
-    double ca = cos(M_PI / 6.0);
-    double sa = sin(M_PI / 6.0);
-    double seg[3][4];
+    /* Outside heads: same tip, legs away from the span, so they point in. */
+    if (type == ISOGL_DIM_ARROW_OPEN_OUTSIDE ||
+        type == ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+        dirx = -dirx;
+        diry = -diry;
+        type = (type == ISOGL_DIM_ARROW_OPEN_OUTSIDE)
+                   ? ISOGL_DIM_ARROW_OPEN
+                   : ISOGL_DIM_ARROW_CLOSED;
+    }
+
+    if (type != ISOGL_DIM_ARROW_DOT && !(length > 0.0)) return -1;
+    if (type == ISOGL_DIM_ARROW_DOT && !(dot_radius > 0.0)) return -1;
+
+    double half = SYM_DIM_ARROW_HALF_ANGLE;
+    double ca = cos(half);
+    double sa = sin(half);
+    /* length is the axial extent; the leg is slightly longer. */
+    double leg = length / ca;
+    double seg[SYM_DIM_DOT_SEGMENTS][4];
     int n = 0;
 
     switch (type) {
@@ -70,21 +90,21 @@ static int sym_arrow_segments(double tipx, double tipy,
     case ISOGL_DIM_ARROW_OPEN: {
         seg[0][0] = tipx;
         seg[0][1] = tipy;
-        seg[0][2] = tipx + length * (ca * dirx + sa * nx);
-        seg[0][3] = tipy + length * (ca * diry + sa * ny);
+        seg[0][2] = tipx + leg * (ca * dirx + sa * nx);
+        seg[0][3] = tipy + leg * (ca * diry + sa * ny);
         seg[1][0] = tipx;
         seg[1][1] = tipy;
-        seg[1][2] = tipx + length * (ca * dirx - sa * nx);
-        seg[1][3] = tipy + length * (ca * diry - sa * ny);
+        seg[1][2] = tipx + leg * (ca * dirx - sa * nx);
+        seg[1][3] = tipy + leg * (ca * diry - sa * ny);
         n = 2;
         break;
     }
 
     case ISOGL_DIM_ARROW_CLOSED: {
-        double x0 = tipx + length * (ca * dirx + sa * nx);
-        double y0 = tipy + length * (ca * diry + sa * ny);
-        double x1 = tipx + length * (ca * dirx - sa * nx);
-        double y1 = tipy + length * (ca * diry - sa * ny);
+        double x0 = tipx + leg * (ca * dirx + sa * nx);
+        double y0 = tipy + leg * (ca * diry + sa * ny);
+        double x1 = tipx + leg * (ca * dirx - sa * nx);
+        double y1 = tipy + leg * (ca * diry - sa * ny);
         seg[0][0] = tipx;
         seg[0][1] = tipy;
         seg[0][2] = x0;
@@ -108,37 +128,27 @@ static int sym_arrow_segments(double tipx, double tipy,
         if (!(d > 0.0)) return -1;
         dx /= d;
         dy /= d;
-        double half = 0.5 * length;
-        seg[0][0] = tipx - half * dx;
-        seg[0][1] = tipy - half * dy;
-        seg[0][2] = tipx + half * dx;
-        seg[0][3] = tipy + half * dy;
+        double tick_half = 0.5 * length;
+        seg[0][0] = tipx - tick_half * dx;
+        seg[0][1] = tipy - tick_half * dy;
+        seg[0][2] = tipx + tick_half * dx;
+        seg[0][3] = tipy + tick_half * dy;
         n = 1;
         break;
     }
 
     case ISOGL_DIM_ARROW_DOT: {
-        double ax = dirx + nx;
-        double ay = diry + ny;
-        double bx = dirx - nx;
-        double by = diry - ny;
-        double da = hypot(ax, ay);
-        double db = hypot(bx, by);
-        if (!(da > 0.0) || !(db > 0.0)) return -1;
-        ax /= da;
-        ay /= da;
-        bx /= db;
-        by /= db;
-        double half = 0.25 * length;
-        seg[0][0] = tipx - half * ax;
-        seg[0][1] = tipy - half * ay;
-        seg[0][2] = tipx + half * ax;
-        seg[0][3] = tipy + half * ay;
-        seg[1][0] = tipx - half * bx;
-        seg[1][1] = tipy - half * by;
-        seg[1][2] = tipx + half * bx;
-        seg[1][3] = tipy + half * by;
-        n = 2;
+        for (int i = 0; i < SYM_DIM_DOT_SEGMENTS; ++i) {
+            double a0 = 2.0 * M_PI * (double)i /
+                        (double)SYM_DIM_DOT_SEGMENTS;
+            double a1 = 2.0 * M_PI * (double)(i + 1) /
+                        (double)SYM_DIM_DOT_SEGMENTS;
+            seg[i][0] = tipx + dot_radius * cos(a0);
+            seg[i][1] = tipy + dot_radius * sin(a0);
+            seg[i][2] = tipx + dot_radius * cos(a1);
+            seg[i][3] = tipy + dot_radius * sin(a1);
+        }
+        n = SYM_DIM_DOT_SEGMENTS;
         break;
     }
 
@@ -146,7 +156,7 @@ static int sym_arrow_segments(double tipx, double tipy,
         return -1;
     }
 
-    if (n > max) return -1;
+    if (n > max || n > SYM_DIM_DOT_SEGMENTS) return -1;
     for (int i = 0; i < n; ++i) {
         memcpy(out[i], seg[i], sizeof(seg[i]));
     }
@@ -165,9 +175,9 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
         return -1;
     }
     if (d->arrow_left < ISOGL_DIM_ARROW_NONE ||
-        d->arrow_left > ISOGL_DIM_ARROW_DOT ||
+        d->arrow_left > ISOGL_DIM_ARROW_CLOSED_OUTSIDE ||
         d->arrow_right < ISOGL_DIM_ARROW_NONE ||
-        d->arrow_right > ISOGL_DIM_ARROW_DOT) {
+        d->arrow_right > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
         return -1;
     }
 
@@ -196,11 +206,13 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     double scale = sym_scale(d->sheet_scale);
     double overshoot = SYM_DIM_EXT_MM / scale;
     double arrow = SYM_DIM_ARROW_MM / scale;
+    double dot_radius = 0.5 * SYM_DIM_DOT_MM / scale;
     double max_arrow = len * 0.45;
     if (arrow > max_arrow) arrow = max_arrow;
     double text_gap = SYM_DIM_TEXT_GAP_MM / scale;
-    double text_height_mm = d->text_height_mm > 0.0 ? d->text_height_mm : 3.5;
-    if (!sym_finite(text_height_mm)) return -1;
+    double text_height_mm = d->text_height_mm > 0.0 ? d->text_height_mm
+                                                   : SYM_DIM_TEXT_MM;
+    if (!sym_finite(text_height_mm) || !(dot_radius > 0.0)) return -1;
 
     g->ax = ax;
     g->ay = ay;
@@ -213,13 +225,14 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
 
     int left_count = 0;
     int right_count = 0;
-    if (sym_arrow_segments(ax, ay, ux, uy, nx, ny, arrow,
-                           d->arrow_left, g->arrow, &left_count, 3) != 0) {
+    if (sym_arrow_segments(ax, ay, ux, uy, nx, ny, arrow, dot_radius,
+                           d->arrow_left, g->arrow, &left_count,
+                           SYM_DIM_DOT_SEGMENTS) != 0) {
         return -1;
     }
-    if (sym_arrow_segments(bx, by, -ux, -uy, nx, ny, arrow,
+    if (sym_arrow_segments(bx, by, -ux, -uy, nx, ny, arrow, dot_radius,
                            d->arrow_right, g->arrow + left_count,
-                           &right_count, 3) != 0) {
+                           &right_count, SYM_DIM_DOT_SEGMENTS) != 0) {
         return -1;
     }
     g->arrow_count = left_count + right_count;

@@ -50,13 +50,20 @@ typedef struct {
     double (*text_width)(void *user, const char *utf8, double height_mm);
 } IsoglSymMetrics;
 
-/* Arrow style at one end of a dimension line. */
+/* Arrow style at one end of a dimension line.
+ *
+ * OPEN and CLOSED place the head inside the measured span.  The *_OUTSIDE
+ * variants keep the tip on the extension line but draw the legs outside the
+ * span, so the head points inward; they are used when the span is too short
+ * for inside arrows.  DOT is a 1.5 mm outline circle. */
 typedef enum {
     ISOGL_DIM_ARROW_NONE = 0,
-    ISOGL_DIM_ARROW_OPEN = 1,    /* two legs, open V */
-    ISOGL_DIM_ARROW_CLOSED = 2,  /* closed triangle outline */
-    ISOGL_DIM_ARROW_TICK = 3,    /* 45-degree slash */
-    ISOGL_DIM_ARROW_DOT = 4      /* small cross */
+    ISOGL_DIM_ARROW_OPEN = 1,           /* two legs, open V */
+    ISOGL_DIM_ARROW_CLOSED = 2,         /* closed triangle outline */
+    ISOGL_DIM_ARROW_TICK = 3,           /* 45-degree slash */
+    ISOGL_DIM_ARROW_DOT = 4,            /* 1.5 mm outline dot */
+    ISOGL_DIM_ARROW_OPEN_OUTSIDE = 5,   /* open head outside, inward */
+    ISOGL_DIM_ARROW_CLOSED_OUTSIDE = 6  /* closed head outside, inward */
 } IsoglDimensionArrow;
 
 /*
