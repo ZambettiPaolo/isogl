@@ -114,6 +114,7 @@ example-qt6: lib
 	@$(PKG_CONFIG) --exists Qt6Widgets Qt6OpenGLWidgets || \
 	    (echo "error: Qt6 Widgets/OpenGLWidgets development files not found"; exit 1)
 	$(MAKE) -C examples/qt6 BUILD="$(CURDIR)/build/examples/qt6" \
+	    ISOGL_LIB="$(CURDIR)/build/libisogl.a" \
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
@@ -121,6 +122,7 @@ example-gtk4: lib
 	@$(PKG_CONFIG) --exists gtk4 || \
 	    (echo "error: GTK4 development files not found (libgtk-4-dev)"; exit 1)
 	$(MAKE) -C examples/gtk4 BUILD="$(CURDIR)/build/examples/gtk4" \
+	    ISOGL_LIB="$(CURDIR)/build/libisogl.a" \
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 

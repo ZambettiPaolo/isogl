@@ -3,6 +3,7 @@
 #include <isogl-sdl/isogl_sdl.h>
 
 #include <math.h>
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -159,6 +160,44 @@ int main(int argc, char **argv) {
         isogl_cleanup();
         isogl_sdl_host_shutdown(&host);
         return 2;
+    }
+
+    /* tomlc99 parses doubles with strtod(), which is locale-sensitive.  In a
+       comma-decimal locale the font advances used to stay zero and strings
+       collapsed onto themselves.  The loader must force the C numeric
+       locale while parsing. */
+    {
+        char saved_locale[128] = "";
+        const char *current = setlocale(LC_NUMERIC, NULL);
+        if (current) {
+            snprintf(saved_locale, sizeof(saved_locale), "%s", current);
+        }
+
+        static const char *comma_locales[] = {
+            "it_IT.UTF-8", "it_IT.utf8", "it_IT",
+            "de_DE.UTF-8", "de_DE.utf8", "de_DE",
+            "fr_FR.UTF-8", "fr_FR.utf8", "fr_FR"
+        };
+        int comma_locale = 0;
+        for (size_t i = 0;
+             i < sizeof(comma_locales) / sizeof(comma_locales[0]); ++i) {
+            if (setlocale(LC_NUMERIC, comma_locales[i])) {
+                comma_locale = 1;
+                break;
+            }
+        }
+        if (comma_locale) {
+            isogl_font_data *localized = isogl_font_load_from_toml(font_path);
+            check(localized != NULL,
+                  "font loads under a comma-decimal locale");
+            check(localized &&
+                  isogl_font_text_advance(localized, "isogl") > 0.0,
+                  "glyph advances survive a comma-decimal locale");
+            isogl_font_free_data(localized);
+        } else {
+            printf("skip comma-decimal locale test (no locale installed)\n");
+        }
+        if (current) setlocale(LC_NUMERIC, saved_locale);
     }
     isogl_font_init_vao();
     if (isogl_symbol_init(font) != 0) {

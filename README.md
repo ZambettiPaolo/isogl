@@ -72,6 +72,12 @@ FreeType/Pango). Ogni stringa è un VBO con `first`/`count` per
 `glMultiDrawArrays`. Le coordinate dei glifi sono `int16`; le stringhe più larghe
 di ~32767 unità vengono clampate con un avviso (limite documentato).
 
+Il parsing TOML è **indipendente dal locale**: `isogl_font_load_from_toml()`
+forza `LC_NUMERIC=C` e ripristina il locale dell'ospite. Senza, in un locale
+con virgola decimale (`it_IT`, `de_DE`, `fr_FR`) i valori `advance = 320.0`
+non verrebbero letti, gli advance resterebbero zero e i glifi si
+sovrapporrebbero. `make test-viewport` copre il caso.
+
 Larghezza linee: **1 px per scelta deliberata**. Lo spessore ISO è un dato del
 modello e viene visualizzato tramite la mappa colore→spessore (`T` alterna
 colori-spessore e colori-stampa, come in AutoCAD).

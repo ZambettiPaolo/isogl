@@ -4,7 +4,6 @@
 #include <EGL/egl.h>
 #include <dlfcn.h>
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 
 #include <isogl/isogl.h>

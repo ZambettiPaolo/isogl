@@ -432,6 +432,10 @@ rimozione/undo delle entità e il modello gerarchico del CAD.
 - Usare le coordinate della finestra invece di quelle locali al viewport.
 - Calcolare NDC della selezione una volta sola e cacharlo: va ricalcolato al
   draw perché il viewport può cambiare.
+- Far dipendere il parsing del font dal locale del processo: tomlc99 usa
+  `strtod`, quindi in locale con virgola decimale gli `advance` diventano 0 e
+  i glifi si sovrappongono. `isogl_font_load_from_toml()` forza
+  `LC_NUMERIC=C` e ripristina; `test-viewport` copre il caso.
 
 ## Build e test
 

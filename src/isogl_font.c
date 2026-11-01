@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <locale.h>
 #include "glad.h"
 #include "toml.h"
 
@@ -96,7 +97,7 @@ static void isogl_store_polyline(isogl_glyph *glyph, uint32_t *poly_idx,
     (*poly_idx)++;
 }
 
-isogl_font_data* isogl_font_load_from_toml(const char* filename) {
+static isogl_font_data* isogl_font_load_from_toml_impl(const char* filename) {
     char errbuf[256];
     FILE* fp = fopen(filename, "r");
     if (!fp) {
@@ -284,6 +285,28 @@ fail:
     toml_free(doc);
     isogl_font_free_data(font);
     return NULL;
+}
+
+/*
+ * tomlc99 parses floating point values with the C library's strtod(), which is
+ * locale-sensitive.  In a comma-decimal locale (it_IT, de_DE, fr_FR, ...)
+ * "advance = 320.0" fails to parse and the glyph advances stay zero, so every
+ * string collapses onto itself.  Parse under the C numeric locale and restore
+ * the host locale afterwards.  The library is documented as single-threaded.
+ */
+isogl_font_data* isogl_font_load_from_toml(const char* filename) {
+    char saved[128];
+    int restore = 0;
+    const char *current = setlocale(LC_NUMERIC, NULL);
+    if (current) {
+        snprintf(saved, sizeof(saved), "%s", current);
+        if (setlocale(LC_NUMERIC, "C")) restore = 1;
+    }
+
+    isogl_font_data *font = isogl_font_load_from_toml_impl(filename);
+
+    if (restore) setlocale(LC_NUMERIC, saved);
+    return font;
 }
 
 void isogl_font_free_data(isogl_font_data* font) {
