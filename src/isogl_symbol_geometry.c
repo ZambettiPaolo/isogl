@@ -12,6 +12,7 @@
 #define SYM_DIM_DOT_MM 1.5
 #define SYM_DIM_OUTSIDE_EXT_MM 5.0
 #define SYM_DIM_EXT_MM 2.0
+#define SYM_DIM_REF_GAP_MM 3.0
 #define SYM_DIM_TEXT_GAP_MM 1.0
 #define SYM_DIM_TEXT_MM 2.5
 #define SYM_DIM_ARROW_HALF_ANGLE (M_PI / 12.0) /* 30 degrees included */
@@ -21,10 +22,13 @@
 typedef struct {
     double ax, ay;          /* dimension line A */
     double bx, by;          /* dimension line B */
+    double s1x, s1y;        /* extension line 1 start (detached from p1) */
+    double s2x, s2y;        /* extension line 2 start (detached from p2) */
     double e1x, e1y;        /* extension line 1 end */
     double e2x, e2y;        /* extension line 2 end */
     double arrow[SYM_DIM_MAX_ARROW_SEGMENTS][4];
     int arrow_count;
+    double point_radius;    /* reference dot radius, model units */
     double text_x, text_y;  /* centred baseline origin */
     double text_angle;
     double text_width;      /* model units */
@@ -227,6 +231,13 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     double ext_right = sym_arrow_is_outside(d->arrow_right) ? outside_ext : 0.0;
     if (!sym_finite(outside_ext) || !(outside_ext > 0.0)) return -1;
 
+    /* Leave a paper-space gap between the measured point and the extension
+       line.  If the dimension line is closer than the gap, shrink it so the
+       extension line never crosses back over its own endpoint. */
+    double ref_gap = SYM_DIM_REF_GAP_MM / scale;
+    if (!sym_finite(ref_gap) || !(ref_gap >= 0.0)) return -1;
+    double gap_used = ref_gap < lateral ? ref_gap : lateral;
+
     double ax = a0x - ext_left * ux;
     double ay = a0y - ext_left * uy;
     double bx = b0x + ext_right * ux;
@@ -236,10 +247,15 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     g->ay = ay;
     g->bx = bx;
     g->by = by;
+    g->s1x = d->x0 + sign * gap_used * nx;
+    g->s1y = d->y0 + sign * gap_used * ny;
+    g->s2x = d->x1 + sign * gap_used * nx;
+    g->s2y = d->y1 + sign * gap_used * ny;
     g->e1x = a0x + sign * overshoot * nx;
     g->e1y = a0y + sign * overshoot * ny;
     g->e2x = b0x + sign * overshoot * nx;
     g->e2y = b0y + sign * overshoot * ny;
+    g->point_radius = dot_radius;
 
     int left_count = 0;
     int right_count = 0;
@@ -354,6 +370,45 @@ static int sym_emit_pick_obb(IsoglSymPickEmitter *out,
     return out->emit(out->user, &item);
 }
 
+static int sym_emit_dot(IsoglSymEmitter *out,
+                        uint8_t pattern, uint8_t weight, uint8_t layer,
+                        const float color[4],
+                        double cx, double cy, double radius) {
+    double seg[SYM_DIM_DOT_SEGMENTS][4];
+    int n = 0;
+    if (sym_arrow_segments(cx, cy, 1.0, 0.0, 0.0, 1.0, 0.0, radius,
+                           ISOGL_DIM_ARROW_DOT, seg, &n,
+                           SYM_DIM_DOT_SEGMENTS) != 0) {
+        return -1;
+    }
+    for (int i = 0; i < n; ++i) {
+        if (sym_emit_segment(out, pattern, weight, layer, color,
+                             seg[i][0], seg[i][1],
+                             seg[i][2], seg[i][3]) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int sym_emit_pick_dot(IsoglSymPickEmitter *out,
+                             double cx, double cy, double radius) {
+    double seg[SYM_DIM_DOT_SEGMENTS][4];
+    int n = 0;
+    if (sym_arrow_segments(cx, cy, 1.0, 0.0, 0.0, 1.0, 0.0, radius,
+                           ISOGL_DIM_ARROW_DOT, seg, &n,
+                           SYM_DIM_DOT_SEGMENTS) != 0) {
+        return -1;
+    }
+    for (int i = 0; i < n; ++i) {
+        if (sym_emit_pick_segment(out, seg[i][0], seg[i][1],
+                                  seg[i][2], seg[i][3]) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 int isogl_dimension_geometry(const IsoglDimensionDesc *d,
                              const IsoglSymMetrics *metrics,
                              IsoglSymEmitter *out) {
@@ -365,9 +420,9 @@ int isogl_dimension_geometry(const IsoglDimensionDesc *d,
     if (sym_emit_segment(out, d->pattern, d->weight, d->layer, d->color,
                          g.ax, g.ay, g.bx, g.by) != 0) return -1;
     if (sym_emit_segment(out, d->pattern, d->weight, d->layer, d->color,
-                         d->x0, d->y0, g.e1x, g.e1y) != 0) return -1;
+                         g.s1x, g.s1y, g.e1x, g.e1y) != 0) return -1;
     if (sym_emit_segment(out, d->pattern, d->weight, d->layer, d->color,
-                         d->x1, d->y1, g.e2x, g.e2y) != 0) return -1;
+                         g.s2x, g.s2y, g.e2x, g.e2y) != 0) return -1;
     for (int i = 0; i < g.arrow_count; ++i) {
         if (sym_emit_segment(out, d->pattern, d->weight, d->layer, d->color,
                              g.arrow[i][0], g.arrow[i][1],
@@ -377,6 +432,12 @@ int isogl_dimension_geometry(const IsoglDimensionDesc *d,
     }
     if (sym_emit_text(out, d->pattern, d->weight, d->layer, d->color, &g) != 0) {
         return -1;
+    }
+    if (d->mark_points) {
+        if (sym_emit_dot(out, d->pattern, d->weight, d->layer, d->color,
+                         d->x0, d->y0, g.point_radius) != 0) return -1;
+        if (sym_emit_dot(out, d->pattern, d->weight, d->layer, d->color,
+                         d->x1, d->y1, g.point_radius) != 0) return -1;
     }
     return 0;
 }
@@ -390,8 +451,8 @@ int isogl_dimension_pick_geometry(const IsoglDimensionDesc *d,
     if (sym_dimension_layout(d, metrics, &g) != 0) return -1;
 
     if (sym_emit_pick_segment(out, g.ax, g.ay, g.bx, g.by) != 0) return -1;
-    if (sym_emit_pick_segment(out, d->x0, d->y0, g.e1x, g.e1y) != 0) return -1;
-    if (sym_emit_pick_segment(out, d->x1, d->y1, g.e2x, g.e2y) != 0) return -1;
+    if (sym_emit_pick_segment(out, g.s1x, g.s1y, g.e1x, g.e1y) != 0) return -1;
+    if (sym_emit_pick_segment(out, g.s2x, g.s2y, g.e2x, g.e2y) != 0) return -1;
     for (int i = 0; i < g.arrow_count; ++i) {
         if (sym_emit_pick_segment(out, g.arrow[i][0], g.arrow[i][1],
                                   g.arrow[i][2], g.arrow[i][3]) != 0) {
@@ -403,6 +464,14 @@ int isogl_dimension_pick_geometry(const IsoglDimensionDesc *d,
         if (sym_emit_pick_obb(out, g.text_x, g.text_y,
                               g.text_width, g.text_height,
                               g.text_angle) != 0) {
+            return -1;
+        }
+    }
+    if (d->mark_points) {
+        if (sym_emit_pick_dot(out, d->x0, d->y0, g.point_radius) != 0) {
+            return -1;
+        }
+        if (sym_emit_pick_dot(out, d->x1, d->y1, g.point_radius) != 0) {
             return -1;
         }
     }

@@ -192,11 +192,13 @@ documento; 0 = ricavato da `p3`), `text_offset_mm` (posizione del testo
 rispetto al centro, in mm di carta e con segno lungo la linea),
 `text_left`/`text_right` (testo libero prima/dopo il valore) e
 `arrow_left`/`arrow_right` (`NONE`, `OPEN`, `CLOSED`, `TICK`, `DOT`,
-`OPEN_OUTSIDE`, `CLOSED_OUTSIDE`). Proporzioni di default: testo **2,5 mm**,
-frecce **2,2 mm** con ampiezza **30°**, pallino **1,5 mm**. Le varianti
+`OPEN_OUTSIDE`, `CLOSED_OUTSIDE`) e `mark_points`. Proporzioni di default:
+testo **2,5 mm**, frecce **2,2 mm** con ampiezza **30°**, pallino **1,5 mm**;
+le linee di riferimento partono **3 mm** dopo il punto misurato. Le varianti
 `*_OUTSIDE` hanno la punta sull’estremo e le gambe fuori dal tratto, quindi
 puntano all’interno; la linea di quota viene estesa di **5 mm** oltre
-quell’estremo per ospitare la freccia. Il valore non è memorizzato: si calcola
+quell’estremo per ospitare la freccia. `mark_points` aggiunge un pallino di
+riferimento da 1,5 mm su `p1` e `p2`. Il valore non è memorizzato: si calcola
 da `|p1 − p2|` e **non ha unità automatica**; chi vuole “ mm” lo mette in
 `text_right`. Le coordinate del modello sono in unità
 documento; la scala del foglio governa le grandezze di carta (altezza testo,
