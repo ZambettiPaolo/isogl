@@ -112,7 +112,7 @@ static IsoglDimensionDesc make_dimension(void) {
     d.y1 = 0.0;
     d.px = 0.0;
     d.py = 20.0;
-    d.text_height_mm = 5.0;
+    d.text_height_mm = 2.5;
     d.sheet_scale = 1.0;
     d.distance = 0.0;
     d.text_offset_mm = 0.0;
@@ -165,9 +165,9 @@ int main(void) {
               "dimension text item kind");
         check(strcmp(c.items[7].text, "100.0 mm") == 0,
               "dimension text value");
-        check(near(c.items[7].x, 38.0) && near(c.items[7].y, 21.0),
+        check(near(c.items[7].x, 44.0) && near(c.items[7].y, 21.0),
               "dimension text is centred above the line");
-        check(near(c.items[7].height_mm, 5.0) &&
+        check(near(c.items[7].height_mm, 2.5) &&
               near(c.items[7].angle, 0.0),
               "dimension text height and angle");
         check(c.items[7].weight == 3 && c.items[0].weight == 3,
@@ -182,8 +182,8 @@ int main(void) {
           "dimension pick geometry succeeds");
     check(p.count == 8, "dimension pick = 7 segments + text OBB");
     if (p.count == 8) {
-        check(near(p.items[7].x0, 38.0) && near(p.items[7].y0, 21.0) &&
-              near(p.items[7].x1, 62.0) && near(p.items[7].y1, 26.0),
+        check(near(p.items[7].x0, 44.0) && near(p.items[7].y0, 21.0) &&
+              near(p.items[7].x1, 56.0) && near(p.items[7].y1, 23.5),
               "dimension text OBB corners");
     }
 
@@ -250,7 +250,7 @@ int main(void) {
     /* ---- Non-unit scale -------------------------------------------------- */
     IsoglDimensionDesc scaled = make_dimension();
     scaled.sheet_scale = 0.5;
-    scaled.text_height_mm = 5.0;
+    scaled.text_height_mm = 2.5;
     memset(&c, 0, sizeof(c));
     c.fail_on_call = -1;
     check(isogl_dimension_geometry(&scaled, &metrics, &emitter) == 0,
@@ -258,8 +258,8 @@ int main(void) {
     if (c.count == 8) {
         check(near(c.items[1].y1, 24.0),
               "extension overshoot is paper-space at 1:2");
-        check(near(c.items[7].height_mm, 5.0) &&
-              near(c.items[7].x, 38.0),
+        check(near(c.items[7].height_mm, 2.5) &&
+              near(c.items[7].x, 44.0),
               "text remains paper-size and is centred in model units");
     }
 
@@ -295,7 +295,51 @@ int main(void) {
     c.fail_on_call = -1;
     check(isogl_dimension_geometry(&ad, &metrics, &emitter) == 0,
           "dot arrows succeed");
-    check(c.count == 8, "DOT arrows emit two segments each");
+    check(c.count == 28, "DOT arrows emit a 12-segment circle each");
+
+    /* ---- Arrow proportions and outside heads ----------------------------- */
+    IsoglDimensionDesc geom = make_dimension();
+    geom.arrow_left = ISOGL_DIM_ARROW_OPEN;
+    geom.arrow_right = ISOGL_DIM_ARROW_NONE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&geom, &metrics, &emitter) == 0,
+          "arrow proportion probe succeeds");
+    if (c.count >= 4) {
+        check(near(c.items[3].x1, 2.2) &&
+              near(c.items[3].y1, 20.0 + 2.2 * tan(M_PI / 12.0)),
+              "open arrow is 2.2 mm long with a 30-degree included angle");
+    }
+
+    geom.arrow_left = ISOGL_DIM_ARROW_OPEN_OUTSIDE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&geom, &metrics, &emitter) == 0,
+          "outside open arrow succeeds");
+    if (c.count >= 4) {
+        check(near(c.items[3].x1, -2.2),
+              "outside arrow points inward from beyond the span");
+    }
+    check(c.count == 6, "OPEN_OUTSIDE emits one head + text");
+
+    geom.arrow_left = ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&geom, &metrics, &emitter) == 0,
+          "outside closed arrow succeeds");
+    check(c.count == 7, "CLOSED_OUTSIDE emits a triangle + text");
+
+    geom.arrow_left = ISOGL_DIM_ARROW_DOT;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&geom, &metrics, &emitter) == 0,
+          "dot arrow succeeds");
+    if (c.count >= 4) {
+        double r0 = hypot(c.items[3].x0 - 0.0, c.items[3].y0 - 20.0);
+        double r1 = hypot(c.items[3].x1 - 0.0, c.items[3].y1 - 20.0);
+        check(near(r0, 0.75) && near(r1, 0.75),
+              "dot is a 1.5 mm diameter circle");
+    }
 
     /* ---- Explicit distance ---------------------------------------------- */
     IsoglDimensionDesc dd = make_dimension();
@@ -354,8 +398,8 @@ int main(void) {
     check(isogl_dimension_geometry(&td, &metrics, &emitter) == 0,
           "text offset succeeds");
     if (c.count > 0) {
-        /* "L 100.0 u" = 9 chars, stub width = 0.6*5*9 = 27. */
-        check(near(c.items[c.count - 1].x, 50.0 + 10.0 - 27.0 * 0.5) &&
+        /* "L 100.0 u" = 9 chars, stub width = 0.6*2.5*9 = 13.5. */
+        check(near(c.items[c.count - 1].x, 50.0 + 10.0 - 13.5 * 0.5) &&
               near(c.items[c.count - 1].y, 21.0),
               "text offset moves the text along the dimension line");
     }

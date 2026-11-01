@@ -59,7 +59,7 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     dim.py = dim.y0 - 75.0f;
     dim.distance = 75.0f;
     dim.text_offset_mm = 0.0f;
-    dim.text_height_mm = 5.0;
+    dim.text_height_mm = 2.5;
     dim.precision = 1;
     dim.pick_text = 1;
     dim.arrow_left = ISOGL_DIM_ARROW_CLOSED;
@@ -79,11 +79,11 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     hdim.py = 230.0f;
     hdim.distance = 20.0f;
     hdim.text_offset_mm = 0.0f;
-    hdim.text_height_mm = 4.0;
+    hdim.text_height_mm = 2.5;
     hdim.precision = 1;
     hdim.pick_text = 1;
-    hdim.arrow_left = ISOGL_DIM_ARROW_TICK;
-    hdim.arrow_right = ISOGL_DIM_ARROW_TICK;
+    hdim.arrow_left = ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
+    hdim.arrow_right = ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
     snprintf(hdim.text_left, sizeof(hdim.text_left), "L ");
     cad_add_dimension_symbol(doc, 1, &hdim);
 
@@ -98,7 +98,7 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     vdim.py = 120.0f;
     vdim.distance = 30.0f;
     vdim.text_offset_mm = 8.0f;
-    vdim.text_height_mm = 4.0;
+    vdim.text_height_mm = 2.5;
     vdim.precision = 1;
     vdim.pick_text = 1;
     vdim.arrow_left = ISOGL_DIM_ARROW_DOT;
@@ -117,7 +117,7 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     idim.py = 100.0f;
     idim.distance = 10.0f;
     idim.text_offset_mm = 12.0f;
-    idim.text_height_mm = 4.0;
+    idim.text_height_mm = 2.5;
     idim.precision = 1;
     idim.pick_text = 1;
     idim.arrow_left = ISOGL_DIM_ARROW_OPEN;

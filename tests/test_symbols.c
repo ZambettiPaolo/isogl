@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
     isogl_box dim_bounds;
     check(isogl_symbol_bounds(dim_id, &dim_bounds) == 0 &&
           dim_bounds.xmin <= 40.0 && dim_bounds.xmax >= 160.0 &&
-          dim_bounds.ymin <= 60.0 && dim_bounds.ymax >= 96.0,
+          dim_bounds.ymin <= 60.0 && dim_bounds.ymax >= 93.0,
           "dimension bounds cover pick geometry");
 
     isogl_box dim_no_text = {30.0, 50.0, 170.0, 93.0};

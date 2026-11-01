@@ -100,7 +100,10 @@ ogni volta un `IsoglDimensionDesc` completo:
   segno lungo la linea;
 - `text_left`/`text_right`: testo libero prima/dopo il valore (per esempio `Ø `
   a sinistra o ` mm` a destra);
-- `arrow_left`/`arrow_right`: `NONE`, `OPEN`, `CLOSED`, `TICK`, `DOT`;
+- `arrow_left`/`arrow_right`: `NONE`, `OPEN`, `CLOSED`, `TICK`, `DOT`,
+  `OPEN_OUTSIDE`, `CLOSED_OUTSIDE`; testo 2,5 mm, frecce 2,2 mm con ampiezza
+  30°, pallino 1,5 mm. Le varianti `*_OUTSIDE` puntano all’interno da fuori
+  del tratto;
 - precisione, altezza testo e `pick_text`.
 
 Poi chiama `cad_add_dimension_symbol()` e conserva solo l’`isogl_symbol_id` nel
@@ -117,9 +120,9 @@ Poi chiama `cad_add_dimension_symbol()` e conserva solo l’`isogl_symbol_id` ne
   contenuta o intersecante; `pick_text = 0` lascia il testo al solo click.
 
 Il documento demo contiene quattro quote: diametro con frecce chiuse,
-orizzontale con tacche, verticale con punti e testo spostato lungo la linea,
-inclinata con frecce miste e testo a destra. Il center mark è un secondo
-simbolo al centro del cerchio. La geometria arriva dal modulo puro condiviso
+orizzontale con frecce esterne chiuse, verticale con pallini e testo spostato
+lungo la linea, inclinata con frecce miste e testo a destra. Il center mark è
+un secondo simbolo al centro del cerchio. La geometria arriva dal modulo puro condiviso
 `isogl_symbol_geometry`; il registry `isogl_symbol` possiede VBO, stringa,
 hit/pick ed explode. Per manipolare un
 simbolo il CAD usa `isogl_symbol_explode`, che trasferisce segmenti e testo al
