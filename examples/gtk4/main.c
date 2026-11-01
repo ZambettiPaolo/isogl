@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include <gtk/gtk.h>
+#include <EGL/egl.h>
 #include <dlfcn.h>
 #include <math.h>
 #include <stdio.h>

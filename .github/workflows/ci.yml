@@ -58,4 +58,4 @@ jobs:
           ISOGL_ASSET_DIR: ${{ github.workspace }}
         run: |
           xvfb-run -a -s "-screen 0 1280x720x24" \
-            timeout 3 ./examples/qt6/build/isogl-qt6-host || [ $? -eq 124 ]
+            timeout 3 ./build/examples/qt6/isogl-qt6-host || [ $? -eq 124 ]
