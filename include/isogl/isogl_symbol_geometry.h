@@ -54,8 +54,8 @@ typedef struct {
  *
  * OPEN and CLOSED place the head inside the measured span.  The *_OUTSIDE
  * variants keep the tip on the extension line but draw the legs outside the
- * span, so the head points inward; they are used when the span is too short
- * for inside arrows.  DOT is a 1.5 mm outline circle. */
+ * span, so the head points inward; the dimension line is extended 5 mm beyond
+ * that end to host the head.  DOT is a 1.5 mm outline circle. */
 typedef enum {
     ISOGL_DIM_ARROW_NONE = 0,
     ISOGL_DIM_ARROW_OPEN = 1,           /* two legs, open V */
