@@ -8,10 +8,90 @@
 #include <math.h>
 
 #include "cad.h"
+#include "console.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+static const float ISOCAD_SCENE_BG[4]   = {0.08f, 0.09f, 0.10f, 1.0f};
+static const float ISOCAD_PANEL_BG[4]   = {0.030f, 0.039f, 0.047f, 1.0f};
+static const float ISOCAD_PANEL_EDGE[4] = {0.20f, 0.24f, 0.30f, 1.0f};
+static const float ISOCAD_SCENE_TEXT[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+
+#define ISOCAD_PANEL_SEPARATOR 1
+
+/* Bottom strip height in framebuffer pixels: 100 logical points. */
+static int isocad_panel_px(const isogl_sdl_host *host) {
+    if (!host || host->fb_height < 2) return 0;
+    double dpr = host->scale_y > 0.0 ? host->scale_y : 1.0;
+    int px = (int)lround((double)ISOCAD_CONSOLE_LOGICAL_HEIGHT * dpr);
+    if (px < 1) px = 1;
+    if (px > host->fb_height - 1) px = host->fb_height - 1;
+    return px;
+}
+
+/* Fit the sheet into the visible area above the bottom strip by editing the
+ * model matrix.  The viewport stays the full window, so events, screen/world
+ * conversions and pick keep using the same global matrices. */
+static void isocad_fit_scene(const isogl_sdl_host *host, int panel_px) {
+    isogl_zoom_all_sheet();
+    if (!host || host->fb_height <= 1) return;
+
+    float p = (float)panel_px / (float)host->fb_height;
+    float s = 1.0f - p;
+
+    isogl_model_matrix[0] *= s;
+    isogl_model_matrix[5] *= s;
+    isogl_model_matrix[12] *= s;
+    isogl_model_matrix[13] *= s;
+
+    float ay = (host->fb_width >= host->fb_height)
+                   ? 1.0f
+                   : (float)host->fb_width / (float)host->fb_height;
+    if (fabsf(ay) < 1e-6f) ay = 1.0f;
+    isogl_model_matrix[13] += p / ay;
+}
+
+/* px, py are framebuffer pixels, origin window top-left. */
+static int isocad_fb_in_panel(const isogl_sdl_host *host, int panel_px,
+                              float px, float py) {
+    (void)px;
+    if (!host || panel_px <= 0) return 0;
+    return py >= (float)(host->fb_height - panel_px);
+}
+
+/* Opaque UI strip over the scene.  Raw GL on the full-window viewport: no
+ * isogl viewport is installed or changed. */
+static void isocad_draw_panel_rect(const isogl_sdl_host *host, int panel_px) {
+    if (!host || panel_px <= 0 || host->fb_width <= 0) return;
+
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    GLint box[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_SCISSOR_BOX, box);
+
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, host->fb_width, panel_px);
+    glClearColor(ISOCAD_PANEL_BG[0], ISOCAD_PANEL_BG[1],
+                 ISOCAD_PANEL_BG[2], ISOCAD_PANEL_BG[3]);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+#if ISOCAD_PANEL_SEPARATOR
+    if (panel_px > 1) {
+        glScissor(0, panel_px - 1, host->fb_width, 1);
+        glClearColor(ISOCAD_PANEL_EDGE[0], ISOCAD_PANEL_EDGE[1],
+                     ISOCAD_PANEL_EDGE[2], ISOCAD_PANEL_EDGE[3]);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+#endif
+
+    if (scissor) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(box[0], box[1], box[2], box[3]);
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
+}
 
 static void shutdown_all(isogl_sdl_host *host, CadDocument *doc,
                          isogl_font_data *font) {
@@ -435,8 +515,9 @@ int main(int argc, char **argv) {
         shutdown_all(&host, NULL, font);
         return 1;
     }
-    isogl_zoom_all_sheet();
     isogl_sdl_host_update(&host);
+    int panel_px = isocad_panel_px(&host);
+    isocad_fit_scene(&host, panel_px);
 
     CadDocument doc;
     if (cad_document_init(&doc, font, 1.0f) != 0) {
@@ -453,6 +534,16 @@ int main(int argc, char **argv) {
         0, 0, 1, 0,
         0, 0, 0, 1
     };
+
+    IsocadConsole console;
+    isocad_console_init(&console, font);
+    isocad_console_layout(&console, host.fb_width, host.fb_height, panel_px);
+
+    /* The first SDL_PollEvent happens before the first frame: install the
+       full-window viewport so screen/world conversions and pick are valid. */
+    isogl_viewport full_vp = {0, 0, host.fb_width, host.fb_height};
+    isogl_set_viewport(&full_vp);
+    SDL_StartTextInput();
 
     int running = 1;
     int selecting = 0;
@@ -472,8 +563,16 @@ int main(int argc, char **argv) {
                     break;
 
                 case SDL_WINDOWEVENT:
-                    if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                    if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                        event.window.event == SDL_WINDOWEVENT_RESIZED) {
                         isogl_sdl_host_update(&host);
+                        panel_px = isocad_panel_px(&host);
+                        isocad_console_layout(&console, host.fb_width,
+                                              host.fb_height, panel_px);
+                        isocad_fit_scene(&host, panel_px);
+                        isogl_viewport full = {0, 0, host.fb_width,
+                                               host.fb_height};
+                        isogl_set_viewport(&full);
                         if (selecting && sel_moved) {
                             int mx = 0, my = 0;
                             SDL_GetMouseState(&mx, &my);
@@ -483,36 +582,58 @@ int main(int argc, char **argv) {
                     }
                     break;
 
-                case SDL_KEYDOWN:
-                    if (event.key.repeat) break;
-                    switch (event.key.keysym.sym) {
+                case SDL_KEYDOWN: {
+                    SDL_Keycode sym = event.key.keysym.sym;
+                    if (event.key.repeat && sym != SDLK_BACKSPACE) break;
+                    int ctrl = (event.key.keysym.mod & KMOD_CTRL) != 0;
+
+                    switch (sym) {
                         case SDLK_ESCAPE:
-                            if (selecting || isogl_get_selection_active() ||
-                                selection.count > 0) {
+                            if (console.input_len > 0) {
+                                isocad_console_clear_input(&console);
+                            } else if (selecting ||
+                                       isogl_get_selection_active() ||
+                                       selection.count > 0) {
                                 selecting = 0;
                                 sel_moved = 0;
                                 isogl_clear_selection_rect();
                                 selection_clear_all(&doc, &selection);
                             }
                             break;
-                        case SDLK_q:
-                            running = 0;
+                        case SDLK_BACKSPACE:
+                            isocad_console_backspace(&console);
                             break;
-                        case SDLK_f: {
-                            isogl_zoom_all_sheet();
-                            if (selecting && sel_moved) {
-                                int mx = 0, my = 0;
-                                SDL_GetMouseState(&mx, &my);
-                                selection_update(&doc, &host, sel_start_world,
-                                                 mx, my, 1, &selection);
+                        case SDLK_RETURN:
+                        case SDLK_KP_ENTER:
+                            isocad_console_enter(&console);
+                            break;
+                        case SDLK_q:
+                            if (ctrl) running = 0;
+                            break;
+                        case SDLK_f:
+                            if (ctrl) {
+                                isocad_fit_scene(&host, panel_px);
+                                if (selecting && sel_moved) {
+                                    int mx = 0, my = 0;
+                                    SDL_GetMouseState(&mx, &my);
+                                    selection_update(&doc, &host,
+                                                     sel_start_world,
+                                                     mx, my, 1, &selection);
+                                }
                             }
                             break;
-                        }
                         case SDLK_t:
-                            isogl_toggle_color_thickness();
+                            if (ctrl) isogl_toggle_color_thickness();
                             break;
                         default:
                             break;
+                    }
+                    break;
+                }
+
+                case SDL_TEXTINPUT:
+                    if (!(SDL_GetModState() & (KMOD_CTRL | KMOD_ALT))) {
+                        isocad_console_text_input(&console, event.text.text);
                     }
                     break;
 
@@ -521,6 +642,7 @@ int main(int argc, char **argv) {
                     isogl_sdl_host_local_to_pixels(&host,
                         (float)event.wheel.mouseX,
                         (float)event.wheel.mouseY, &px, &py);
+                    if (isocad_fb_in_panel(&host, panel_px, px, py)) break;
                     isogl_handle_zoom(event.wheel.y, px, py);
                     if (selecting && sel_moved) {
                         int mx = 0, my = 0;
@@ -531,12 +653,14 @@ int main(int argc, char **argv) {
                     break;
                 }
 
-                case SDL_MOUSEBUTTONDOWN:
+                case SDL_MOUSEBUTTONDOWN: {
+                    float px = 0.0f, py = 0.0f;
+                    isogl_sdl_host_local_to_pixels(&host,
+                        (float)event.button.x, (float)event.button.y,
+                        &px, &py);
+                    if (isocad_fb_in_panel(&host, panel_px, px, py)) break;
+
                     if (event.button.button == SDL_BUTTON_LEFT) {
-                        float px = 0.0f, py = 0.0f;
-                        isogl_sdl_host_local_to_pixels(&host,
-                            (float)event.button.x, (float)event.button.y,
-                            &px, &py);
                         if (isogl_screen_to_world(px, py,
                                                   &sel_start_world) == 0) {
                             selecting = 1;
@@ -546,16 +670,13 @@ int main(int argc, char **argv) {
                             isogl_clear_selection_rect();
                         }
                     } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                        float px = 0.0f, py = 0.0f;
-                        isogl_sdl_host_local_to_pixels(&host,
-                            (float)event.button.x, (float)event.button.y,
-                            &px, &py);
                         pick_and_print(&doc, &host, px, py,
                                        pick_max_entities);
                     } else if (event.button.button == SDL_BUTTON_MIDDLE) {
                         panning = 1;
                     }
                     break;
+                }
 
                 case SDL_MOUSEBUTTONUP:
                     if (event.button.button == SDL_BUTTON_LEFT && selecting) {
@@ -584,7 +705,13 @@ int main(int argc, char **argv) {
                     }
                     break;
 
-                case SDL_MOUSEMOTION:
+                case SDL_MOUSEMOTION: {
+                    float px = 0.0f, py = 0.0f;
+                    isogl_sdl_host_local_to_pixels(&host,
+                        (float)event.motion.x, (float)event.motion.y,
+                        &px, &py);
+                    if (isocad_fb_in_panel(&host, panel_px, px, py)) break;
+
                     if (panning) {
                         float dx = 0.0f, dy = 0.0f;
                         isogl_sdl_host_delta_to_pixels(&host,
@@ -610,6 +737,7 @@ int main(int argc, char **argv) {
                         }
                     }
                     break;
+                }
 
                 default:
                     break;
@@ -617,13 +745,25 @@ int main(int argc, char **argv) {
         }
 
         isogl_sdl_host_begin_frame(&host);
-        isogl_clear(0.08f, 0.09f, 0.10f, 1.0f);
+        panel_px = isocad_panel_px(&host);
+        isocad_console_layout(&console, host.fb_width, host.fb_height,
+                              panel_px);
+
+        isogl_font_set_color(ISOCAD_SCENE_TEXT);
+        isogl_clear(ISOCAD_SCENE_BG[0], ISOCAD_SCENE_BG[1],
+                    ISOCAD_SCENE_BG[2], ISOCAD_SCENE_BG[3]);
         isogl_draw_sheet();
         isogl_draw_all_vbo_objects(&doc.parts);
         isogl_draw_string_list(&doc.strings, isogl_shader_program_font,
                                isogl_model_matrix, isogl_view_matrix, identity);
         isogl_symbol_draw_all();
         isogl_draw_selection_overlay();
+
+        /* Opaque bottom strip and its text; both are screen-space overlays.
+           The isogl viewport stays the full window. */
+        isocad_draw_panel_rect(&host, panel_px);
+        isocad_console_draw(&console, isogl_shader_program_font);
+
         isogl_sdl_host_swap(&host);
     }
 
@@ -632,6 +772,9 @@ int main(int argc, char **argv) {
     free(selection_hit);
     selection_contained = NULL;
     selection_hit = NULL;
+
+    isocad_console_free(&console);
+    SDL_StopTextInput();
 
     shutdown_all(&host, &doc, font);
     return 0;
