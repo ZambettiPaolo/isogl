@@ -173,6 +173,11 @@ isogl_draw_all_vbo_objects(&parts);
 isogl_draw_string_list(&strings, isogl_shader_program_font,
                        isogl_model_matrix, isogl_view_matrix, identity);
 
+// overlay UI: rettangolo pieno e testo condividono la stessa matrice
+isogl_draw_rect(ui_view, 0.0f, 0.0f, fb_width, 80.0f, panel_color);
+isogl_draw_string_list(&panel_strings, isogl_shader_program_font,
+                       identity, ui_view, identity);
+
 isogl_string_list_free(&strings);
 isogl_vbo_array_free(&parts);
 isogl_cleanup();

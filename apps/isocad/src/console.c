@@ -8,6 +8,8 @@
 #define CONSOLE_MAX_FONT_ADVANCE 32000.0
 
 static const float CONSOLE_TEXT_COLOR[4] = {0.80f, 0.86f, 0.92f, 1.0f};
+static const float CONSOLE_PANEL_BG[4] = {0.030f, 0.039f, 0.047f, 1.0f};
+static const float CONSOLE_PANEL_EDGE[4] = {0.20f, 0.24f, 0.30f, 1.0f};
 
 static void console_seed_history(IsocadConsole *c) {
     c->history_count = ISOCAD_CONSOLE_HISTORY_LINES;
@@ -72,13 +74,13 @@ void isocad_console_layout(IsocadConsole *c, int fb_w, int fb_h,
              ISOCAD_CONSOLE_LOGICAL_PITCH * (float)i) * u;
     }
 
-    memset(c->view, 0, sizeof(c->view));
-    c->view[0] = 2.0f / (float)fb_w;
-    c->view[5] = 2.0f / (float)fb_h;
-    c->view[10] = 1.0f;
-    c->view[12] = -1.0f;
-    c->view[13] = -1.0f;
-    c->view[15] = 1.0f;
+    memset(c->overlay_view, 0, sizeof(c->overlay_view));
+    c->overlay_view[0] = 2.0f / (float)fb_w;
+    c->overlay_view[5] = 2.0f / (float)fb_h;
+    c->overlay_view[10] = 1.0f;
+    c->overlay_view[12] = -1.0f;
+    c->overlay_view[13] = -1.0f;
+    c->overlay_view[15] = 1.0f;
 
     c->strings_dirty = 1;
 }
@@ -343,11 +345,23 @@ static void console_rebuild(IsocadConsole *c) {
 }
 
 void isocad_console_draw(IsocadConsole *c, GLuint font_program) {
-    if (!c || !c->font || c->panel_h <= 0 ||
-        c->window_w <= 0 || c->window_h <= 0 || font_program == 0) {
+    if (!c || c->panel_h <= 0 ||
+        c->window_w <= 0 || c->window_h <= 0) {
         return;
     }
 
+    /* The overlay is drawn after the scene: the panel quad first, then its
+       text, both through isogl with the same orthographic matrix. */
+    isogl_draw_rect(c->overlay_view, 0.0f, 0.0f,
+                    (float)c->window_w, (float)c->panel_h,
+                    CONSOLE_PANEL_BG);
+    if (c->panel_h > 1) {
+        isogl_draw_rect(c->overlay_view, 0.0f,
+                        (float)c->panel_h - 1.0f,
+                        (float)c->window_w, 1.0f, CONSOLE_PANEL_EDGE);
+    }
+
+    if (!c->font || font_program == 0) return;
     if (c->strings_dirty) console_rebuild(c);
 
     float identity[16] = {
@@ -359,5 +373,5 @@ void isocad_console_draw(IsocadConsole *c, GLuint font_program) {
 
     isogl_font_set_color(CONSOLE_TEXT_COLOR);
     isogl_draw_string_list(&c->strings, font_program,
-                           identity, c->view, identity);
+                           identity, c->overlay_view, identity);
 }

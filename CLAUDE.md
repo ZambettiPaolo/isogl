@@ -38,8 +38,11 @@ L’app usa già riferimenti simbolo al posto della vecchia `CAD_DIMENSION` e ID
 entità monotoni. L’app ha una console a overlay in basso
 (`apps/isocad/src/console.*`) con comandi `fit`/`color`/`clear`/`echo`/`help`/
 `quit` e richiamo dello storico con ↑/↓; parser e storico sono puri, gli
-effetti restano in `main.c`. Editing, archi, polilinee, export e modello CAD
-gerarchico non sono implementati.
+effetti restano in `main.c`. Il pannello è un quad pieno disegnato da
+`isogl_draw_rect()` con la matrice ortografica di overlay della console, e il
+testo usa la stessa matrice: nessun `glScissor`/`glClear` raw nell’app.
+Editing, archi, polilinee, export e modello CAD gerarchico non sono
+implementati.
 
 Il pick GPU è ora implementato in `isogl_pick_at` (`GL_R32UI`, box logico 8×8
 pixel, texture 16×16 per 2× di definizione, stesso VS/GS e `fs_pick.glsl` per

@@ -201,6 +201,29 @@ int main(int argc, char **argv) {
 
     unsigned char pixels[FB_SIZE * FB_SIZE * 4];
 
+    // ---- Solid UI rectangle ------------------------------------------------
+    float ui_view[16] = {
+        2.0f / FB_SIZE, 0, 0, 0,
+        0, -2.0f / FB_SIZE, 0, 0,
+        0, 0, 1, 0,
+        -1, 1, 0, 1
+    };
+    float rect_color[4] = {0.9f, 0.2f, 0.1f, 1.0f};
+
+    isogl_clear(0.0f, 0.0f, 0.0f, 1.0f);
+    isogl_draw_rect(ui_view, 20.0f, 20.0f, 60.0f, 40.0f, rect_color);
+    glReadPixels(0, 0, FB_SIZE, FB_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    check(pixel_near_color(pixels, 40, 40, 230, 51, 26),
+          "rect pipeline fills its quad");
+    check(!pixel_near_color(pixels, 120, 120, 230, 51, 26),
+          "rect pipeline leaves the outside clear");
+
+    isogl_clear(0.0f, 0.0f, 0.0f, 1.0f);
+    isogl_draw_rect(ui_view, 100.0f, 100.0f, -40.0f, -30.0f, rect_color);
+    glReadPixels(0, 0, FB_SIZE, FB_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    check(pixel_near_color(pixels, 80, 85, 230, 51, 26),
+          "rect pipeline normalises negative sizes");
+
     // ---- Selection overlay ------------------------------------------------
     isogl_set_selection_rect(20.0f, 20.0f, 100.0f, 100.0f, 0);
     isogl_clear(0.05f, 0.05f, 0.05f, 1.0f);

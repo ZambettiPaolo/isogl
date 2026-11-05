@@ -5,9 +5,10 @@
 #include <stddef.h>
 
 /* Console: a 100-logical-px strip at the bottom of the window.
- * The strip is an opaque overlay drawn with scissor+clear; the text uses a
- * full-window pixel orthographic view passed to isogl_draw_string_list.
- * No second isogl viewport is installed.
+ * The strip is an opaque overlay: one orthographic matrix maps its pixels to
+ * clip space, and isogl draws the filled panel quad and then its text with the
+ * same matrix.  No second isogl viewport is installed and the application
+ * issues no raw GL calls.
  *
  * Input handling and parsing are pure state operations (no GL, no SDL):
  * isocad_console_enter() returns the action the application has to perform.
@@ -59,7 +60,7 @@ typedef struct {
     int panel_h;                 /* framebuffer pixels */
     float cap_px, pitch_px, pad_x_px;
     float baseline_px[1 + ISOCAD_CONSOLE_HISTORY_LINES];
-    float view[16];              /* full-window pixel ortho, column-major */
+    float overlay_view[16];      /* full-window pixel ortho, bottom-left */
 } IsocadConsole;
 
 void isocad_console_init(IsocadConsole *c, isogl_font_data *font);

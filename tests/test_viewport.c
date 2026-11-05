@@ -2,6 +2,8 @@
 #include <isogl/isogl_symbol.h>
 #include <isogl-sdl/isogl_sdl.h>
 
+#include "console.h"
+
 #include <math.h>
 #include <locale.h>
 #include <stdio.h>
@@ -253,7 +255,26 @@ int main(int argc, char **argv) {
           !glIsEnabled(GL_SCISSOR_TEST),
           "begin_frame disables depth, cull and scissor");
 
-    /* 2. isogl_clear is confined to the viewport and restores scissor. */
+    /* 2. Console overlay: isogl-drawn panel quad, then text over it. */
+    IsocadConsole console;
+    isocad_console_init(&console, font);
+    isocad_console_layout(&console, FB_SIZE, FB_SIZE, 100);
+    clear_whole_fb(0.8f, 0.1f, 0.1f, 1.0f);
+    isocad_console_draw(&console, isogl_shader_program_font);
+    read_fb(pixels);
+    check(pixel_near_color(pixels, 200, 50, 8, 10, 12, 6),
+          "console panel quad fills the bottom strip");
+    check(!pixel_near_color(pixels, 200, 50, 204, 26, 26, 30),
+          "console panel quad is opaque over the scene");
+    check(pixel_near_color(pixels, 200, 99, 51, 61, 77, 12),
+          "console panel separator sits on the panel top edge");
+    check(pixel_lit_near(pixels, 10, 24, 6),
+          "console text draws over the panel quad");
+    check(pixel_near_color(pixels, 200, 150, 204, 26, 26, 20),
+          "console overlay leaves the scene above the panel untouched");
+    isocad_console_free(&console);
+
+    /* 3. isogl_clear is confined to the viewport and restores scissor. */
     clear_whole_fb(0.2f, 0.1f, 0.05f, 1.0f);          /* colour A */
     isogl_viewport vp2 = {32, 48, 96, 64};
     isogl_set_viewport(&vp2);

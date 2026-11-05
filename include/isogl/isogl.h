@@ -220,6 +220,17 @@ void isogl_toggle_color_thickness(void);
 /* Non-zero when colour-thickness mode is active; zero selects print colours. */
 int isogl_color_thickness_enabled(void);
 
+/* Filled axis-aligned rectangle in the 2D space mapped by `view`.
+ *
+ * `view` is the same kind of matrix passed to isogl_draw_string_list, so a
+ * screen-space panel and its text can share one orthographic projection.
+ * Coordinates are (x, y, width, height) in that space.  The rectangle uses
+ * the solid-colour program and the frame state set by isogl_begin_frame():
+ * blending on, depth test off, no scissor.  Draw order defines the stacking;
+ * the isogl viewport is not changed. */
+void isogl_draw_rect(const float view[16], float x, float y,
+                     float width, float height, const float color[4]);
+
 // Gestione VBO array
 int isogl_vbo_array_init(isogl_vbo_array* vbo_array);
 GLuint isogl_vbo_array_add(isogl_vbo_array* vbo_array, const isogl_segment_list* segment_list, isogl_vbo_type type);

@@ -37,7 +37,8 @@ TEST_SYMBOLS_SRCS := tests/test_symbols.c tests/fake_cad.c
 TEST_SYMBOLS_OBJS := $(TEST_SYMBOLS_SRCS:%.c=$(BUILD)/%.o)
 TEST_VIEWPORT := $(BUILD)/test-viewport
 TEST_VIEWPORT_SRCS := tests/test_viewport.c
-TEST_VIEWPORT_OBJS := $(TEST_VIEWPORT_SRCS:%.c=$(BUILD)/%.o)
+TEST_VIEWPORT_OBJS := $(TEST_VIEWPORT_SRCS:%.c=$(BUILD)/%.o) \
+                      $(BUILD)/apps/isocad/src/console.o
 TEST_CONSOLE := $(BUILD)/test-console
 TEST_CONSOLE_OBJS := $(BUILD)/tests/test_console.o \
                      $(BUILD)/apps/isocad/src/console.o

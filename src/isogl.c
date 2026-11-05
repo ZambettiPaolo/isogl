@@ -42,6 +42,8 @@ static float selection_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 // Variabili private per i buffer OpenGL
 static GLuint VAO_sheet = 0;
 static GLuint VBO_sheet = 0;
+static GLuint VAO_rect = 0;
+static GLuint VBO_rect = 0;
 static GLuint VAO_geometry = 0;
 
 // Variabili private per gli shader programs
@@ -262,6 +264,8 @@ void isogl_cleanup(void) {
     if (VAO_geometry) glDeleteVertexArrays(1, &VAO_geometry);
     if (VAO_sheet) glDeleteVertexArrays(1, &VAO_sheet);
     if (VBO_sheet) glDeleteBuffers(1, &VBO_sheet);
+    if (VAO_rect) glDeleteVertexArrays(1, &VAO_rect);
+    if (VBO_rect) glDeleteBuffers(1, &VBO_rect);
     if (pick_fbo) glDeleteFramebuffers(1, &pick_fbo);
     if (pick_tex) glDeleteTextures(1, &pick_tex);
     if (selection_vbo) glDeleteBuffers(1, &selection_vbo);
@@ -279,6 +283,8 @@ void isogl_cleanup(void) {
     VAO_geometry = 0;
     VAO_sheet = 0;
     VBO_sheet = 0;
+    VAO_rect = 0;
+    VBO_rect = 0;
     pick_fbo = 0;
     pick_tex = 0;
     pick_extent = 0;
@@ -513,6 +519,70 @@ void isogl_draw_sheet(void) {
     if (isogl_sheet_u.color != -1) glUniform4fv(isogl_sheet_u.color, 1, color);
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
+    glBindVertexArray(0);
+    glUseProgram(0);
+}
+
+void isogl_draw_rect(const float view[16], float x, float y,
+                     float width, float height, const float color[4]) {
+    if (!view || !color || isogl_shader_program_sheet == 0) return;
+
+    if (width < 0.0f) {
+        x += width;
+        width = -width;
+    }
+    if (height < 0.0f) {
+        y += height;
+        height = -height;
+    }
+    if (width <= 0.0f || height <= 0.0f) return;
+
+    if (VAO_rect == 0) {
+        glGenVertexArrays(1, &VAO_rect);
+        glGenBuffers(1, &VBO_rect);
+
+        glBindVertexArray(VAO_rect);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_rect);
+        glBufferData(GL_ARRAY_BUFFER, 4 * 2 * sizeof(float), NULL,
+                     GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
+                              2 * sizeof(float), (void *)0);
+        glEnableVertexAttribArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /* Triangle strip: bottom-left, bottom-right, top-left, top-right. */
+    const float vertices[8] = {
+        x,         y,
+        x + width, y,
+        x,         y + height,
+        x + width, y + height
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_rect);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    const float identity[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+
+    glUseProgram(isogl_shader_program_sheet);
+    isogl_cache_sheet_uniforms(isogl_shader_program_sheet);
+
+    if (isogl_sheet_u.view != -1)
+        glUniformMatrix4fv(isogl_sheet_u.view, 1, GL_FALSE, view);
+    if (isogl_sheet_u.model != -1)
+        glUniformMatrix4fv(isogl_sheet_u.model, 1, GL_FALSE, identity);
+    if (isogl_sheet_u.color != -1)
+        glUniform4fv(isogl_sheet_u.color, 1, color);
+
+    glBindVertexArray(VAO_rect);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
     glUseProgram(0);
 }

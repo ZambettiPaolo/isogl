@@ -83,8 +83,14 @@ console possiede input, storico e parser: `isocad_console_enter()` restituisce
 un `IsocadConsoleCommand`; l’app esegue l’effetto (`fit`, toggle dei colori,
 quit) e riporta l’esito con `isocad_console_print()`. Il parser e il richiamo
 dello storico sono funzioni pure, verificate headless da
-`tests/test_console.c`. Click e rotella dentro il pannello vengono ignorati
-dalla scena.
+`tests/test_console.c`.
+
+Il pannello non usa più scissor/`glClear` raw: `isocad_console_draw()` costruisce
+una matrice ortografica di overlay e disegna prima il quad pieno con
+`isogl_draw_rect()`, poi il testo con `isogl_draw_string_list()` usando la
+stessa matrice. Il codice dell’app non fa chiamate GL dirette, quindi il
+pannello è identico su qualunque host (SDL2, GTK4, Qt6). Click e rotella dentro
+il pannello vengono ignorati dalla scena.
 
 Durante il drag di selezione `cad` ricalcola il set esatto a ogni movimento:
 `cad_select_rect()` per le entità CAD e `isogl_symbol_hit()` per i simboli
