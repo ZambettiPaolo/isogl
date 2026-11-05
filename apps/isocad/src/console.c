@@ -12,12 +12,12 @@ static const float CONSOLE_TEXT_COLOR[4] = {0.80f, 0.86f, 0.92f, 1.0f};
 static void console_seed_history(IsocadConsole *c) {
     c->history_count = ISOCAD_CONSOLE_HISTORY_LINES;
     /* [0] is the newest, displayed just above the input line. */
-    snprintf(c->history[0], sizeof(c->history[0]),
-             "Ctrl+F fit  Ctrl+T thickness  Ctrl+Q quit");
-    snprintf(c->history[1], sizeof(c->history[1]),
-             "type text and press Enter to echo");
-    snprintf(c->history[2], sizeof(c->history[2]),
-             "isocad console (prototype)");
+    snprintf(c->history[0], ISOCAD_CONSOLE_LINE_MAX,
+             "type help for commands");
+    snprintf(c->history[1], ISOCAD_CONSOLE_LINE_MAX,
+             "up/down: history");
+    snprintf(c->history[2], ISOCAD_CONSOLE_LINE_MAX,
+             "isocad console");
 }
 
 void isocad_console_init(IsocadConsole *c, isogl_font_data *font) {
@@ -83,6 +83,90 @@ void isocad_console_layout(IsocadConsole *c, int fb_w, int fb_h,
     c->strings_dirty = 1;
 }
 
+/* -------------------------------------------------------------------------
+ * History and recall
+ * ---------------------------------------------------------------------- */
+
+static void console_history_push(IsocadConsole *c, const char *line) {
+    if (!c || !line) return;
+
+    size_t shift = c->history_count;
+    if (shift >= ISOCAD_CONSOLE_HISTORY_LINES) {
+        shift = ISOCAD_CONSOLE_HISTORY_LINES - 1;
+    }
+    for (size_t i = shift; i > 0; --i) {
+        memcpy(c->history[i], c->history[i - 1],
+               sizeof(c->history[i]));
+    }
+    snprintf(c->history[0], sizeof(c->history[0]), "%s", line);
+
+    if (c->history_count < ISOCAD_CONSOLE_HISTORY_LINES) {
+        c->history_count++;
+    }
+    c->strings_dirty = 1;
+}
+
+static void console_cmd_history_push(IsocadConsole *c, const char *line) {
+    if (!c || !line) return;
+
+    /* Consecutive duplicates would only waste a recall step. */
+    if (c->cmd_history_count > 0 &&
+        strcmp(c->cmd_history[0], line) == 0) {
+        return;
+    }
+
+    size_t shift = c->cmd_history_count;
+    if (shift >= ISOCAD_CONSOLE_CMD_HISTORY) {
+        shift = ISOCAD_CONSOLE_CMD_HISTORY - 1;
+    }
+    for (size_t i = shift; i > 0; --i) {
+        memcpy(c->cmd_history[i], c->cmd_history[i - 1],
+               sizeof(c->cmd_history[i]));
+    }
+    snprintf(c->cmd_history[0], sizeof(c->cmd_history[0]), "%s", line);
+
+    if (c->cmd_history_count < ISOCAD_CONSOLE_CMD_HISTORY) {
+        c->cmd_history_count++;
+    }
+}
+
+static void console_set_input(IsocadConsole *c, const char *text) {
+    size_t n = text ? strlen(text) : 0;
+    if (n > ISOCAD_CONSOLE_MAX_INPUT) n = ISOCAD_CONSOLE_MAX_INPUT;
+
+    if (n > 0) memcpy(c->input, text, n);
+    c->input[n] = '\0';
+    c->input_len = n;
+    c->strings_dirty = 1;
+}
+
+void isocad_console_history_prev(IsocadConsole *c) {
+    if (!c || c->cmd_history_count == 0) return;
+
+    if (c->recall_pos == 0) {
+        memcpy(c->recall_draft, c->input, c->input_len + 1);
+    }
+    if (c->recall_pos < c->cmd_history_count) {
+        c->recall_pos++;
+        console_set_input(c, c->cmd_history[c->recall_pos - 1]);
+    }
+}
+
+void isocad_console_history_next(IsocadConsole *c) {
+    if (!c || c->recall_pos == 0) return;
+
+    c->recall_pos--;
+    if (c->recall_pos == 0) {
+        console_set_input(c, c->recall_draft);
+    } else {
+        console_set_input(c, c->cmd_history[c->recall_pos - 1]);
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * Editing
+ * ---------------------------------------------------------------------- */
+
 void isocad_console_text_input(IsocadConsole *c, const char *utf8) {
     if (!c || !utf8) return;
 
@@ -96,6 +180,7 @@ void isocad_console_text_input(IsocadConsole *c, const char *utf8) {
         candidate[c->input_len + 1] = '\0';
         if (!console_line_fits(c, candidate)) break;
 
+        c->recall_pos = 0; /* editing leaves recall mode */
         c->input[c->input_len++] = (char)*p;
         c->input[c->input_len] = '\0';
         c->strings_dirty = 1;
@@ -104,33 +189,123 @@ void isocad_console_text_input(IsocadConsole *c, const char *utf8) {
 
 void isocad_console_backspace(IsocadConsole *c) {
     if (!c || c->input_len == 0) return;
+
+    c->recall_pos = 0;
     c->input[--c->input_len] = '\0';
     c->strings_dirty = 1;
 }
 
-int isocad_console_enter(IsocadConsole *c) {
-    if (!c || c->input_len == 0) return 0;
-
-    for (size_t i = ISOCAD_CONSOLE_HISTORY_LINES - 1; i > 0; --i) {
-        memcpy(c->history[i], c->history[i - 1], sizeof(c->history[i]));
-    }
-    memcpy(c->history[0], c->input, c->input_len + 1);
-    if (c->history_count < ISOCAD_CONSOLE_HISTORY_LINES) {
-        c->history_count++;
-    }
-
-    c->input[0] = '\0';
-    c->input_len = 0;
-    c->strings_dirty = 1;
-    return 1;
-}
-
 void isocad_console_clear_input(IsocadConsole *c) {
-    if (!c || c->input_len == 0) return;
+    if (!c) return;
+
+    c->recall_pos = 0;
+    if (c->input_len == 0) return;
     c->input[0] = '\0';
     c->input_len = 0;
     c->strings_dirty = 1;
 }
+
+void isocad_console_print(IsocadConsole *c, const char *text) {
+    if (!c || !text) return;
+    console_history_push(c, text);
+}
+
+/* -------------------------------------------------------------------------
+ * Command parsing
+ * ---------------------------------------------------------------------- */
+
+static char *console_trim(char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) {
+        s[--n] = '\0';
+    }
+    return s;
+}
+
+static int console_command_is(const char *word, const char *literal) {
+    for (; *literal; ++word, ++literal) {
+        char ch = *word;
+        if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        if (ch != *literal) return 0;
+    }
+    return *word == '\0';
+}
+
+IsocadConsoleCommand isocad_console_enter(IsocadConsole *c) {
+    if (!c || c->input_len == 0) return ISOCAD_CONSOLE_CMD_NONE;
+
+    char line[ISOCAD_CONSOLE_MAX_INPUT + 1];
+    memcpy(line, c->input, c->input_len + 1);
+    char *cmdline = console_trim(line);
+
+    /* A line of spaces is not a command. */
+    if (*cmdline == '\0') {
+        isocad_console_clear_input(c);
+        return ISOCAD_CONSOLE_CMD_NONE;
+    }
+
+    char echo[ISOCAD_CONSOLE_LINE_MAX];
+    snprintf(echo, sizeof(echo), "> %s", cmdline);
+    console_history_push(c, echo);
+    console_cmd_history_push(c, cmdline);
+
+    c->input[0] = '\0';
+    c->input_len = 0;
+    c->recall_pos = 0;
+    c->recall_draft[0] = '\0';
+    c->strings_dirty = 1;
+
+    /* Split the command word from its arguments. */
+    char *arg = cmdline;
+    while (*arg && *arg != ' ' && *arg != '\t') arg++;
+    if (*arg) {
+        *arg++ = '\0';
+        arg = console_trim(arg);
+    }
+
+    if (console_command_is(cmdline, "fit")) {
+        return ISOCAD_CONSOLE_CMD_FIT;
+    }
+    if (console_command_is(cmdline, "color") ||
+        console_command_is(cmdline, "colour") ||
+        console_command_is(cmdline, "colors") ||
+        console_command_is(cmdline, "colours") ||
+        console_command_is(cmdline, "thickness") ||
+        console_command_is(cmdline, "style")) {
+        return ISOCAD_CONSOLE_CMD_TOGGLE_STYLE;
+    }
+    if (console_command_is(cmdline, "quit") ||
+        console_command_is(cmdline, "exit")) {
+        return ISOCAD_CONSOLE_CMD_QUIT;
+    }
+    if (console_command_is(cmdline, "help") ||
+        console_command_is(cmdline, "?")) {
+        isocad_console_print(c, "commands: fit color clear echo help quit");
+        return ISOCAD_CONSOLE_CMD_NONE;
+    }
+    if (console_command_is(cmdline, "clear") ||
+        console_command_is(cmdline, "cls")) {
+        c->history_count = 0;
+        c->strings_dirty = 1;
+        return ISOCAD_CONSOLE_CMD_NONE;
+    }
+    if (console_command_is(cmdline, "echo")) {
+        isocad_console_print(c, *arg ? arg : "echo: missing text");
+        return ISOCAD_CONSOLE_CMD_NONE;
+    }
+
+    char message[ISOCAD_CONSOLE_LINE_MAX];
+    snprintf(message, sizeof(message),
+             "unknown command: %.24s; type help", cmdline);
+    isocad_console_print(c, message);
+    return ISOCAD_CONSOLE_CMD_NONE;
+}
+
+/* -------------------------------------------------------------------------
+ * Rendering
+ * ---------------------------------------------------------------------- */
 
 static void console_append(IsocadConsole *c, const char *text,
                            float x, float y) {
@@ -160,8 +335,8 @@ static void console_rebuild(IsocadConsole *c) {
     size_t n = c->history_count;
     if (n > ISOCAD_CONSOLE_HISTORY_LINES) n = ISOCAD_CONSOLE_HISTORY_LINES;
     for (size_t i = 0; i < n; ++i) {
-        snprintf(line, sizeof(line), "> %s", c->history[i]);
-        console_append(c, line, c->pad_x_px, c->baseline_px[i + 1]);
+        console_append(c, c->history[i], c->pad_x_px,
+                       c->baseline_px[i + 1]);
     }
 
     c->strings_dirty = 0;

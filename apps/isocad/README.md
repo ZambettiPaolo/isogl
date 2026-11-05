@@ -60,14 +60,31 @@ Comandi:
 - `Ctrl+Q`: esci
 - `Esc`: se la riga di comando contiene testo lo svuota; altrimenti annulla il
   drag e svuota la selezione
-- testo digitato: va alla riga di comando, sempre attiva; `Enter` echeggia la
-  riga nelle 3 righe di storico; `Backspace` cancella
+- testo digitato: va alla riga di comando, sempre attiva; `Enter` esegue il
+  comando; `Backspace` cancella
+- `↑` / `↓`: richiama il comando precedente / successivo; il testo digitato
+  prima del richiamo resta come bozza e viene ripristinato tornando in fondo
 
-Il pannello inferiore è un prototipo: una striscia opaca di **100 px logici**
-con **4 righe** (3 di storico + input) disegnate col font vettoriale. La scena
-è adattata sopra il pannello modificando la matrice modello, senza un secondo
-viewport. I comandi reali non sono ancora implementati: `Enter` fa solo eco.
-Click e rotella dentro il pannello vengono ignorati dalla scena.
+Comandi della console (case-insensitive, spazi esterni ignorati):
+
+| comando | effetto |
+|---|---|
+| `fit` | adatta il foglio all’area sopra la console |
+| `color` | alterna colori-spessore / colori-stampa (alias `colour`, `colors`, `colours`, `thickness`, `style`) |
+| `clear` | svuota lo storico visualizzato, non quello dei comandi (alias `cls`) |
+| `echo TESTO` | stampa `TESTO` nello storico |
+| `help` | elenca i comandi (alias `?`) |
+| `quit` | esce (alias `exit`) |
+
+Il pannello inferiore è una striscia opaca di **100 px logici** con **4 righe**
+(3 di storico + input) disegnate col font vettoriale. La scena è adattata sopra
+il pannello modificando la matrice modello, senza un secondo viewport. La
+console possiede input, storico e parser: `isocad_console_enter()` restituisce
+un `IsocadConsoleCommand`; l’app esegue l’effetto (`fit`, toggle dei colori,
+quit) e riporta l’esito con `isocad_console_print()`. Il parser e il richiamo
+dello storico sono funzioni pure, verificate headless da
+`tests/test_console.c`. Click e rotella dentro il pannello vengono ignorati
+dalla scena.
 
 Durante il drag di selezione `cad` ricalcola il set esatto a ogni movimento:
 `cad_select_rect()` per le entità CAD e `isogl_symbol_hit()` per i simboli
@@ -190,6 +207,8 @@ stringhe; a scala il limite sono i VBO e le draw call, non i byte.
 Milestone A: foglio, linee, cerchi, rettangoli, testo vettoriale, pattern e pesi
 ISO, zoom/pan, modalità colori-spessore/stampa, selezione d’area persistente
 taggata CAD/simbolo, quota e center mark come simboli isogl con registry,
-hit/pick/explode, ambiente di test gerarchico e testo incrementale per entità.
+hit/pick/explode, ambiente di test gerarchico, testo incrementale per entità e
+console a overlay con comandi `fit`/`color`/`clear`/`echo`/`help`/`quit` e
+richiamo dello storico con ↑/↓.
 Editing, UI layer, archi, polilinee, export/stampa e modello CAD gerarchico
 sono i passi successivi.

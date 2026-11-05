@@ -423,6 +423,21 @@ static int selection_update(CadDocument *doc, isogl_sdl_host *host,
     return crossing;
 }
 
+/* Fit the sheet above the panel; an in-progress selection rectangle is
+ * recomputed against the new view so preview and final set stay identical. */
+static void refit_and_update_selection(isogl_sdl_host *host, int panel_px,
+                                       CadDocument *doc, int selecting,
+                                       int sel_moved,
+                                       isogl_point sel_start_world,
+                                       CadSelection *selection) {
+    isocad_fit_scene(host, panel_px);
+    if (selecting && sel_moved) {
+        int mx = 0, my = 0;
+        SDL_GetMouseState(&mx, &my);
+        selection_update(doc, host, sel_start_world, mx, my, 1, selection);
+    }
+}
+
 static void selection_finish(CadDocument *doc, isogl_sdl_host *host,
                              isogl_point start_world, int x, int y,
                              CadSelection *set) {
@@ -569,22 +584,20 @@ int main(int argc, char **argv) {
                         panel_px = isocad_panel_px(&host);
                         isocad_console_layout(&console, host.fb_width,
                                               host.fb_height, panel_px);
-                        isocad_fit_scene(&host, panel_px);
                         isogl_viewport full = {0, 0, host.fb_width,
                                                host.fb_height};
                         isogl_set_viewport(&full);
-                        if (selecting && sel_moved) {
-                            int mx = 0, my = 0;
-                            SDL_GetMouseState(&mx, &my);
-                            selection_update(&doc, &host, sel_start_world,
-                                             mx, my, 1, &selection);
-                        }
+                        refit_and_update_selection(&host, panel_px, &doc,
+                                                   selecting, sel_moved,
+                                                   sel_start_world,
+                                                   &selection);
                     }
                     break;
 
                 case SDL_KEYDOWN: {
                     SDL_Keycode sym = event.key.keysym.sym;
-                    if (event.key.repeat && sym != SDLK_BACKSPACE) break;
+                    if (event.key.repeat && sym != SDLK_BACKSPACE &&
+                        sym != SDLK_UP && sym != SDLK_DOWN) break;
                     int ctrl = (event.key.keysym.mod & KMOD_CTRL) != 0;
 
                     switch (sym) {
@@ -603,23 +616,46 @@ int main(int argc, char **argv) {
                         case SDLK_BACKSPACE:
                             isocad_console_backspace(&console);
                             break;
-                        case SDLK_RETURN:
-                        case SDLK_KP_ENTER:
-                            isocad_console_enter(&console);
+                        case SDLK_UP:
+                            isocad_console_history_prev(&console);
                             break;
+                        case SDLK_DOWN:
+                            isocad_console_history_next(&console);
+                            break;
+                        case SDLK_RETURN:
+                        case SDLK_KP_ENTER: {
+                            IsocadConsoleCommand command =
+                                isocad_console_enter(&console);
+                            if (command == ISOCAD_CONSOLE_CMD_FIT) {
+                                refit_and_update_selection(&host, panel_px,
+                                                           &doc, selecting,
+                                                           sel_moved,
+                                                           sel_start_world,
+                                                           &selection);
+                                isocad_console_print(&console,
+                                    "fit: sheet above console");
+                            } else if (command ==
+                                       ISOCAD_CONSOLE_CMD_TOGGLE_STYLE) {
+                                isogl_toggle_color_thickness();
+                                isocad_console_print(&console,
+                                    isogl_color_thickness_enabled()
+                                        ? "color mode: thickness"
+                                        : "color mode: print");
+                            } else if (command == ISOCAD_CONSOLE_CMD_QUIT) {
+                                running = 0;
+                            }
+                            break;
+                        }
                         case SDLK_q:
                             if (ctrl) running = 0;
                             break;
                         case SDLK_f:
                             if (ctrl) {
-                                isocad_fit_scene(&host, panel_px);
-                                if (selecting && sel_moved) {
-                                    int mx = 0, my = 0;
-                                    SDL_GetMouseState(&mx, &my);
-                                    selection_update(&doc, &host,
-                                                     sel_start_world,
-                                                     mx, my, 1, &selection);
-                                }
+                                refit_and_update_selection(&host, panel_px,
+                                                           &doc, selecting,
+                                                           sel_moved,
+                                                           sel_start_world,
+                                                           &selection);
                             }
                             break;
                         case SDLK_t:

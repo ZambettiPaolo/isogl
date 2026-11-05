@@ -217,6 +217,8 @@ int isogl_set_sheet(float width, float height, isogl_scale scale);
 void isogl_draw_sheet(void);
 void isogl_zoom_all_sheet(void);
 void isogl_toggle_color_thickness(void);
+/* Non-zero when colour-thickness mode is active; zero selects print colours. */
+int isogl_color_thickness_enabled(void);
 
 // Gestione VBO array
 int isogl_vbo_array_init(isogl_vbo_array* vbo_array);

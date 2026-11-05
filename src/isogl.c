@@ -528,6 +528,10 @@ void isogl_toggle_color_thickness(void) {
     colorThikness = (colorThikness == 0) ? 1 : 0;
 }
 
+int isogl_color_thickness_enabled(void) {
+    return colorThikness != 0;
+}
+
 // ===== GESTIONE VIEWPORT E TRASFORMAZIONI =====
 
 isogl_viewport isogl_viewport_from_top_left(int x, int y, int width, int height,

@@ -38,6 +38,9 @@ TEST_SYMBOLS_OBJS := $(TEST_SYMBOLS_SRCS:%.c=$(BUILD)/%.o)
 TEST_VIEWPORT := $(BUILD)/test-viewport
 TEST_VIEWPORT_SRCS := tests/test_viewport.c
 TEST_VIEWPORT_OBJS := $(TEST_VIEWPORT_SRCS:%.c=$(BUILD)/%.o)
+TEST_CONSOLE := $(BUILD)/test-console
+TEST_CONSOLE_OBJS := $(BUILD)/tests/test_console.o \
+                     $(BUILD)/apps/isocad/src/console.o
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
 SYMBOL_SRC := src/isogl_symbol.c
@@ -107,6 +110,14 @@ $(TEST_VIEWPORT): $(TEST_VIEWPORT_OBJS) $(SDL_HOST_LIB) $(LIB)
 test-viewport: $(TEST_VIEWPORT)
 	./$(TEST_VIEWPORT) .
 
+# Headless: the console parser and its recall ring never touch GL or SDL.
+$(TEST_CONSOLE): $(TEST_CONSOLE_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(TEST_CONSOLE_OBJS) $(LIB) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-console: $(TEST_CONSOLE)
+	./$(TEST_CONSOLE)
+
 run: $(DEMO)
 	./$(DEMO)
 
@@ -126,7 +137,7 @@ example-gtk4: lib
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
-test: test-symbol-geometry test-symbols test-viewport $(TEST)
+test: test-symbol-geometry test-symbols test-console test-viewport $(TEST)
 	./$(TEST) .
 
 install: all
@@ -172,8 +183,9 @@ clean:
 
 -include $(LIB_OBJS:.o=.d) $(SDL_HOST_OBJS:.o=.d) $(DEMO_OBJS:.o=.d) \
          $(TEST_OBJS:.o=.d) $(BUILD)/tests/test_symbol_geometry.d \
-         $(TEST_SYMBOLS_OBJS:.o=.d) $(TEST_VIEWPORT_OBJS:.o=.d)
+         $(TEST_SYMBOLS_OBJS:.o=.d) $(TEST_VIEWPORT_OBJS:.o=.d) \
+         $(TEST_CONSOLE_OBJS:.o=.d)
 
 .PHONY: all lib sdl-host run test test-symbol-geometry test-symbols \
-        test-viewport check-sdl-free example-qt6 example-gtk4 \
+        test-console test-viewport check-sdl-free example-qt6 example-gtk4 \
         install uninstall clean

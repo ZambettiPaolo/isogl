@@ -35,8 +35,11 @@ Stato: Milestone A. Esistono foglio, linee, cerchi, rettangoli, testo, pattern
 e pesi ISO, zoom/pan, modalità colori-spessore, selezione d’area persistente e
 i primi simboli isogl (quota, center mark) con registry, hit/pick/explode.
 L’app usa già riferimenti simbolo al posto della vecchia `CAD_DIMENSION` e ID
-entità monotoni. Editing, archi, polilinee, export e modello CAD gerarchico
-non sono implementati.
+entità monotoni. L’app ha una console a overlay in basso
+(`apps/isocad/src/console.*`) con comandi `fit`/`color`/`clear`/`echo`/`help`/
+`quit` e richiamo dello storico con ↑/↓; parser e storico sono puri, gli
+effetti restano in `main.c`. Editing, archi, polilinee, export e modello CAD
+gerarchico non sono implementati.
 
 Il pick GPU è ora implementato in `isogl_pick_at` (`GL_R32UI`, box logico 8×8
 pixel, texture 16×16 per 2× di definizione, stesso VS/GS e `fs_pick.glsl` per
@@ -471,8 +474,9 @@ make lib                    # solo il core, senza SDL installato
 make sdl-host               # solo libisogl_sdl.a
 make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
+make test-console           # headless: parser e storico della console
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
-make test                   # symbol geometry + symbols + viewport + test-core
+make test                   # symbol geometry + symbols + console + viewport + test-core
 make check-sdl-free         # nessun riferimento SDL nel core
 make example-qt6            # host Qt6 (opzionale)
 make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)

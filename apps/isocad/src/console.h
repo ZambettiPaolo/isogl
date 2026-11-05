@@ -4,27 +4,52 @@
 #include <isogl/isogl.h>
 #include <stddef.h>
 
-/* Console prototype: a 100-logical-px strip at the bottom of the window.
+/* Console: a 100-logical-px strip at the bottom of the window.
  * The strip is an opaque overlay drawn with scissor+clear; the text uses a
  * full-window pixel orthographic view passed to isogl_draw_string_list.
- * No second isogl viewport is installed. */
+ * No second isogl viewport is installed.
+ *
+ * Input handling and parsing are pure state operations (no GL, no SDL):
+ * isocad_console_enter() returns the action the application has to perform.
+ * The console only owns its text history and the echo/output lines. */
 
 #define ISOCAD_CONSOLE_MAX_INPUT          60
 #define ISOCAD_CONSOLE_HISTORY_LINES      3
+#define ISOCAD_CONSOLE_CMD_HISTORY        32
 #define ISOCAD_CONSOLE_LOGICAL_HEIGHT     100.0f
 #define ISOCAD_CONSOLE_LOGICAL_CAP        13.0f
 #define ISOCAD_CONSOLE_LOGICAL_PITCH      21.0f
 #define ISOCAD_CONSOLE_LOGICAL_BASE0      18.0f
 #define ISOCAD_CONSOLE_LOGICAL_PAD_X      8.0f
 
+/* Longest rendered line: a "> " echo plus the maximum input. */
+#define ISOCAD_CONSOLE_LINE_MAX (ISOCAD_CONSOLE_MAX_INPUT + 4)
+
+typedef enum {
+    ISOCAD_CONSOLE_CMD_NONE = 0,
+    ISOCAD_CONSOLE_CMD_FIT,          /* fit the sheet above the panel */
+    ISOCAD_CONSOLE_CMD_TOGGLE_STYLE, /* colour-thickness / print colours */
+    ISOCAD_CONSOLE_CMD_QUIT          /* leave the application */
+} IsocadConsoleCommand;
+
 typedef struct {
     char input[ISOCAD_CONSOLE_MAX_INPUT + 1];
     size_t input_len;
 
-    /* Newest echoed line at [0]; lines are displayed oldest at the top,
-       newest just above the input. */
-    char history[ISOCAD_CONSOLE_HISTORY_LINES][ISOCAD_CONSOLE_MAX_INPUT + 1];
+    /* Rendered lines, newest at [0], displayed just above the input line.
+       Input echoes already carry the "> " prefix; command output does not. */
+    char history[ISOCAD_CONSOLE_HISTORY_LINES][ISOCAD_CONSOLE_LINE_MAX];
     size_t history_count;
+
+    /* Submitted command lines, newest at [0].  Duplicates of the newest
+       entry are not stored twice. */
+    char cmd_history[ISOCAD_CONSOLE_CMD_HISTORY][ISOCAD_CONSOLE_MAX_INPUT + 1];
+    size_t cmd_history_count;
+
+    /* 0 = editing; k = showing cmd_history[k - 1].  The line being edited
+       before the first Up is saved in recall_draft. */
+    size_t recall_pos;
+    char recall_draft[ISOCAD_CONSOLE_MAX_INPUT + 1];
 
     isogl_font_data *font;       /* not owned */
     isogl_string_list strings;   /* four panel lines */
@@ -49,8 +74,20 @@ void isocad_console_layout(IsocadConsole *c, int fb_w, int fb_h,
 /* Pure state operations: no GL calls, safe with font == NULL. */
 void isocad_console_text_input(IsocadConsole *c, const char *utf8);
 void isocad_console_backspace(IsocadConsole *c);
-int  isocad_console_enter(IsocadConsole *c);   /* 1 if a line was echoed */
 void isocad_console_clear_input(IsocadConsole *c);
+
+/* Submit the input line.  The command is echoed, parsed and stored; the
+ * returned action is executed by the application, which can append feedback
+ * with isocad_console_print().  Empty/blank lines return NONE. */
+IsocadConsoleCommand isocad_console_enter(IsocadConsole *c);
+
+/* Command recall: prev is Up, next is Down.  Editing the recalled line
+ * leaves recall mode; Down past the newest command restores the draft. */
+void isocad_console_history_prev(IsocadConsole *c);
+void isocad_console_history_next(IsocadConsole *c);
+
+/* Append one line of output (no "> " prefix).  NULL is ignored. */
+void isocad_console_print(IsocadConsole *c, const char *text);
 
 /* Rebuilds if dirty, sets the panel text colour and draws with the active
  * (full-window) viewport. */
