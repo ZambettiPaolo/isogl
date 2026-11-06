@@ -64,11 +64,12 @@ Comandi:
   riga nelle 3 righe di storico; `Backspace` cancella
 
 Il pannello inferiore è un prototipo: una striscia opaca di **100 px logici**
-con **4 righe** (3 di storico + input) disegnate col font vettoriale. La scena
-è adattata al rettangolo interno ai pannelli modificando la matrice modello,
-senza un secondo viewport. I comandi reali non sono ancora implementati:
-`Enter` fa solo eco. Click e rotella dentro un pannello vengono ignorati dalla
-scena.
+con **4 righe** (3 di storico + input) disegnate col font vettoriale. Lo sfondo
+è un quad come gli altri pannelli; il modulo console possiede solo il testo.
+La scena è adattata al rettangolo interno ai pannelli modificando la matrice
+modello, senza un secondo viewport. I comandi reali non sono ancora
+implementati: `Enter` fa solo eco. Click e rotella dentro un pannello vengono
+ignorati dalla scena.
 
 Attorno all'area di disegno ci sono tre pannelli con icone, spessi **32 px
 logici** (scalati con il device pixel ratio):
@@ -80,12 +81,19 @@ logici** (scalati con il device pixel ratio):
 - a destra: vista e visualizzazione (zoom +, zoom −, pan, fit, griglia, snap,
   spessore).
 
-Come la console, i pannelli sono overlay opachi in screen-space: lo sfondo usa
-scissor+clear e le icone sono segmenti `GL_LINES` disegnati con un programma
-pixel-ortografico dedicato al modulo `panels.c`. Il viewport isogl resta
-quello dell'intera finestra. Il foglio viene adattato all'area interna ai
-quattro pannelli con scala uniforme e centratura. Le icone sono un prototipo
-visivo: evidenziano l'hover ma non hanno ancora azioni associate.
+Tutti e quattro gli sfondi (alto, sinistro, destro e console) sono **quad
+pieni** disegnati nello stesso pass, senza scissor+clear e senza uno shader
+proprio: dopo la scena il modulo `panels.c` salva `isogl_model_matrix` e
+`isogl_view_matrix`, le sostituisce con un'ortografica in pixel, disegna i
+rettangoli con `isogl_draw_filled_rect()` (primitivo che riusa lo shader del
+foglio) e le icone con un VBO di segmenti isogl (`isogl_vbo_array` +
+`isogl_draw_vbo_object()`), poi ripristina le matrici. La console aggiunge solo
+il testo. Il viewport isogl resta quello dell'intera finestra. Il foglio viene
+adattato all'area interna ai quattro pannelli con scala uniforme e centratura.
+Le icone usano gli spessori ISO 7 e 6 (grigio e bianco in modalità
+colori-spessore) e il VBO viene aggiornato solo al cambio di cella hoverata,
+non a ogni frame. Sono un prototipo visivo: evidenziano l'hover ma non hanno
+ancora azioni associate.
 
 Durante il drag di selezione `cad` ricalcola il set esatto a ogni movimento:
 `cad_select_rect()` per le entità CAD e `isogl_symbol_hit()` per i simboli

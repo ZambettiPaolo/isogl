@@ -215,6 +215,12 @@ GLuint isogl_create_shader_program(char *vertex_shader_source, char *geometry_sh
 // Gestione sheet (foglio)
 int isogl_set_sheet(float width, float height, isogl_scale scale);
 void isogl_draw_sheet(void);
+/* Axis-aligned filled rectangle transformed by the current isogl_view_matrix
+ * and isogl_model_matrix and coloured by rgba.  It reuses the sheet shader,
+ * so switching those matrices to a pixel orthographic projection gives a
+ * screen-space overlay primitive that needs no second viewport. */
+void isogl_draw_filled_rect(float x0, float y0, float x1, float y1,
+                            const float rgba[4]);
 void isogl_zoom_all_sheet(void);
 void isogl_toggle_color_thickness(void);
 

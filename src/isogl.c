@@ -43,6 +43,8 @@ static float selection_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 static GLuint VAO_sheet = 0;
 static GLuint VBO_sheet = 0;
 static GLuint VAO_geometry = 0;
+static GLuint VAO_fill = 0;
+static GLuint VBO_fill = 0;
 
 // Variabili private per gli shader programs
 GLuint isogl_shader_program_segment = 0;
@@ -262,6 +264,8 @@ void isogl_cleanup(void) {
     if (VAO_geometry) glDeleteVertexArrays(1, &VAO_geometry);
     if (VAO_sheet) glDeleteVertexArrays(1, &VAO_sheet);
     if (VBO_sheet) glDeleteBuffers(1, &VBO_sheet);
+    if (VAO_fill) glDeleteVertexArrays(1, &VAO_fill);
+    if (VBO_fill) glDeleteBuffers(1, &VBO_fill);
     if (pick_fbo) glDeleteFramebuffers(1, &pick_fbo);
     if (pick_tex) glDeleteTextures(1, &pick_tex);
     if (selection_vbo) glDeleteBuffers(1, &selection_vbo);
@@ -279,6 +283,8 @@ void isogl_cleanup(void) {
     VAO_geometry = 0;
     VAO_sheet = 0;
     VBO_sheet = 0;
+    VAO_fill = 0;
+    VBO_fill = 0;
     pick_fbo = 0;
     pick_tex = 0;
     pick_extent = 0;
@@ -514,6 +520,57 @@ void isogl_draw_sheet(void) {
     glDrawArrays(GL_LINE_LOOP, 0, 4);
 
     glBindVertexArray(0);
+    glUseProgram(0);
+}
+
+void isogl_draw_filled_rect(float x0, float y0, float x1, float y1,
+                            const float rgba[4]) {
+    if (!rgba || isogl_shader_program_sheet == 0) return;
+
+    if (VAO_fill == 0) {
+        glGenVertexArrays(1, &VAO_fill);
+        glGenBuffers(1, &VBO_fill);
+        if (VAO_fill == 0 || VBO_fill == 0) {
+            if (VAO_fill) glDeleteVertexArrays(1, &VAO_fill);
+            if (VBO_fill) glDeleteBuffers(1, &VBO_fill);
+            VAO_fill = 0;
+            VBO_fill = 0;
+            return;
+        }
+
+        glBindVertexArray(VAO_fill);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_fill);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
+                              (void *)0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    float vertices[8] = {
+        x0, y0,
+        x1, y0,
+        x1, y1,
+        x0, y1
+    };
+
+    glUseProgram(isogl_shader_program_sheet);
+    isogl_cache_sheet_uniforms(isogl_shader_program_sheet);
+
+    if (isogl_sheet_u.view != -1)
+        glUniformMatrix4fv(isogl_sheet_u.view, 1, GL_FALSE, isogl_view_matrix);
+    if (isogl_sheet_u.model != -1)
+        glUniformMatrix4fv(isogl_sheet_u.model, 1, GL_FALSE, isogl_model_matrix);
+    if (isogl_sheet_u.color != -1)
+        glUniform4fv(isogl_sheet_u.color, 1, rgba);
+
+    glBindVertexArray(VAO_fill);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_fill);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     glUseProgram(0);
 }
 

@@ -16,11 +16,7 @@
 #endif
 
 static const float ISOCAD_SCENE_BG[4]   = {0.08f, 0.09f, 0.10f, 1.0f};
-static const float ISOCAD_PANEL_BG[4]   = {0.030f, 0.039f, 0.047f, 1.0f};
-static const float ISOCAD_PANEL_EDGE[4] = {0.20f, 0.24f, 0.30f, 1.0f};
 static const float ISOCAD_SCENE_TEXT[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-
-#define ISOCAD_PANEL_SEPARATOR 1
 
 /* Bottom strip height in framebuffer pixels: 100 logical points. */
 static int isocad_panel_px(const isogl_sdl_host *host) {
@@ -109,38 +105,6 @@ static int isocad_fb_in_ui(const isogl_sdl_host *host,
     }
     return py < (float)insets->top ||
            py >= (float)(host->fb_height - insets->bottom);
-}
-
-/* Opaque UI strip over the scene.  Raw GL on the full-window viewport: no
- * isogl viewport is installed or changed. */
-static void isocad_draw_panel_rect(const isogl_sdl_host *host, int panel_px) {
-    if (!host || panel_px <= 0 || host->fb_width <= 0) return;
-
-    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
-    GLint box[4] = {0, 0, 0, 0};
-    glGetIntegerv(GL_SCISSOR_BOX, box);
-
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(0, 0, host->fb_width, panel_px);
-    glClearColor(ISOCAD_PANEL_BG[0], ISOCAD_PANEL_BG[1],
-                 ISOCAD_PANEL_BG[2], ISOCAD_PANEL_BG[3]);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-#if ISOCAD_PANEL_SEPARATOR
-    if (panel_px > 1) {
-        glScissor(0, panel_px - 1, host->fb_width, 1);
-        glClearColor(ISOCAD_PANEL_EDGE[0], ISOCAD_PANEL_EDGE[1],
-                     ISOCAD_PANEL_EDGE[2], ISOCAD_PANEL_EDGE[3]);
-        glClear(GL_COLOR_BUFFER_BIT);
-    }
-#endif
-
-    if (scissor) {
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(box[0], box[1], box[2], box[3]);
-    } else {
-        glDisable(GL_SCISSOR_TEST);
-    }
 }
 
 static void shutdown_all(isogl_sdl_host *host, CadDocument *doc,
@@ -832,16 +796,15 @@ int main(int argc, char **argv) {
         isogl_symbol_draw_all();
         isogl_draw_selection_overlay();
 
-        /* Opaque tool strips and console text; all screen-space overlays.
-           The isogl viewport stays the full window. */
+        /* All UI strips are filled quads drawn by the panel module with the
+           isogl pipeline; the console adds its text on top. */
         int mouse_x = 0, mouse_y = 0;
         SDL_GetMouseState(&mouse_x, &mouse_y);
         float cursor_x = 0.0f, cursor_y = 0.0f;
         isogl_sdl_host_local_to_pixels(&host, (float)mouse_x, (float)mouse_y,
                                        &cursor_x, &cursor_y);
-        isocad_draw_panel_rect(&host, panel_px);
-        isocad_console_draw(&console, isogl_shader_program_font);
         isocad_panels_draw(&panels, cursor_x, cursor_y);
+        isocad_console_draw(&console, isogl_shader_program_font);
 
         isogl_sdl_host_swap(&host);
     }
