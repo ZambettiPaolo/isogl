@@ -14,58 +14,29 @@ static const float PANEL_EDGE[4]       = {0.20f, 0.24f, 0.30f, 1.0f};
 static const float PANEL_HOVER_BG[4]   = {0.085f, 0.105f, 0.135f, 1.0f};
 static const float ICON_COLOR[4]       = {0.62f, 0.70f, 0.78f, 1.0f};
 static const float ICON_HOVER_COLOR[4] = {0.98f, 0.99f, 1.00f, 1.0f};
+static const float TOOLTIP_BG[4]       = {0.070f, 0.085f, 0.105f, 1.0f};
+static const float TOOLTIP_EDGE[4]     = {0.24f, 0.29f, 0.35f, 1.0f};
+static const float TOOLTIP_TEXT[4]     = {0.90f, 0.94f, 0.98f, 1.0f};
 
-/* In the "colour by thickness" display mode the segment shader ignores the
- * vertex colour and uses the ISO weight colour: weight 7 is grey, weight 6
- * is white.  In print-colour mode the vertex colour below is used.  Setting
- * both keeps the icons legible in either mode and makes hover visible. */
-#define ICON_THICKNESS       ((uint8_t)LINE_THICKNESS_2_0)
-#define ICON_HOVER_THICKNESS ((uint8_t)LINE_THICKNESS_1_4)
-
-/* Icon art lives in a [-1, 1] square with y pointing down, like the layout
- * coordinates.  sink_point() converts it to framebuffer pixels with the GL
- * origin at the bottom-left. */
+/* Icon art lives in a [-1, 1] square with y pointing down.  The group
+ * transform places and scales it in viewport pixels; no thick-line quad is
+ * generated, overlay lines are GL_LINES. */
 typedef struct {
-    float *v;
-    size_t count;       /* floats, two per vertex */
-    size_t capacity;    /* floats */
-    float cx, cy;       /* icon centre, framebuffer px, origin top-left */
-    float s;            /* art half-size in px */
+    isogl_overlay *overlay;
+    isogl_overlay_group group;
     float sx, sy;       /* mirror, 1 or -1 */
-    int fb_h;
     int ok;
 } IconSink;
 
-static void sink_point(IconSink *s, float x, float y) {
+static void sink_line(IconSink *s, float x0, float y0, float x1, float y1) {
     if (!s->ok) return;
-
-    if (s->count + 2 > s->capacity) {
-        size_t capacity = s->capacity ? s->capacity * 2 : 512;
-        while (capacity < s->count + 2) {
-            if (capacity > (size_t)-1 / 2) {
-                s->ok = 0;
-                return;
-            }
-            capacity *= 2;
-        }
-        float *v = realloc(s->v, capacity * sizeof(float));
-        if (!v) {
-            s->ok = 0;
-            return;
-        }
-        s->v = v;
-        s->capacity = capacity;
-    }
-
-    float px = s->cx + x * s->sx * s->s;
-    float py = s->cy + y * s->sy * s->s;
-    s->v[s->count++] = px;
-    s->v[s->count++] = (float)s->fb_h - py;
+    isogl_overlay_group_line(s->overlay, s->group,
+                             x0 * s->sx, y0 * s->sy,
+                             x1 * s->sx, y1 * s->sy, ICON_COLOR);
 }
 
 static void ile_seg(IconSink *s, float x0, float y0, float x1, float y1) {
-    sink_point(s, x0, y0);
-    sink_point(s, x1, y1);
+    sink_line(s, x0, y0, x1, y1);
 }
 
 static void ile_rect(IconSink *s, float x0, float y0, float x1, float y1) {
@@ -102,7 +73,7 @@ static void ile_cross(IconSink *s, float cx, float cy, float r) {
     ile_seg(s, cx, cy - r, cx, cy + r);
 }
 
-/* ---- top strip: document and history ----------------------------------- */
+/* ---- icon artwork ------------------------------------------------------- */
 
 static void icon_new(IconSink *s) {
     ile_rect(s, -0.60f, -0.80f, 0.55f, 0.80f);
@@ -155,8 +126,6 @@ static void icon_print(IconSink *s) {
     ile_rect(s, -0.45f, 0.35f, 0.45f, 0.80f);
     ile_seg(s, -0.65f, -0.05f, -0.45f, -0.05f);
 }
-
-/* ---- left strip: drawing tools ----------------------------------------- */
 
 static void icon_select(IconSink *s) {
     static const float cursor[] = {
@@ -214,8 +183,6 @@ static void icon_center(IconSink *s) {
     ile_seg(s, -0.85f, 0.0f, 0.85f, 0.0f);
     ile_seg(s, 0.0f, -0.85f, 0.0f, 0.85f);
 }
-
-/* ---- right strip: view and display ------------------------------------- */
 
 static void icon_zoom_common(IconSink *s, int plus) {
     ile_circle(s, -0.15f, -0.15f, 0.55f, 20);
@@ -288,244 +255,214 @@ static void icon_thickness(IconSink *s) {
 
 /* ---- registry ----------------------------------------------------------- */
 
-typedef enum {
-    PANEL_TOP = 0,
-    PANEL_LEFT,
-    PANEL_RIGHT
-} PanelSide;
-
 typedef struct {
-    PanelSide side;
+    IsocadPanelSide side;
     const char *name;
     void (*emit)(IconSink *);
 } IconDef;
 
 static const IconDef ICON_DEFS[] = {
-    {PANEL_TOP,   "new",        icon_new},
-    {PANEL_TOP,   "open",       icon_open},
-    {PANEL_TOP,   "save",       icon_save},
-    {PANEL_TOP,   "undo",       icon_undo},
-    {PANEL_TOP,   "redo",       icon_redo},
-    {PANEL_TOP,   "print",      icon_print},
+    {ISOCAD_PANEL_TOP,   "new",        icon_new},
+    {ISOCAD_PANEL_TOP,   "open",       icon_open},
+    {ISOCAD_PANEL_TOP,   "save",       icon_save},
+    {ISOCAD_PANEL_TOP,   "undo",       icon_undo},
+    {ISOCAD_PANEL_TOP,   "redo",       icon_redo},
+    {ISOCAD_PANEL_TOP,   "print",      icon_print},
 
-    {PANEL_LEFT,  "select",     icon_select},
-    {PANEL_LEFT,  "line",       icon_line},
-    {PANEL_LEFT,  "circle",     icon_circle},
-    {PANEL_LEFT,  "rectangle",  icon_rectangle},
-    {PANEL_LEFT,  "polyline",   icon_polyline},
-    {PANEL_LEFT,  "text",       icon_text},
-    {PANEL_LEFT,  "dimension",  icon_dimension},
-    {PANEL_LEFT,  "center",     icon_center},
+    {ISOCAD_PANEL_LEFT,  "select",     icon_select},
+    {ISOCAD_PANEL_LEFT,  "line",       icon_line},
+    {ISOCAD_PANEL_LEFT,  "circle",     icon_circle},
+    {ISOCAD_PANEL_LEFT,  "rectangle",  icon_rectangle},
+    {ISOCAD_PANEL_LEFT,  "polyline",   icon_polyline},
+    {ISOCAD_PANEL_LEFT,  "text",       icon_text},
+    {ISOCAD_PANEL_LEFT,  "dimension",  icon_dimension},
+    {ISOCAD_PANEL_LEFT,  "center",     icon_center},
 
-    {PANEL_RIGHT, "zoom_in",    icon_zoom_in},
-    {PANEL_RIGHT, "zoom_out",   icon_zoom_out},
-    {PANEL_RIGHT, "pan",        icon_pan},
-    {PANEL_RIGHT, "fit",        icon_fit},
-    {PANEL_RIGHT, "grid",       icon_grid},
-    {PANEL_RIGHT, "snap",       icon_snap},
-    {PANEL_RIGHT, "thickness",  icon_thickness}
+    {ISOCAD_PANEL_RIGHT, "zoom_in",    icon_zoom_in},
+    {ISOCAD_PANEL_RIGHT, "zoom_out",   icon_zoom_out},
+    {ISOCAD_PANEL_RIGHT, "pan",        icon_pan},
+    {ISOCAD_PANEL_RIGHT, "fit",        icon_fit},
+    {ISOCAD_PANEL_RIGHT, "grid",       icon_grid},
+    {ISOCAD_PANEL_RIGHT, "snap",       icon_snap},
+    {ISOCAD_PANEL_RIGHT, "thickness",  icon_thickness}
 };
 
 #define ICON_DEF_COUNT (sizeof(ICON_DEFS) / sizeof(ICON_DEFS[0]))
 
 /* ---- lifecycle ---------------------------------------------------------- */
 
-int isocad_panels_init(IsocadPanels *p) {
-    if (!p) return -1;
+static void panel_emit_icon(IsocadPanels *p, int index) {
+    IsocadPanelIcon *icon = &p->icons[index];
+    if (!p->overlay || icon->group == ISOGL_OVERLAY_GROUP_INVALID) return;
 
+    isogl_overlay_group_clear(p->overlay, icon->group);
+    IconSink sink = {p->overlay, icon->group, 1.0f, 1.0f, 1};
+    ICON_DEFS[index].emit(&sink);
+}
+
+void isocad_panels_rebuild_icons(IsocadPanels *p) {
+    if (!p || !p->overlay) return;
+    for (int i = 0; i < p->icon_count; ++i) {
+        panel_emit_icon(p, i);
+    }
+}
+
+void isocad_panels_init(IsocadPanels *p, isogl_overlay *overlay,
+                        isogl_font_data *font) {
+    if (!p) return;
     memset(p, 0, sizeof(*p));
+    p->overlay = overlay;
+    p->font = font;
     p->hover = -1;
-    p->hover_drawn = -1;
-    return isogl_vbo_array_init(&p->vbos) == 0 ? 0 : -1;
+    if (!overlay) return;
+
+    p->panel_group = isogl_overlay_group_create(overlay, 0);
+    isogl_overlay_group_set_visible(overlay, p->panel_group, 1);
+
+    for (size_t i = 0; i < ICON_DEF_COUNT; ++i) {
+        if (p->icon_count >= ISOCAD_PANEL_MAX_ICONS) break;
+
+        isogl_overlay_group group = isogl_overlay_group_create(overlay, 0);
+        if (group == ISOGL_OVERLAY_GROUP_INVALID) break;
+
+        IsocadPanelIcon *icon = &p->icons[p->icon_count];
+        memset(icon, 0, sizeof(*icon));
+        icon->name = ICON_DEFS[i].name;
+        icon->side = ICON_DEFS[i].side;
+        icon->group = group;
+        isogl_overlay_group_set_transform(overlay, group, 0.0f, 0.0f, 1.0f);
+        isogl_overlay_group_set_visible(overlay, group, 0);
+        p->icon_count++;
+
+        panel_emit_icon(p, p->icon_count - 1);
+    }
+
+    p->hover_group = isogl_overlay_group_create(overlay, 0);
+    isogl_overlay_group_set_visible(overlay, p->hover_group, 0);
+
+    p->tooltip_group = isogl_overlay_group_create(overlay, 1);
+    isogl_overlay_group_set_visible(overlay, p->tooltip_group, 0);
 }
 
 void isocad_panels_free(IsocadPanels *p) {
     if (!p) return;
-
-    free(p->art);
-    isogl_vbo_array_free(&p->vbos);
+    if (p->overlay) {
+        if (p->panel_group != ISOGL_OVERLAY_GROUP_INVALID) {
+            isogl_overlay_group_destroy(p->overlay, p->panel_group);
+        }
+        if (p->hover_group != ISOGL_OVERLAY_GROUP_INVALID) {
+            isogl_overlay_group_destroy(p->overlay, p->hover_group);
+        }
+        if (p->tooltip_group != ISOGL_OVERLAY_GROUP_INVALID) {
+            isogl_overlay_group_destroy(p->overlay, p->tooltip_group);
+        }
+        for (int i = 0; i < p->icon_count; ++i) {
+            if (p->icons[i].group != ISOGL_OVERLAY_GROUP_INVALID) {
+                isogl_overlay_group_destroy(p->overlay, p->icons[i].group);
+            }
+        }
+    }
     memset(p, 0, sizeof(*p));
     p->hover = -1;
-    p->hover_drawn = -1;
 }
 
-/* ---- geometry ----------------------------------------------------------- */
+/* ---- layout ------------------------------------------------------------- */
 
-static isogl_vertex panels_make_vertex(const IsocadPanels *p, GLint index,
-                                       int hovered) {
-    isogl_vertex v;
-    memset(&v, 0, sizeof(v));
-
-    v.position[0] = p->art[2 * (size_t)index];
-    v.position[1] = p->art[2 * (size_t)index + 1];
-
-    const float *color = hovered ? ICON_HOVER_COLOR : ICON_COLOR;
-    memcpy(v.color, color, sizeof(v.color));
-    v.distanceFromStart = 0.0f;
-    v.pk_thickness_pattern_layer = isogl_pack(
-        hovered ? ICON_HOVER_THICKNESS : ICON_THICKNESS,
-        LINE_TYPE_CONTINUOUS, 0);
-    return v;
-}
-
-/* Bake the hover state into the segment VBO.  Called only when the layout or
- * the hovered icon changes, not every frame. */
-static void panels_upload(IsocadPanels *p) {
-    if (!p || !p->art || p->art_count < 4 || p->icon_count == 0) {
-        p->hover_drawn = p->hover;
-        return;
-    }
-
-    isogl_segment_list list;
-    if (isogl_segment_list_init(&list, p->art_count / 2) != 0) return;
-
-    int ok = 1;
-    for (int i = 0; i < p->icon_count && ok; ++i) {
-        const IsocadPanelIcon *icon = &p->icons[i];
-        int hovered = (i == p->hover);
-        for (GLint v = icon->first;
-             v + 1 < icon->first + icon->count; v += 2) {
-            isogl_vertex a = panels_make_vertex(p, v, hovered);
-            isogl_vertex b = panels_make_vertex(p, v + 1, hovered);
-            if (isogl_segment_list_push_pair(&list, a, b) != 0) {
-                ok = 0;
-                break;
-            }
-        }
-    }
-
-    if (ok && list.size > 0) {
-        if (p->vbo_id != 0) {
-            if (isogl_vbo_array_update(&p->vbos, p->vbo_id, &list) != 0) {
-                ok = 0;
-            }
-        } else {
-            p->vbo_id = isogl_vbo_array_add(&p->vbos, &list,
-                                            ISOGL_VBO_SEGMENT);
-            if (p->vbo_id == 0) ok = 0;
-        }
-    }
-
-    isogl_segment_list_free(&list);
-    if (ok) p->hover_drawn = p->hover;
-}
-
-static void panels_build(IsocadPanels *p) {
-    IconSink sink;
-    memset(&sink, 0, sizeof(sink));
-    sink.fb_h = p->fb_h;
-    sink.sx = 1.0f;
-    sink.sy = 1.0f;
-    sink.ok = 1;
-
-    const float cell = (float)p->thickness_px;
-    const float half = cell * 0.5f;
-    const float art = cell * (14.0f / ISOCAD_PANEL_LOGICAL_THICKNESS) * 0.5f;
-
-    int slot[3] = {0, 0, 0};
-    int icon_count = 0;
-
-    for (size_t i = 0; i < ICON_DEF_COUNT; ++i) {
-        const IconDef *def = &ICON_DEFS[i];
-        if (icon_count >= ISOCAD_PANEL_MAX_ICONS) break;
-
-        IsocadPanelIcon *icon = &p->icons[icon_count];
-        int index = slot[def->side];
-
-        if (def->side == PANEL_TOP) {
-            if (p->insets.top <= 0) continue;
-            icon->cx = half + (float)index * cell;
-            icon->cy = half;
-            if (icon->cx + half > (float)p->fb_w) continue;
-        } else if (def->side == PANEL_LEFT) {
-            if (p->insets.left <= 0) continue;
-            icon->cx = half;
-            icon->cy = (float)p->insets.top + half + (float)index * cell;
-            if (icon->cy + half > (float)(p->fb_h - p->insets.bottom)) continue;
-        } else {
-            if (p->insets.right <= 0) continue;
-            icon->cx = (float)p->fb_w - half;
-            icon->cy = (float)p->insets.top + half + (float)index * cell;
-            if (icon->cy + half > (float)(p->fb_h - p->insets.bottom)) continue;
-        }
-
-        slot[def->side] = index + 1;
-
-        icon->name = def->name;
-        icon->half = half;
-        icon->first = (GLint)(sink.count / 2);
-
-        sink.cx = icon->cx;
-        sink.cy = icon->cy;
-        sink.s = art;
-        def->emit(&sink);
-        if (!sink.ok) break;
-
-        icon->count = (GLsizei)(sink.count / 2) - icon->first;
-        icon_count++;
-    }
-
-    free(p->art);
-    p->art = NULL;
-    p->art_count = 0;
-    p->icon_count = 0;
-
-    if (!sink.ok || sink.count == 0) {
-        free(sink.v);
-    } else {
-        p->art = sink.v;
-        p->art_count = sink.count;
-        p->icon_count = icon_count;
-    }
-
-    isogl_vbo_array_free(&p->vbos);
-    isogl_vbo_array_init(&p->vbos);
-    p->vbo_id = 0;
+static void panels_hide_hover(IsocadPanels *p) {
     p->hover = -1;
-    p->hover_drawn = -1;
-    panels_upload(p);
-    p->built = 1;
+    if (!p->overlay) return;
+    isogl_overlay_group_clear(p->overlay, p->hover_group);
+    isogl_overlay_group_set_visible(p->overlay, p->hover_group, 0);
+    isogl_overlay_group_clear(p->overlay, p->tooltip_group);
+    isogl_overlay_group_set_visible(p->overlay, p->tooltip_group, 0);
+    p->tooltip_shown = 0;
 }
 
-void isocad_panels_layout(IsocadPanels *p, int fb_w, int fb_h,
-                          int thickness_px, int bottom_px) {
-    if (!p || fb_w <= 0 || fb_h <= 0) return;
+void isocad_panels_layout(IsocadPanels *p, const isogl_panel_layout *layout) {
+    if (!p || !layout || !p->overlay) return;
 
-    if (thickness_px < 1) thickness_px = 1;
-    if (bottom_px < 0) bottom_px = 0;
-    if (bottom_px > fb_h - 1) bottom_px = fb_h - 1;
-
-    int max_thickness = (fb_w < fb_h ? fb_w : fb_h) / 3;
-    if (max_thickness < 1) max_thickness = 1;
-    if (thickness_px > max_thickness) thickness_px = max_thickness;
+    int top = layout->top.height;
+    int left = layout->left.width;
+    int right = layout->right.width;
+    int bottom = layout->bottom.height;
 
     if (p->built &&
-        p->fb_w == fb_w && p->fb_h == fb_h &&
-        p->thickness_px == thickness_px && p->bottom_px == bottom_px) {
+        p->last_width == layout->width && p->last_height == layout->height &&
+        p->last_top == top && p->last_left == left &&
+        p->last_right == right && p->last_bottom == bottom) {
         return;
     }
 
-    p->fb_w = fb_w;
-    p->fb_h = fb_h;
-    p->thickness_px = thickness_px;
-    p->bottom_px = bottom_px;
+    p->built = 1;
+    p->last_width = layout->width;
+    p->last_height = layout->height;
+    p->last_top = top;
+    p->last_left = left;
+    p->last_right = right;
+    p->last_bottom = bottom;
 
-    p->insets.top = thickness_px;
-    p->insets.left = thickness_px;
-    p->insets.right = thickness_px;
-    p->insets.bottom = bottom_px;
-    if (p->insets.left + p->insets.right >= fb_w) {
-        p->insets.left = 0;
-        p->insets.right = 0;
-    }
-    if (p->insets.top + p->insets.bottom >= fb_h) {
-        p->insets.top = 0;
+    isogl_overlay_group_clear(p->overlay, p->panel_group);
+    isogl_overlay_group_set_transform(p->overlay, p->panel_group,
+                                      0.0f, 0.0f, 1.0f);
+    isogl_overlay_group_set_layer(p->overlay, p->panel_group, 0);
+    isogl_overlay_group_set_visible(p->overlay, p->panel_group, 1);
+
+    isogl_panel_style style;
+    memcpy(style.background, PANEL_BG, sizeof(style.background));
+    memcpy(style.edge, PANEL_EDGE, sizeof(style.edge));
+    isogl_panel_emit(layout, &style, p->overlay, p->panel_group);
+
+    int top_index = 0;
+    int left_index = 0;
+    int right_index = 0;
+
+    for (int i = 0; i < p->icon_count; ++i) {
+        IsocadPanelIcon *icon = &p->icons[i];
+        float cell = 0.0f;
+        float cx = 0.0f, cy = 0.0f;
+        int place = 0;
+
+        if (icon->side == ISOCAD_PANEL_TOP && top > 0) {
+            cell = (float)top;
+            cx = cell * 0.5f + (float)top_index * cell;
+            cy = cell * 0.5f;
+            top_index++;
+            place = (cx + cell * 0.5f <= (float)layout->width);
+        } else if (icon->side == ISOCAD_PANEL_LEFT && left > 0) {
+            cell = (float)left;
+            cx = cell * 0.5f;
+            cy = (float)top + cell * 0.5f + (float)left_index * cell;
+            left_index++;
+            place = (cy + cell * 0.5f <=
+                     (float)(layout->height - bottom));
+        } else if (icon->side == ISOCAD_PANEL_RIGHT && right > 0) {
+            cell = (float)right;
+            cx = (float)layout->width - cell * 0.5f;
+            cy = (float)top + cell * 0.5f + (float)right_index * cell;
+            right_index++;
+            place = (cy + cell * 0.5f <=
+                     (float)(layout->height - bottom));
+        }
+
+        if (!place) {
+            icon->half = 0.0f;
+            isogl_overlay_group_set_visible(p->overlay, icon->group, 0);
+            continue;
+        }
+
+        icon->cx = cx;
+        icon->cy = cy;
+        icon->half = cell * 0.5f;
+        float art = cell * (14.0f / ISOCAD_PANEL_LOGICAL_THICKNESS) * 0.5f;
+        isogl_overlay_group_set_transform(p->overlay, icon->group,
+                                          cx, cy, art);
+        isogl_overlay_group_set_visible(p->overlay, icon->group, 1);
     }
 
-    panels_build(p);
+    panels_hide_hover(p);
 }
 
-/* ---- drawing ------------------------------------------------------------ */
+/* ---- hover, tooltip ----------------------------------------------------- */
 
 static int panels_pick(const IsocadPanels *p, float x, float y) {
     for (int i = 0; i < p->icon_count; ++i) {
@@ -538,83 +475,153 @@ static int panels_pick(const IsocadPanels *p, float x, float y) {
     return -1;
 }
 
-/* Layout rectangles are top-left based; isogl_draw_filled_rect works in the
- * current model space, which is GL pixel space during the overlay pass. */
-static void panel_quad(const IsocadPanels *p, int x, int y_top,
-                       int w, int h, const float color[4]) {
-    if (w <= 0 || h <= 0) return;
-    float y0 = (float)(p->fb_h - (y_top + h));
-    float y1 = (float)(p->fb_h - y_top);
-    isogl_draw_filled_rect((float)x, y0, (float)(x + w), y1, color);
+static float panels_ui_scale(const IsocadPanels *p) {
+    if (p->hover < 0) return 1.0f;
+    float cell = p->icons[p->hover].half * 2.0f;
+    if (cell <= 0.0f) return 1.0f;
+    return cell / ISOCAD_PANEL_LOGICAL_THICKNESS;
 }
 
-void isocad_panels_draw(IsocadPanels *p, float cursor_x, float cursor_y) {
-    if (!p || !p->built || p->fb_w <= 0 || p->fb_h <= 0) return;
+static void panels_tooltip_position(const IsocadPanels *p,
+                                    const isogl_panel_layout *layout,
+                                    float cursor_x, float cursor_y,
+                                    float w, float h,
+                                    float *tx, float *ty) {
+    float u = panels_ui_scale(p);
+    float x = cursor_x + 14.0f * u;
+    float y = cursor_y + 18.0f * u;
 
-    p->hover = panels_pick(p, cursor_x, cursor_y);
-    if (p->hover != p->hover_drawn) panels_upload(p);
-
-    float saved_model[16];
-    float saved_view[16];
-    memcpy(saved_model, isogl_model_matrix, sizeof(saved_model));
-    memcpy(saved_view, isogl_view_matrix, sizeof(saved_view));
-
-    float identity[16] = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    };
-    float ortho[16] = {0};
-    ortho[0] = 2.0f / (float)p->fb_w;
-    ortho[5] = 2.0f / (float)p->fb_h;
-    ortho[10] = 1.0f;
-    ortho[12] = -1.0f;
-    ortho[13] = -1.0f;
-    ortho[15] = 1.0f;
-
-    memcpy(isogl_model_matrix, identity, sizeof(identity));
-    memcpy(isogl_view_matrix, ortho, sizeof(ortho));
-
-    int top_h = p->insets.top;
-    int left_w = p->insets.left;
-    int right_w = p->insets.right;
-    int bottom_h = p->insets.bottom;
-    int mid_h = p->fb_h - top_h - bottom_h;
-    if (mid_h < 0) mid_h = 0;
-
-    if (top_h > 0) {
-        panel_quad(p, 0, 0, p->fb_w, top_h, PANEL_BG);
-        panel_quad(p, 0, top_h - 1, p->fb_w, 1, PANEL_EDGE);
+    if (x + w > (float)layout->width - 1.0f) {
+        x = cursor_x - w - 14.0f * u;
+        if (x < 0.0f) x = 0.0f;
     }
-    if (left_w > 0 && mid_h > 0) {
-        panel_quad(p, 0, top_h, left_w, mid_h, PANEL_BG);
-        panel_quad(p, left_w - 1, top_h, 1, mid_h, PANEL_EDGE);
+    if (y + h > (float)layout->height - 1.0f) {
+        y = cursor_y - h - 18.0f * u;
+        if (y < 0.0f) y = 0.0f;
     }
-    if (right_w > 0 && mid_h > 0) {
-        panel_quad(p, p->fb_w - right_w, top_h, right_w, mid_h, PANEL_BG);
-        panel_quad(p, p->fb_w - right_w, top_h, 1, mid_h, PANEL_EDGE);
+    if (x + w > (float)layout->width - 1.0f) {
+        x = (float)layout->width - w - 1.0f;
     }
-    if (bottom_h > 0) {
-        /* The console strip belongs to the same overlay pass; the console
-           module only draws its text afterwards. */
-        panel_quad(p, 0, p->fb_h - bottom_h, p->fb_w, bottom_h, PANEL_BG);
-        panel_quad(p, 0, p->fb_h - bottom_h, p->fb_w, 1, PANEL_EDGE);
+    if (y + h > (float)layout->height - 1.0f) {
+        y = (float)layout->height - h - 1.0f;
+    }
+    if (x < 0.0f) x = 0.0f;
+    if (y < 0.0f) y = 0.0f;
+    *tx = x;
+    *ty = y;
+}
+
+static void panels_build_tooltip(IsocadPanels *p,
+                                 const isogl_panel_layout *layout,
+                                 const IsocadPanelIcon *icon,
+                                 float cursor_x, float cursor_y) {
+    float u = panels_ui_scale(p);
+    float text_h = 12.0f * u;
+    float pad = 6.0f * u;
+    float border = 1.0f * u;
+    if (border < 1.0f) border = 1.0f;
+
+    float text_w = 0.0f;
+    if (p->font && p->font->height > 0.0f) {
+        text_w = (float)isogl_font_text_advance(p->font, icon->name) *
+                 text_h / p->font->height;
+    }
+
+    float w = text_w + 2.0f * pad;
+    float h = text_h + 2.0f * pad;
+    if (w < 24.0f * u) w = 24.0f * u;
+    if (h < 16.0f * u) h = 16.0f * u;
+
+    float tx = 0.0f, ty = 0.0f;
+    panels_tooltip_position(p, layout, cursor_x, cursor_y, w, h, &tx, &ty);
+
+    isogl_overlay_group_clear(p->overlay, p->tooltip_group);
+    isogl_overlay_group_set_layer(p->overlay, p->tooltip_group, 1);
+    isogl_overlay_group_set_visible(p->overlay, p->tooltip_group, 1);
+    isogl_overlay_group_set_transform(p->overlay, p->tooltip_group,
+                                      tx, ty, 1.0f);
+    isogl_overlay_group_set_clip(p->overlay, p->tooltip_group,
+                                 1, tx, ty, w, h);
+
+    isogl_overlay_group_quad(p->overlay, p->tooltip_group,
+                             0.0f, 0.0f, w, h, TOOLTIP_BG);
+    isogl_overlay_group_quad(p->overlay, p->tooltip_group,
+                             0.0f, 0.0f, w, border, TOOLTIP_EDGE);
+    isogl_overlay_group_quad(p->overlay, p->tooltip_group,
+                             0.0f, h - border, w, border, TOOLTIP_EDGE);
+    isogl_overlay_group_quad(p->overlay, p->tooltip_group,
+                             0.0f, 0.0f, border, h, TOOLTIP_EDGE);
+    isogl_overlay_group_quad(p->overlay, p->tooltip_group,
+                             w - border, 0.0f, border, h, TOOLTIP_EDGE);
+    isogl_overlay_group_text(p->overlay, p->tooltip_group, icon->name,
+                             pad, pad + text_h, text_h, 0.0f, TOOLTIP_TEXT);
+
+    p->tooltip_x = tx;
+    p->tooltip_y = ty;
+    p->tooltip_w = w;
+    p->tooltip_h = h;
+    p->tooltip_shown = 1;
+}
+
+static void panels_move_tooltip(IsocadPanels *p,
+                                const isogl_panel_layout *layout,
+                                float cursor_x, float cursor_y) {
+    if (!p->tooltip_shown) return;
+
+    float tx = 0.0f, ty = 0.0f;
+    panels_tooltip_position(p, layout, cursor_x, cursor_y,
+                            p->tooltip_w, p->tooltip_h, &tx, &ty);
+    if (tx == p->tooltip_x && ty == p->tooltip_y) return;
+
+    p->tooltip_x = tx;
+    p->tooltip_y = ty;
+    isogl_overlay_group_set_transform(p->overlay, p->tooltip_group,
+                                      tx, ty, 1.0f);
+    isogl_overlay_group_set_clip(p->overlay, p->tooltip_group,
+                                 1, tx, ty, p->tooltip_w, p->tooltip_h);
+}
+
+void isocad_panels_emit(IsocadPanels *p, const isogl_panel_layout *layout,
+                        float cursor_x, float cursor_y) {
+    if (!p || !layout || !p->overlay || !p->built) return;
+
+    int hover = panels_pick(p, cursor_x, cursor_y);
+    if (hover != p->hover) {
+        if (p->hover >= 0) {
+            isogl_overlay_group_set_color(p->overlay,
+                                          p->icons[p->hover].group, NULL);
+        }
+
+        if (hover < 0) {
+            panels_hide_hover(p);
+        } else {
+            p->hover = hover;
+            const IsocadPanelIcon *icon = &p->icons[hover];
+
+            isogl_overlay_group_set_color(p->overlay, icon->group,
+                                          ICON_HOVER_COLOR);
+
+            isogl_overlay_group_clear(p->overlay, p->hover_group);
+            isogl_overlay_group_set_transform(p->overlay, p->hover_group,
+                                              0.0f, 0.0f, 1.0f);
+            isogl_overlay_group_set_layer(p->overlay, p->hover_group, 0);
+            isogl_overlay_group_set_visible(p->overlay, p->hover_group, 1);
+            isogl_overlay_group_quad(p->overlay, p->hover_group,
+                                     icon->cx - icon->half,
+                                     icon->cy - icon->half,
+                                     icon->half * 2.0f,
+                                     icon->half * 2.0f,
+                                     PANEL_HOVER_BG);
+
+            panels_build_tooltip(p, layout, icon, cursor_x, cursor_y);
+        }
     }
 
     if (p->hover >= 0) {
-        const IsocadPanelIcon *icon = &p->icons[p->hover];
-        int x0 = (int)floorf(icon->cx - icon->half);
-        int x1 = (int)ceilf(icon->cx + icon->half);
-        int y0 = (int)floorf(icon->cy - icon->half);
-        int y1 = (int)ceilf(icon->cy + icon->half);
-        panel_quad(p, x0, y0, x1 - x0, y1 - y0, PANEL_HOVER_BG);
+        panels_move_tooltip(p, layout, cursor_x, cursor_y);
     }
+}
 
-    if (p->vbo_id != 0 && p->vbos.size > 0) {
-        isogl_draw_vbo_object(&p->vbos, 0);
-    }
-
-    memcpy(isogl_model_matrix, saved_model, sizeof(saved_model));
-    memcpy(isogl_view_matrix, saved_view, sizeof(saved_view));
+int isocad_panels_hover(const IsocadPanels *p) {
+    return p ? p->hover : -1;
 }

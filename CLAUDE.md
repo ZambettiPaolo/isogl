@@ -265,6 +265,41 @@ Implementazione:
   render, pick, hit, selezione, explode e trasferimento al CAD.
   `tests/test_symbol_geometry.c` è headless.
 
+## Overlay e pannelli
+
+L'interfaccia screen-space non usa scissor+clear né uno shader privato dell'app.
+`isogl_overlay` (`include/isogl/isogl_overlay.h`, `src/isogl_overlay.c`) espone
+**gruppi di primitive** in pixel di framebuffer, viewport-local, origine in alto
+a sinistra:
+
+- ogni gruppo ha quad, linee e testo in coordinate locali, più trasformazione
+  `(tx, ty, scale)`, layer, clip rect, visibilità e override di colore;
+- ogni mutazione marca solo quel gruppo dirty; `isogl_overlay_commit()`
+  ricostruisce gli staging condivisi e carica i VBO solo quando serve. Nei frame
+  statici non c'è upload;
+- `isogl_overlay_draw()` usa una proiezione pixel propria e **non modifica**
+  `isogl_model_matrix`/`isogl_view_matrix`; il clip è per-vertice su quad/linee e
+  per-stringa sul testo, quindi non moltiplica le draw call;
+- l'ordine è per layer e poi per creazione: in ogni layer quad, linee, testo.
+  Un tooltip è un gruppo in un layer alto con un quad e un testo, non un tipo
+  speciale.
+
+Trigger di aggiornamento: hover, input di testo, resize/DPR, cambio icone
+(`group_clear` + re-add), visibilità/layer/clip, movimento del tooltip. Le liste
+CPU retained sono **stato UI**, non geometria del documento: l'eccezione al
+divieto di copia RAM dei segmenti vale solo per l'overlay.
+
+`isogl_panel*` è il layout puro dei pannelli (`top/left/right/bottom`,
+`separator`, `content`) più l'emissione dei quad di sfondo/separatore. Il CAD usa
+`content` per il fit della scena e gli inset per filtrare l'input, e disegna il
+contenuto dei pannelli in pixel con le primitive dell'overlay. Le linee
+dell'overlay sono `GL_LINES` a 1 px: **non esiste** un helper che le converta in
+quad spessi.
+
+Test: `make test-panel-layout` (headless, solo `-lm`) e `make test-overlay`
+(GL, FBO). `apps/isocad/src/panels.c` compone i gruppi icona e il tooltip;
+`console.c` emette le righe nel gruppo testo.
+
 ## Selezione
 
 Due modalità, due rappresentazioni. Il kernel analitico non sparisce: cambia
@@ -437,6 +472,11 @@ rimozione/undo delle entità e il modello gerarchico del CAD.
 - Tenere una copia RAM dei segmenti.
 - Fare hit-test sui segmenti invece che sulle entità.
 - Usare un pass di pick GPU per la selezione a rettangolo.
+- Usare l'overlay o i suoi VBO per la geometria del documento: è solo stato UI.
+- Modificare `isogl_model_matrix`/`isogl_view_matrix` dentro
+  `isogl_overlay_draw()`: l'overlay usa una proiezione propria.
+- Aggiungere un helper che converta le linee dell'overlay in quad spessi: le
+  linee UI restano `GL_LINES` a 1 px.
 - Usare il solo AABB come filtro del click: il cerchio include l'interno, la
   diagonale include gli angoli vuoti.
 - Leggere il framebuffer normale per decidere se fare il pick.
@@ -470,17 +510,20 @@ make                        # core + helper SDL + demo
 make lib                    # solo il core, senza SDL installato
 make sdl-host               # solo libisogl_sdl.a
 make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
+make test-panel-layout      # headless: layout pannelli, niente GL/SDL
+make test-overlay           # GL: overlay a gruppi, batch, clip, testo
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
-make test                   # symbol geometry + symbols + viewport + test-core
+make test                   # geometry + panel layout + overlay + symbols + viewport + core
 make check-sdl-free         # nessun riferimento SDL nel core
 make example-qt6            # host Qt6 (opzionale)
 make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)
 make -B SANITIZE=1 test
 ```
 
-`tests/test_symbol_geometry.c` gira senza finestra e senza linkare SDL/GL.
-`tests/test_symbols.c` usa un contesto GL (Xvfb in CI) e il disegno
+`tests/test_symbol_geometry.c` e `tests/test_panel_layout.c` girano senza
+finestra e senza linkare SDL/GL. `tests/test_overlay.c` usa un contesto GL
+(Xvfb in CI) e un FBO. `tests/test_symbols.c` usa un contesto GL e il disegno
 strutturato `tests/fixtures/test_drawing.toml`; il fake CAD
 `tests/fake_cad.*` non è il CAD di produzione. I test di `tests/test_core.c`
 richiedono ancora un contesto GL.
@@ -491,4 +534,5 @@ richiedono ancora un contesto GL.
 - `README.md` — architettura, contratto, build, install.
 - `apps/isocad/README.md` — modello del documento e stato dell'app.
 - `include/isogl/isogl.h`, `include/isogl/isogl_font.h`,
-  `include/isogl/isogl_style.h` — API e tabelle normative.
+  `include/isogl/isogl_style.h`, `include/isogl/isogl_overlay.h`,
+  `include/isogl/isogl_panel.h` — API, overlay e tabelle normative.

@@ -2,12 +2,13 @@
 #define ISOCAD_CONSOLE_H
 
 #include <isogl/isogl.h>
+#include <isogl/isogl_overlay.h>
+#include <isogl/isogl_panel.h>
 #include <stddef.h>
 
 /* Console prototype: a 100-logical-px strip at the bottom of the window.
- * The strip is an opaque overlay drawn with scissor+clear; the text uses a
- * full-window pixel orthographic view passed to isogl_draw_string_list.
- * No second isogl viewport is installed. */
+ * The strip background is emitted by the panel helper; this module owns the
+ * text state and emits its lines into an overlay group. */
 
 #define ISOCAD_CONSOLE_MAX_INPUT          60
 #define ISOCAD_CONSOLE_HISTORY_LINES      3
@@ -27,24 +28,23 @@ typedef struct {
     size_t history_count;
 
     isogl_font_data *font;       /* not owned */
-    isogl_string_list strings;   /* four panel lines */
-    int strings_dirty;
+    isogl_overlay *overlay;      /* not owned */
+    isogl_overlay_group group;
 
-    int window_w, window_h;      /* framebuffer pixels */
+    int dirty;
     int panel_h;                 /* framebuffer pixels */
     float cap_px, pitch_px, pad_x_px;
     float baseline_px[1 + ISOCAD_CONSOLE_HISTORY_LINES];
-    float view[16];              /* full-window pixel ortho, column-major */
 } IsocadConsole;
 
-void isocad_console_init(IsocadConsole *c, isogl_font_data *font);
+void isocad_console_init(IsocadConsole *c, isogl_font_data *font,
+                         isogl_overlay *overlay);
 void isocad_console_free(IsocadConsole *c);
 
-/* Idempotent.  panel_h is in framebuffer pixels; the metrics are derived from
- * panel_h/100 so HiDPI needs no extra scale.  Marks the string list dirty
- * when the window or panel size changes. */
-void isocad_console_layout(IsocadConsole *c, int fb_w, int fb_h,
-                           int panel_h);
+/* Idempotent.  Metrics are derived from the bottom strip height so HiDPI
+ * needs no extra scale.  Marks the text dirty when the size changes. */
+void isocad_console_layout(IsocadConsole *c,
+                           const isogl_panel_layout *layout);
 
 /* Pure state operations: no GL calls, safe with font == NULL. */
 void isocad_console_text_input(IsocadConsole *c, const char *utf8);
@@ -52,8 +52,8 @@ void isocad_console_backspace(IsocadConsole *c);
 int  isocad_console_enter(IsocadConsole *c);   /* 1 if a line was echoed */
 void isocad_console_clear_input(IsocadConsole *c);
 
-/* Rebuilds if dirty, sets the panel text colour and draws with the active
- * (full-window) viewport. */
-void isocad_console_draw(IsocadConsole *c, GLuint font_program);
+/* Emit the text lines into the overlay group when the content or layout
+ * changed.  The overlay draws them later. */
+void isocad_console_emit(IsocadConsole *c, const isogl_panel_layout *layout);
 
 #endif /* ISOCAD_CONSOLE_H */

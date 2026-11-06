@@ -32,16 +32,23 @@ TEST        := $(BUILD)/test-core
 TEST_SYMBOL_GEOMETRY := $(BUILD)/test-symbol-geometry
 SYMBOL_GEOMETRY_TEST_OBJS := $(BUILD)/tests/test_symbol_geometry.o \
                              $(BUILD)/src/isogl_symbol_geometry.o
+TEST_PANEL_LAYOUT := $(BUILD)/test-panel-layout
+PANEL_LAYOUT_TEST_OBJS := $(BUILD)/tests/test_panel_layout.o \
+                          $(BUILD)/src/isogl_panel.o
 TEST_SYMBOLS := $(BUILD)/test-symbols
 TEST_SYMBOLS_SRCS := tests/test_symbols.c tests/fake_cad.c
 TEST_SYMBOLS_OBJS := $(TEST_SYMBOLS_SRCS:%.c=$(BUILD)/%.o)
 TEST_VIEWPORT := $(BUILD)/test-viewport
 TEST_VIEWPORT_SRCS := tests/test_viewport.c
 TEST_VIEWPORT_OBJS := $(TEST_VIEWPORT_SRCS:%.c=$(BUILD)/%.o)
+TEST_OVERLAY := $(BUILD)/test-overlay
+TEST_OVERLAY_SRCS := tests/test_overlay.c
+TEST_OVERLAY_OBJS := $(TEST_OVERLAY_SRCS:%.c=$(BUILD)/%.o)
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
 SYMBOL_SRC := src/isogl_symbol.c
 LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_style.c \
+               src/isogl_overlay.c src/isogl_panel.c src/isogl_panel_emit.c \
                $(SYMBOL_GEOMETRY_SRC) $(SYMBOL_SRC) \
                third_party/glad/glad.c third_party/tomlc99/toml.c
 SDL_HOST_SRCS := hosts/isogl-sdl/isogl_sdl.c
@@ -63,7 +70,7 @@ sdl-host: $(SDL_HOST_LIB)
 # library objects are compiled without them: a stray SDL include fails the
 # build by construction.
 $(SDL_HOST_OBJS) $(DEMO_OBJS) $(TEST_OBJS) $(TEST_SYMBOLS_OBJS) \
-    $(TEST_VIEWPORT_OBJS): TARGET_CFLAGS := $(SDL2_CFLAGS)
+    $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS): TARGET_CFLAGS := $(SDL2_CFLAGS)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -92,6 +99,13 @@ $(TEST_SYMBOL_GEOMETRY): $(SYMBOL_GEOMETRY_TEST_OBJS)
 test-symbol-geometry: $(TEST_SYMBOL_GEOMETRY)
 	./$(TEST_SYMBOL_GEOMETRY)
 
+$(TEST_PANEL_LAYOUT): $(PANEL_LAYOUT_TEST_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(PANEL_LAYOUT_TEST_OBJS) -lm $(LDFLAGS) -o $@
+
+test-panel-layout: $(TEST_PANEL_LAYOUT)
+	./$(TEST_PANEL_LAYOUT)
+
 $(TEST_SYMBOLS): $(TEST_SYMBOLS_OBJS) $(LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(TEST_SYMBOLS_OBJS) $(LIB) $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
@@ -106,6 +120,14 @@ $(TEST_VIEWPORT): $(TEST_VIEWPORT_OBJS) $(SDL_HOST_LIB) $(LIB)
 
 test-viewport: $(TEST_VIEWPORT)
 	./$(TEST_VIEWPORT) .
+
+$(TEST_OVERLAY): $(TEST_OVERLAY_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(TEST_OVERLAY_OBJS) $(LIB) \
+	    $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-overlay: $(TEST_OVERLAY)
+	./$(TEST_OVERLAY) .
 
 run: $(DEMO)
 	./$(DEMO)
@@ -126,7 +148,7 @@ example-gtk4: lib
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
-test: test-symbol-geometry test-symbols test-viewport $(TEST)
+test: test-symbol-geometry test-panel-layout test-overlay test-symbols test-viewport $(TEST)
 	./$(TEST) .
 
 install: all

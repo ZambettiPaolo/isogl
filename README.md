@@ -15,9 +15,12 @@ modulo (`isogl_style`), usato sia dal C sia dagli shader.
 | `isogl` | init/cleanup, shader, viewport, foglio, matrici view/model, zoom/pan, oggetti segmento |
 | `isogl_font` | font vettoriale TOML, stringhe, VBO per stringa |
 | `isogl_symbol*` | geometria pura e registry GL dei simboli (quota, center mark) |
+| `isogl_overlay` | overlay screen-space a gruppi: quad, linee e testo batchati, dirty per gruppo, clip e layer |
+| `isogl_panel*` | layout puro dei pannelli (bordi, separatori, content rect) ed emissione dei quad |
 | `shaders/vs|gs|fs_segment` | unpack attributi, filtro maschere, clip, tratteggio |
 | `shaders/vs|fs_sheet` | foglio |
-| `shaders/vs|fs_font` | testo con `glMultiDrawArrays(GL_LINE_STRIP)` |
+| `shaders/vs|fs_overlay` | quad e linee dell'overlay, colore e clip per vertice |
+| `shaders/vs|fs_font` | testo con un VBO di `GL_LINES` per stringa |
 
 `libisogl.a` non dipende da SDL: usa solo OpenGL, glad e tomlc99. SDL compare
 solo nel pacchetto opzionale `isogl-sdl` (helper di hosting), nella demo e nei
@@ -110,9 +113,11 @@ stringhe.
 make                     # build/libisogl.a + libisogl_sdl.a + build/isogl-demo
 make lib                 # solo il core, compila senza SDL installato
 make test-symbol-geometry # headless: geometria pura, niente GL/SDL
+make test-panel-layout    # headless: matematica dei pannelli, niente GL/SDL
+make test-overlay         # GL: overlay a gruppi, batch, clip, testo
 make test-symbols         # GL: fake CAD gerarchico + fixture TOML
 make test-viewport        # GL: viewport, coordinate, pick HiDPI, selezione
-make test                 # symbol geometry + symbols + viewport + test FBO
+make test                 # geometria + layout + overlay + symbols + viewport + test FBO
 make check-sdl-free       # il core non deve contenere riferimenti SDL
 make example-qt6          # host Qt6 (opzionale, richiede Qt6)
 make example-gtk4         # host GTK4 (opzionale, richiede libgtk-4-dev)
@@ -126,7 +131,7 @@ checks `nm -u build/libisogl.a` for SDL symbols.
 Install layout:
 
 ```
-$PREFIX/include/isogl/{isogl.h,isogl_font.h,isogl_style.h,isogl_symbol.h,isogl_symbol_geometry.h,glad.h,khrplatform.h}
+$PREFIX/include/isogl/{isogl.h,isogl_font.h,isogl_style.h,isogl_symbol.h,isogl_symbol_geometry.h,isogl_overlay.h,isogl_panel.h,glad.h,khrplatform.h}
 $PREFIX/include/isogl-sdl/isogl_sdl.h
 $PREFIX/lib/libisogl.a
 $PREFIX/lib/libisogl_sdl.a

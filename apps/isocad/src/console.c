@@ -20,18 +20,27 @@ static void console_seed_history(IsocadConsole *c) {
              "isocad console (prototype)");
 }
 
-void isocad_console_init(IsocadConsole *c, isogl_font_data *font) {
+void isocad_console_init(IsocadConsole *c, isogl_font_data *font,
+                         isogl_overlay *overlay) {
     if (!c) return;
     memset(c, 0, sizeof(*c));
     c->font = font;
-    c->strings_dirty = 1;
+    c->overlay = overlay;
+    c->dirty = 1;
     console_seed_history(c);
+
+    if (overlay) {
+        c->group = isogl_overlay_group_create(overlay, 0);
+        isogl_overlay_group_set_visible(overlay, c->group, 1);
+    }
 }
 
 void isocad_console_free(IsocadConsole *c) {
     if (!c) return;
-    isogl_string_list_free(&c->strings);
-    memset(&c->strings, 0, sizeof(c->strings));
+    if (c->overlay && c->group != ISOGL_OVERLAY_GROUP_INVALID) {
+        isogl_overlay_group_destroy(c->overlay, c->group);
+    }
+    memset(c, 0, sizeof(*c));
 }
 
 static int console_line_fits(const IsocadConsole *c, const char *input) {
@@ -44,23 +53,20 @@ static int console_line_fits(const IsocadConsole *c, const char *input) {
     return isogl_font_text_advance(c->font, line) <= CONSOLE_MAX_FONT_ADVANCE;
 }
 
-void isocad_console_layout(IsocadConsole *c, int fb_w, int fb_h,
-                           int panel_h) {
-    if (!c || fb_w <= 0 || fb_h <= 0 || panel_h <= 0 || panel_h > fb_h) {
+void isocad_console_layout(IsocadConsole *c,
+                           const isogl_panel_layout *layout) {
+    if (!c || !layout || !c->overlay) return;
+
+    int panel_h = layout->bottom.height;
+    if (panel_h <= 0) {
+        c->panel_h = 0;
+        c->dirty = 1;
         return;
     }
 
-    if (c->window_w == fb_w && c->window_h == fb_h &&
-        c->panel_h == panel_h && c->cap_px > 0.0f) {
-        return;
-    }
+    if (c->panel_h == panel_h && c->cap_px > 0.0f) return;
 
-    c->window_w = fb_w;
-    c->window_h = fb_h;
     c->panel_h = panel_h;
-
-    /* If the panel is clamped on a tiny window, u < 1 and the text shrinks
-       with it; on HiDPI, u = dpr and the metrics are in framebuffer pixels. */
     float u = (float)panel_h / ISOCAD_CONSOLE_LOGICAL_HEIGHT;
     c->cap_px = ISOCAD_CONSOLE_LOGICAL_CAP * u;
     c->pitch_px = ISOCAD_CONSOLE_LOGICAL_PITCH * u;
@@ -72,15 +78,7 @@ void isocad_console_layout(IsocadConsole *c, int fb_w, int fb_h,
              ISOCAD_CONSOLE_LOGICAL_PITCH * (float)i) * u;
     }
 
-    memset(c->view, 0, sizeof(c->view));
-    c->view[0] = 2.0f / (float)fb_w;
-    c->view[5] = 2.0f / (float)fb_h;
-    c->view[10] = 1.0f;
-    c->view[12] = -1.0f;
-    c->view[13] = -1.0f;
-    c->view[15] = 1.0f;
-
-    c->strings_dirty = 1;
+    c->dirty = 1;
 }
 
 void isocad_console_text_input(IsocadConsole *c, const char *utf8) {
@@ -98,14 +96,14 @@ void isocad_console_text_input(IsocadConsole *c, const char *utf8) {
 
         c->input[c->input_len++] = (char)*p;
         c->input[c->input_len] = '\0';
-        c->strings_dirty = 1;
+        c->dirty = 1;
     }
 }
 
 void isocad_console_backspace(IsocadConsole *c) {
     if (!c || c->input_len == 0) return;
     c->input[--c->input_len] = '\0';
-    c->strings_dirty = 1;
+    c->dirty = 1;
 }
 
 int isocad_console_enter(IsocadConsole *c) {
@@ -121,7 +119,7 @@ int isocad_console_enter(IsocadConsole *c) {
 
     c->input[0] = '\0';
     c->input_len = 0;
-    c->strings_dirty = 1;
+    c->dirty = 1;
     return 1;
 }
 
@@ -129,60 +127,47 @@ void isocad_console_clear_input(IsocadConsole *c) {
     if (!c || c->input_len == 0) return;
     c->input[0] = '\0';
     c->input_len = 0;
-    c->strings_dirty = 1;
+    c->dirty = 1;
 }
 
-static void console_append(IsocadConsole *c, const char *text,
-                           float x, float y) {
-    isogl_glyph_string *s = isogl_create_glyph_string(text, c->font);
-    if (!s) return;
+void isocad_console_emit(IsocadConsole *c,
+                         const isogl_panel_layout *layout) {
+    if (!c || !layout || !c->overlay || !c->dirty) return;
 
-    if (!isogl_string_list_append(&c->strings, s, x, y, c->cap_px, 1.0f,
-                                  0.0f, c->font, 0)) {
-        isogl_free_glyph_string(s);
-    }
-}
+    isogl_overlay_group_clear(c->overlay, c->group);
+    isogl_overlay_group_set_transform(c->overlay, c->group, 0.0f, 0.0f, 1.0f);
+    isogl_overlay_group_set_layer(c->overlay, c->group, 0);
 
-static void console_rebuild(IsocadConsole *c) {
-    isogl_string_list_free(&c->strings);
-    memset(&c->strings, 0, sizeof(c->strings));
-
-    if (!c->font || !(c->cap_px > 0.0f)) {
-        c->strings_dirty = 0;
+    if (c->panel_h <= 0 || layout->bottom.height <= 0) {
+        isogl_overlay_group_set_visible(c->overlay, c->group, 0);
+        c->dirty = 0;
         return;
     }
+
+    isogl_overlay_group_set_visible(c->overlay, c->group, 1);
+    isogl_overlay_group_set_clip(c->overlay, c->group, 1,
+                                 (float)layout->bottom.x,
+                                 (float)layout->bottom.y,
+                                 (float)layout->bottom.width,
+                                 (float)layout->bottom.height);
 
     char line[ISOCAD_CONSOLE_MAX_INPUT + 8];
 
     snprintf(line, sizeof(line), "> %s_", c->input);
-    console_append(c, line, c->pad_x_px, c->baseline_px[0]);
+    float y0 = (float)layout->height - c->baseline_px[0];
+    isogl_overlay_group_text(c->overlay, c->group, line,
+                             c->pad_x_px, y0, c->cap_px, 0.0f,
+                             CONSOLE_TEXT_COLOR);
 
     size_t n = c->history_count;
     if (n > ISOCAD_CONSOLE_HISTORY_LINES) n = ISOCAD_CONSOLE_HISTORY_LINES;
     for (size_t i = 0; i < n; ++i) {
         snprintf(line, sizeof(line), "> %s", c->history[i]);
-        console_append(c, line, c->pad_x_px, c->baseline_px[i + 1]);
+        float y = (float)layout->height - c->baseline_px[i + 1];
+        isogl_overlay_group_text(c->overlay, c->group, line,
+                                 c->pad_x_px, y, c->cap_px, 0.0f,
+                                 CONSOLE_TEXT_COLOR);
     }
 
-    c->strings_dirty = 0;
-}
-
-void isocad_console_draw(IsocadConsole *c, GLuint font_program) {
-    if (!c || !c->font || c->panel_h <= 0 ||
-        c->window_w <= 0 || c->window_h <= 0 || font_program == 0) {
-        return;
-    }
-
-    if (c->strings_dirty) console_rebuild(c);
-
-    float identity[16] = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    };
-
-    isogl_font_set_color(CONSOLE_TEXT_COLOR);
-    isogl_draw_string_list(&c->strings, font_program,
-                           identity, c->view, identity);
+    c->dirty = 0;
 }

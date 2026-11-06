@@ -347,6 +347,28 @@ void isogl_font_set_color(const float rgba[4]) {
     memcpy(isogl_font_color, rgba, sizeof(isogl_font_color));
 }
 
+void isogl_glyph_string_set_color(isogl_glyph_string *glyph_string,
+                                  const float rgba[4]) {
+    if (!glyph_string) return;
+    if (!rgba) {
+        glyph_string->color_override = 0;
+        return;
+    }
+    memcpy(glyph_string->color, rgba, sizeof(glyph_string->color));
+    glyph_string->color_override = 1;
+}
+
+void isogl_glyph_string_set_clip(isogl_glyph_string *glyph_string,
+                                 int enabled, const float rect[4]) {
+    if (!glyph_string) return;
+    if (!enabled || !rect) {
+        glyph_string->clip_override = 0;
+        return;
+    }
+    memcpy(glyph_string->clip_rect, rect, sizeof(glyph_string->clip_rect));
+    glyph_string->clip_override = 1;
+}
+
 isogl_glyph_string* isogl_create_glyph_string(const char* text, isogl_font_data* font) {
     if (!text || !font) return NULL;
 
@@ -570,6 +592,12 @@ int isogl_string_list_update_by_pick_id(isogl_string_list *list,
 
         fresh->pick_id = pick_id;
         fresh->selected = list->glyph_strings[i].selected;
+        memcpy(fresh->color, list->glyph_strings[i].color,
+               sizeof(fresh->color));
+        fresh->color_override = list->glyph_strings[i].color_override;
+        memcpy(fresh->clip_rect, list->glyph_strings[i].clip_rect,
+               sizeof(fresh->clip_rect));
+        fresh->clip_override = list->glyph_strings[i].clip_override;
         isogl_create_string_matrix(fresh->string_matrix, x, y, scale, angle);
 
         isogl_glyph_string_free_contents(&list->glyph_strings[i]);
@@ -600,6 +628,24 @@ int isogl_string_list_set_transform_by_pick_id(isogl_string_list *list,
         return 0;
     }
     return -1;
+}
+
+int isogl_string_list_set_transform_by_index(isogl_string_list *list,
+                                             uint32_t index,
+                                             isogl_font_data *font,
+                                             float x, float y, float height,
+                                             float global_scale,
+                                             float angle) {
+    if (!list || index >= list->glyph_string_count) return -1;
+
+    float scale = 0.0f;
+    if (isogl_text_scale(font, height, global_scale, &scale) != 0) {
+        return -1;
+    }
+
+    isogl_create_string_matrix(list->glyph_strings[index].string_matrix,
+                               x, y, scale, angle);
+    return 0;
 }
 
 static int isogl_font_compare_u32(const void *a, const void *b) {
@@ -653,6 +699,8 @@ typedef struct {
     GLint sel_rect;
     GLint sel_color;
     GLint selected;
+    GLint clip_active;
+    GLint clip_rect;
 } isogl_font_uniforms;
 
 static isogl_font_uniforms isogl_font_u;
@@ -672,12 +720,16 @@ static void isogl_cache_font_uniforms(GLuint program) {
     isogl_font_u.sel_rect = glGetUniformLocation(program, "uSelRect");
     isogl_font_u.sel_color = glGetUniformLocation(program, "uSelColor");
     isogl_font_u.selected = glGetUniformLocation(program, "uSelected");
+    isogl_font_u.clip_active = glGetUniformLocation(program, "uClipActive");
+    isogl_font_u.clip_rect = glGetUniformLocation(program, "uClipRect");
 }
 
-void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_program,
-                            float model_matrix[16],
-                            float view_matrix[16],
-                            float relative_matrix[16]) {
+void isogl_draw_string_list_ex(isogl_string_list* string_list,
+                               GLuint shader_program,
+                               float model_matrix[16],
+                               float view_matrix[16],
+                               float relative_matrix[16],
+                               int apply_selection) {
     if (!string_list || string_list->glyph_string_count == 0) return;
     if (shader_program == 0) return;
     if (isogl_font_vao == 0) isogl_font_init_vao();
@@ -691,26 +743,26 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
         glUniformMatrix4fv(isogl_font_u.model, 1, GL_FALSE, model_matrix);
     if (isogl_font_u.relative != -1)
         glUniformMatrix4fv(isogl_font_u.relative, 1, GL_FALSE, relative_matrix);
-    if (isogl_font_u.color != -1)
-        glUniform4fv(isogl_font_u.color, 1, isogl_font_color);
     if (isogl_font_u.pick_scale != -1)
         glUniform2f(isogl_font_u.pick_scale, 1.0f, 1.0f);
     if (isogl_font_u.pick_offset != -1)
         glUniform2f(isogl_font_u.pick_offset, 0.0f, 0.0f);
+
+    isogl_viewport vp;
+    int have_vp = (isogl_get_viewport(&vp) == 0);
+
     int sel_active = 0;
     float sel_rect_fb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    if (isogl_get_selection_active() && isogl_get_selection_preview()) {
-        isogl_viewport vp;
-        if (isogl_get_viewport(&vp) == 0) {
-            const float *r = isogl_get_selection_rect();
-            sel_active = 1;
-            /* Local top-left -> framebuffer-absolute bottom-left, the space
-               gl_FragCoord uses in fs_font.glsl. */
-            sel_rect_fb[0] = (float)vp.x + r[0];
-            sel_rect_fb[1] = (float)vp.y + (float)vp.height - r[3];
-            sel_rect_fb[2] = (float)vp.x + r[2];
-            sel_rect_fb[3] = (float)vp.y + (float)vp.height - r[1];
-        }
+    if (apply_selection && isogl_get_selection_active() &&
+        isogl_get_selection_preview() && have_vp) {
+        const float *r = isogl_get_selection_rect();
+        sel_active = 1;
+        /* Local top-left -> framebuffer-absolute bottom-left, the space
+           gl_FragCoord uses in fs_font.glsl. */
+        sel_rect_fb[0] = (float)vp.x + r[0];
+        sel_rect_fb[1] = (float)vp.y + (float)vp.height - r[3];
+        sel_rect_fb[2] = (float)vp.x + r[2];
+        sel_rect_fb[3] = (float)vp.y + (float)vp.height - r[1];
     }
     if (isogl_font_u.sel_active != -1)
         glUniform1i(isogl_font_u.sel_active, sel_active);
@@ -729,8 +781,30 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
 
         if (isogl_font_u.string != -1)
             glUniformMatrix4fv(isogl_font_u.string, 1, GL_FALSE, glyph_string->string_matrix);
-        if (isogl_font_u.selected != -1)
-            glUniform1i(isogl_font_u.selected, glyph_string->selected ? 1 : 0);
+        if (isogl_font_u.color != -1) {
+            const float *color = glyph_string->color_override
+                               ? glyph_string->color : isogl_font_color;
+            glUniform4fv(isogl_font_u.color, 1, color);
+        }
+        if (isogl_font_u.selected != -1) {
+            int selected = (apply_selection && glyph_string->selected) ? 1 : 0;
+            glUniform1i(isogl_font_u.selected, selected);
+        }
+        if (isogl_font_u.clip_active != -1) {
+            int clip_on = (glyph_string->clip_override && have_vp) ? 1 : 0;
+            glUniform1i(isogl_font_u.clip_active, clip_on);
+        }
+        if (isogl_font_u.clip_rect != -1) {
+            float clip_fb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            if (glyph_string->clip_override && have_vp) {
+                const float *r = glyph_string->clip_rect;
+                clip_fb[0] = (float)vp.x + r[0];
+                clip_fb[1] = (float)vp.y + (float)vp.height - (r[1] + r[3]);
+                clip_fb[2] = (float)vp.x + r[0] + r[2];
+                clip_fb[3] = (float)vp.y + (float)vp.height - r[1];
+            }
+            glUniform4fv(isogl_font_u.clip_rect, 1, clip_fb);
+        }
 
         glBindBuffer(GL_ARRAY_BUFFER, glyph_string->vbo);
         glVertexAttribPointer(0, 2, GL_SHORT, GL_FALSE,
@@ -742,6 +816,14 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glUseProgram(0);
+}
+
+void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_program,
+                            float model_matrix[16],
+                            float view_matrix[16],
+                            float relative_matrix[16]) {
+    isogl_draw_string_list_ex(string_list, shader_program, model_matrix,
+                              view_matrix, relative_matrix, 1);
 }
 
 void isogl_draw_string_list_pick(isogl_string_list* string_list, GLuint shader_program,

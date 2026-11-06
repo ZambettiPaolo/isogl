@@ -59,6 +59,10 @@ typedef struct {
     uint32_t pick_id;                // Opaque ID for the pick pass (0 = not pickable)
     int selected;                    // Persistent selection highlight (0/1)
     float string_matrix[16];         // String transformation matrix
+    float color[4];                  // Per-string colour, used when color_override != 0
+    int color_override;              // 0 = use isogl_font_set_color()
+    float clip_rect[4];              // Viewport-local top-left x, y, width, height
+    int clip_override;               // 0 = no clip
 } isogl_glyph_string;
 
 typedef struct {
@@ -89,6 +93,28 @@ void isogl_draw_string_list(isogl_string_list* string_list, GLuint shader_progra
                            float model_matrix[16],      // Zoom
                            float view_matrix[16],       // Aspect ratio
                            float relative_matrix[16]);  // Block → World
+
+/*
+ * Same as isogl_draw_string_list(), with control over the scene selection
+ * tint.  apply_selection == 0 is used by screen-space overlays so a drag
+ * selection never tints panel labels; per-string colour and clip still apply.
+ */
+void isogl_draw_string_list_ex(isogl_string_list* string_list,
+                               GLuint shader_program,
+                               float model_matrix[16],
+                               float view_matrix[16],
+                               float relative_matrix[16],
+                               int apply_selection);
+
+/* Set a per-string colour.  rgba == NULL restores the global font colour. */
+void isogl_glyph_string_set_color(isogl_glyph_string *glyph_string,
+                                  const float rgba[4]);
+
+/* Set the per-string clip rectangle, viewport-local top-left pixels.
+ * enabled == 0 removes the clip. */
+void isogl_glyph_string_set_clip(isogl_glyph_string *glyph_string,
+                                 int enabled,
+                                 const float rect[4]);
 
 /*
  * Draw only pickable strings (pick_id != 0) into the current pick target,
@@ -134,6 +160,14 @@ int isogl_string_list_set_transform_by_pick_id(isogl_string_list* list,
                                                isogl_font_data* font,
                                                float x, float y, float height,
                                                float global_scale, float angle);
+
+/* Same as above, addressed by list index.  Used by the overlay for text
+ * that moves without changing its glyph VBO (tooltips). */
+int isogl_string_list_set_transform_by_index(isogl_string_list* list,
+                                             uint32_t index,
+                                             isogl_font_data* font,
+                                             float x, float y, float height,
+                                             float global_scale, float angle);
 
 /*
  * Set the persistent selection flag on the strings whose pick_id is in

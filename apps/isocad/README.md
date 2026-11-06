@@ -81,19 +81,29 @@ logici** (scalati con il device pixel ratio):
 - a destra: vista e visualizzazione (zoom +, zoom −, pan, fit, griglia, snap,
   spessore).
 
-Tutti e quattro gli sfondi (alto, sinistro, destro e console) sono **quad
-pieni** disegnati nello stesso pass, senza scissor+clear e senza uno shader
-proprio: dopo la scena il modulo `panels.c` salva `isogl_model_matrix` e
-`isogl_view_matrix`, le sostituisce con un'ortografica in pixel, disegna i
-rettangoli con `isogl_draw_filled_rect()` (primitivo che riusa lo shader del
-foglio) e le icone con un VBO di segmenti isogl (`isogl_vbo_array` +
-`isogl_draw_vbo_object()`), poi ripristina le matrici. La console aggiunge solo
-il testo. Il viewport isogl resta quello dell'intera finestra. Il foglio viene
-adattato all'area interna ai quattro pannelli con scala uniforme e centratura.
-Le icone usano gli spessori ISO 7 e 6 (grigio e bianco in modalità
-colori-spessore) e il VBO viene aggiornato solo al cambio di cella hoverata,
-non a ogni frame. Sono un prototipo visivo: evidenziano l'hover ma non hanno
-ancora azioni associate.
+Tutti gli sfondi (alto, sinistro, destro e console), le icone, l'hover e il
+tooltip passano da un unico **overlay a gruppi** (`isogl_overlay`). Il CAD crea
+un gruppo per ogni pannello/icona elementare e ci mette primitive locali (quad,
+linee, testo) con trasformazione, layer, clip rect e override di colore. Ogni
+icona è quindi un gruppo di linee in coordinate locali; il layout imposta solo
+la trasformazione, l'hover cambia il colore del gruppo e mostra un tooltip
+(quad + testo) in un layer alto.
+
+`isogl_overlay_commit()` ricostruisce solo i gruppi dirty e carica i VBO
+condivisi; nei frame statici non fa nulla. `isogl_overlay_draw()` usa una
+proiezione pixel propria e **non tocca** `isogl_model_matrix` e
+`isogl_view_matrix`; il clip è per-vertice su quad/linee e per-stringa sul
+testo, quindi non moltiplica le draw call. La console aggiunge solo le righe di
+testo; il viewport isogl resta quello dell'intera finestra e il foglio viene
+adattato al content rect dei pannelli con scala uniforme e centratura.
+
+Trigger di aggiornamento: mouse over, input di testo, resize/DPR, cambio icone
+(`clear` + re-add del gruppo), visibilità/layer/clip e movimento del tooltip.
+Costo UI: layer 0 = 1 draw per tutti i quad, 1 per tutte le linee, 1 per
+stringa (4 di console); layer 1 del tooltip = 1 quad + 1 testo. In totale circa
+**6 draw call senza tooltip e 8 con tooltip**, contro le 14 della versione
+precedente. Le linee dell'overlay restano `GL_LINES` a 1 px: non esiste un
+helper che le converta in quad spessi.
 
 Durante il drag di selezione `cad` ricalcola il set esatto a ogni movimento:
 `cad_select_rect()` per le entità CAD e `isogl_symbol_hit()` per i simboli
