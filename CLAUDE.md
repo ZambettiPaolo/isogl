@@ -11,6 +11,9 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
 - `libisogl`: renderer OpenGL 2D per disegno tecnico, conforme a ISO 128
   (linee) e ISO 3098 (testo). Non è una libreria neutra: espone e impone le
   norme. Le tabelle normative stanno in `include/isogl/isogl_style.h`.
+- `isogl_overlay` / `isogl_panel`: overlay screen-space a gruppi (quad, linee,
+  testo) e layout puro dei pannelli. Sono **stato UI**, non documento, e non
+  entrano nel modello CAD né nella tessellazione delle entità.
 - `apps/isocad`: CAD 2D minimale costruito sopra la libreria. Possiede
   finestra, contesto, documento (layer ed entità) e comandi.
 - C11, OpenGL 3.3 core, glad, tomlc99. **SDL2 non è una dipendenza del
@@ -31,11 +34,22 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
   (`examples/gtk4`), Qt6 `QOpenGLWidget` (`examples/qt6`). GTK4 e Qt6 usano i
   loro contesti EGL nativi: Wayland funziona senza `SDL_CreateWindowFrom`.
 
-Stato: Milestone A. Esistono foglio, linee, cerchi, rettangoli, testo, pattern
-e pesi ISO, zoom/pan, modalità colori-spessore, selezione d’area persistente e
-i primi simboli isogl (quota, center mark) con registry, hit/pick/explode.
-L’app usa già riferimenti simbolo al posto della vecchia `CAD_DIMENSION` e ID
-entità monotoni. Editing, archi, polilinee, export e modello CAD gerarchico
+Stato: Milestone A + UI screen-space. Esistono foglio, linee, cerchi,
+rettangoli, testo, pattern e pesi ISO, zoom/pan, modalità colori-spessore,
+selezione d’area persistente e i primi simboli isogl (quota, center mark) con
+registry, hit/pick/explode. L’app usa già riferimenti simbolo al posto della
+vecchia `CAD_DIMENSION` e ID entità monotoni.
+
+L’interfaccia di isocad usa un **overlay screen-space a gruppi**:
+`isogl_overlay` batcha quad, linee e testo in un unico pass, con
+trasformazione/layer/clip/colore per gruppo e dirty per gruppo; si aggiorna su
+hover, input di testo, resize/DPR, cambio icone e tooltip, mentre i frame
+statici non fanno upload. `isogl_panel` fornisce il layout puro e parametrico
+dei pannelli (spessore per bordo, separatori, content rect). L’app compone
+pannelli, icone (un gruppo di linee locali per icona), hover, console e tooltip
+da gruppi; il costo UI è di 6–8 draw call. L’overlay è stato UI, non documento.
+
+Editing, azioni dei pulsanti, archi, polilinee, export e modello CAD gerarchico
 non sono implementati.
 
 Il pick GPU è ora implementato in `isogl_pick_at` (`GL_R32UI`, box logico 8×8
@@ -117,7 +131,8 @@ Regole che ne derivano:
 - **Niente mirror della tessellazione.** Un cerchio a 96 segmenti costa
   192 vertici × 32 B = 6 KiB. Diecimila cerchi = ~60 MiB. Il modello analitico
   degli stessi cerchi è circa 1 MB. Duplicare i segmenti in RAM raddoppia il
-  dato più grande senza aggiungere capacità.
+  dato più grande senza aggiungere capacità. L'**overlay UI** è l'eccezione
+  documentata: le sue liste CPU sono stato UI, non geometria del documento.
 - **Tessellazione a tolleranza di corda, non a conteggio fisso.**
   `N = ceil(π / acos(1 − s/r))`. La tolleranza è in mm di carta (0,02–0,05 mm,
   sotto il peso minimo ISO di 0,18 mm) e **non** dipende dallo zoom. Con
@@ -300,6 +315,11 @@ Test: `make test-panel-layout` (headless, solo `-lm`) e `make test-overlay`
 (GL, FBO). `apps/isocad/src/panels.c` compone i gruppi icona e il tooltip;
 `console.c` emette le righe nel gruppo testo.
 
+Il testo dell'overlay è disegnato con
+`isogl_draw_string_list_ex(..., apply_selection = 0)`: il rettangolo di
+selezione della scena non tinge etichette, tooltip o console. La selezione
+persistente resta un concetto del documento; l'overlay non la legge.
+
 ## Selezione
 
 Due modalità, due rappresentazioni. Il kernel analitico non sparisce: cambia
@@ -417,7 +437,8 @@ uno.
 
 ## Punti del codice attuale
 
-Riferimenti al commit `05af29c`; verifica i numeri di riga prima di fidarti.
+Riferimenti indicativi; i numeri di riga cambiano spesso, verificali prima di
+fidarti.
 
 | Punto | Oggi | Direzione |
 |---|---|---|
@@ -436,11 +457,16 @@ Riferimenti al commit `05af29c`; verifica i numeri di riga prima di fidarti.
 | `shaders/fs_pick.glsl` | nuovo | fragment shader che scrive `uPickId` |
 | `shaders/fs_font_pick.glsl` | nuovo | pick del testo |
 | `src/isogl.c` `isogl_pick_at` | implementato con `extent_px` | mancano pre-filtro e topmost |
+| `include/isogl/isogl_overlay.h` | overlay a gruppi (quad/linee/testo), dirty per gruppo | fatto |
+| `include/isogl/isogl_panel.h` | layout pannelli puro + emitter | fatto |
+| `apps/isocad/src/panels.c` | gruppi icona, hover, tooltip | fatto |
+| `apps/isocad/src/console.c` | gruppo testo, nessuna string list nel modulo | fatto |
 
 Nota: `isogl_vbo_array_set_transform()` esiste, ma `isocad` non lo usa; la
-matrice relativa è sempre identità. Con la geometria già in mm di carta, il
-batch statico non ha bisogno di una matrice per oggetto. La trasformazione
-serve solo per overlay e anteprime.
+matrice relativa dei VBO documento è sempre identità. L'overlay a gruppi applica
+la trasformazione del gruppo cuocendo le posizioni nello staging, non con
+questa API. Con la geometria già in mm di carta, il batch statico non ha
+bisogno di una matrice per oggetto.
 
 `CadDocument.next_id` assegna ID monotoni alle entità CAD: non viene riusato e
 non dipende più da `count + 1`. I simboli isogl hanno un namespace separato

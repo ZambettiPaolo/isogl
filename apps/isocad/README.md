@@ -223,9 +223,12 @@ stringhe; a scala il limite sono i VBO e le draw call, non i byte.
 
 ## Stato attuale
 
-Milestone A: foglio, linee, cerchi, rettangoli, testo vettoriale, pattern e pesi
-ISO, zoom/pan, modalità colori-spessore/stampa, selezione d’area persistente
-taggata CAD/simbolo, quota e center mark come simboli isogl con registry,
-hit/pick/explode, ambiente di test gerarchico e testo incrementale per entità.
-Editing, UI layer, archi, polilinee, export/stampa e modello CAD gerarchico
-sono i passi successivi.
+Milestone A + UI screen-space: foglio, linee, cerchi, rettangoli, testo
+vettoriale, pattern e pesi ISO, zoom/pan, modalità colori-spessore/stampa,
+selezione d’area persistente taggata CAD/simbolo, quota e center mark come
+simboli isogl con registry, hit/pick/explode, ambiente di test gerarchico e
+testo incrementale per entità. L’interfaccia usa un overlay a gruppi
+(`isogl_overlay`) con pannelli parametrici (`isogl_panel`): pannelli, icone come
+gruppi di linee locali, hover con tooltip e console come gruppo testo; 6–8 draw
+call UI. Editing, azioni dei pulsanti, archi, polilinee, export/stampa e modello
+CAD gerarchico sono i passi successivi.
