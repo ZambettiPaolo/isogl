@@ -186,7 +186,8 @@ isogl_cleanup();
 
 - `include/`, `src/`, `shaders/`, `fonts/` — la libreria (core senza SDL);
 - `hosts/isogl-sdl/` — helper opzionale SDL2 (`libisogl_sdl.a`, `isogl-sdl.pc`);
-- `examples/demo/` — demo/smoke test SDL;
+- `examples/demo/` — demo/smoke test SDL; disegna l'architettura di isogl su A3
+  con le sole primitive della libreria (`architecture.c`);
 - `examples/gtk4/` — host GTK4 (`GtkGLArea`);
 - `examples/qt6/` — host Qt6 (`QOpenGLWidget`);
 - `apps/isocad/` — app CAD minima che consuma la libreria installata via
@@ -202,6 +203,18 @@ PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig" make -C apps/isocad
 make example-qt6      # richiede Qt6
 make example-gtk4     # richiede libgtk-4-dev
 ```
+
+La demo `build/isogl-demo` contiene un disegno A3 dell'architettura di isogl:
+host/app, core `libisogl` SDL-free, overlay/pannelli, font/style/simboli e
+pipeline GPU. Ogni riquadro, freccia e etichetta è un segmento o una stringa
+isogl; nessun GL diretto nel builder.
+
+```sh
+./build/isogl-demo --assets "$PWD/_install/share/isogl"
+```
+
+Comandi demo: rotella = zoom, drag sinistro = pan, `Z` = fit, `T` = alterna
+colori-spessore/stampa, `Q` o `Esc` = esci.
 
 La CI (`.github/workflows/ci.yml`) compila, esegue i test sotto Xvfb, verifica
 che il core resti SDL-free, installa la libreria, costruisce isocad e i due

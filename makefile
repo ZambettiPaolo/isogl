@@ -52,7 +52,7 @@ LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_style.c \
                $(SYMBOL_GEOMETRY_SRC) $(SYMBOL_SRC) \
                third_party/glad/glad.c third_party/tomlc99/toml.c
 SDL_HOST_SRCS := hosts/isogl-sdl/isogl_sdl.c
-DEMO_SRCS   := examples/demo/main.c
+DEMO_SRCS   := examples/demo/main.c examples/demo/architecture.c
 TEST_SRCS   := tests/test_core.c apps/isocad/src/cad.c
 
 LIB_OBJS    := $(LIB_SRCS:%.c=$(BUILD)/%.o)
