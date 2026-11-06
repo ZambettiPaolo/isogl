@@ -285,6 +285,15 @@ int main(int argc, char **argv) {
     check(!region_has_color(9, 5, 50, 32, 255, 0, 0, 30),
           "old text position is empty after the move");
 
+    isogl_overlay_group_set_transform(overlay, text, 60, 20, 1.0f);
+    clear_scene();
+    isogl_overlay_draw(overlay);
+    read_frame();
+    check(region_has_color(69, 25, 150, 60, 255, 0, 0, 30),
+          "group transform moves text vertically without rebuilding it");
+    check(!region_has_color(69, 5, 150, 20, 255, 0, 0, 30),
+          "old vertical text position is empty after the move");
+
     isogl_overlay_group_clear(overlay, text);
     isogl_overlay_group_set_transform(overlay, text, 0.0f, 0.0f, 1.0f);
     isogl_overlay_group_text(overlay, text, "ABC", 10, 30, 18, 0, B);

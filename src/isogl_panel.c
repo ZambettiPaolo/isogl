@@ -17,14 +17,22 @@ int isogl_panel_compute(isogl_panel_layout *out, int width, int height,
     e.bottom = panel_edge(e.bottom);
     e.separator = panel_edge(e.separator);
 
-    if (e.left >= width || e.right >= width - e.left) {
-        e.left = 0;
-        e.right = 0;
+    /* If the strips do not fit, shrink both sides proportionally instead of
+       dropping one edge.  Dropping the top strip made the side strips jump to
+       y = 0 on small windows.  The content rectangle keeps at least 1 px. */
+    long long horizontal = (long long)e.left + (long long)e.right;
+    if (horizontal >= width) {
+        long long available = width > 1 ? (long long)width - 1 : 0;
+        e.left = (int)((long long)e.left * available / horizontal);
+        e.right = (int)((long long)e.right * available / horizontal);
     }
-    if (e.top >= height || e.bottom >= height - e.top) {
-        e.top = 0;
+
+    long long vertical = (long long)e.top + (long long)e.bottom;
+    if (vertical >= height) {
+        long long available = height > 1 ? (long long)height - 1 : 0;
+        e.top = (int)((long long)e.top * available / vertical);
+        e.bottom = (int)((long long)e.bottom * available / vertical);
     }
-    if (e.bottom > height) e.bottom = height;
 
     int mid_height = height - e.top - e.bottom;
     if (mid_height < 0) mid_height = 0;

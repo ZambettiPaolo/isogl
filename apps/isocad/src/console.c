@@ -59,10 +59,25 @@ void isocad_console_layout(IsocadConsole *c,
 
     int panel_h = layout->bottom.height;
     if (panel_h <= 0) {
+        isogl_overlay_group_set_visible(c->overlay, c->group, 0);
+        isogl_overlay_group_set_transform(c->overlay, c->group,
+                                          0.0f, 0.0f, 1.0f);
         c->panel_h = 0;
         c->dirty = 1;
         return;
     }
+
+    /* The group origin tracks the bottom strip.  Text commands are local to
+     * this origin, so resizing the window only changes the transform and the
+     * overlay updates the string matrices without rebuilding glyph VBOs. */
+    isogl_overlay_group_set_visible(c->overlay, c->group, 1);
+    isogl_overlay_group_set_transform(c->overlay, c->group,
+                                      0.0f, (float)layout->bottom.y, 1.0f);
+    isogl_overlay_group_set_clip(c->overlay, c->group, 1,
+                                 (float)layout->bottom.x,
+                                 (float)layout->bottom.y,
+                                 (float)layout->bottom.width,
+                                 (float)layout->bottom.height);
 
     if (c->panel_h == panel_h && c->cap_px > 0.0f) return;
 
@@ -135,7 +150,8 @@ void isocad_console_emit(IsocadConsole *c,
     if (!c || !layout || !c->overlay || !c->dirty) return;
 
     isogl_overlay_group_clear(c->overlay, c->group);
-    isogl_overlay_group_set_transform(c->overlay, c->group, 0.0f, 0.0f, 1.0f);
+    isogl_overlay_group_set_transform(c->overlay, c->group,
+                                      0.0f, (float)layout->bottom.y, 1.0f);
     isogl_overlay_group_set_layer(c->overlay, c->group, 0);
 
     if (c->panel_h <= 0 || layout->bottom.height <= 0) {
@@ -154,7 +170,7 @@ void isocad_console_emit(IsocadConsole *c,
     char line[ISOCAD_CONSOLE_MAX_INPUT + 8];
 
     snprintf(line, sizeof(line), "> %s_", c->input);
-    float y0 = (float)layout->height - c->baseline_px[0];
+    float y0 = (float)layout->bottom.height - c->baseline_px[0];
     isogl_overlay_group_text(c->overlay, c->group, line,
                              c->pad_x_px, y0, c->cap_px, 0.0f,
                              CONSOLE_TEXT_COLOR);
@@ -163,7 +179,7 @@ void isocad_console_emit(IsocadConsole *c,
     if (n > ISOCAD_CONSOLE_HISTORY_LINES) n = ISOCAD_CONSOLE_HISTORY_LINES;
     for (size_t i = 0; i < n; ++i) {
         snprintf(line, sizeof(line), "> %s", c->history[i]);
-        float y = (float)layout->height - c->baseline_px[i + 1];
+        float y = (float)layout->bottom.height - c->baseline_px[i + 1];
         isogl_overlay_group_text(c->overlay, c->group, line,
                                  c->pad_x_px, y, c->cap_px, 0.0f,
                                  CONSOLE_TEXT_COLOR);

@@ -14,7 +14,9 @@ extern "C" {
  *
  * Edges are viewport-local, top-left pixels.  A non-positive thickness
  * disables that edge.  The strips never overlap and the content rectangle is
- * never negative.
+ * never negative.  When the edge pairs do not fit, they are scaled down
+ * proportionally instead of dropping one edge, so the remaining strips keep
+ * their anchoring and the content keeps at least one pixel per axis.
  */
 
 typedef struct isogl_overlay isogl_overlay;

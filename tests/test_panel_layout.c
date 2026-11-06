@@ -52,18 +52,19 @@ int main(void) {
     CHECK(isogl_panel_compute(&layout, 800, 600, NULL) == 0);
     CHECK(rect_is(&layout.content, 0, 0, 800, 600));
 
-    /* Tiny window: side strips disappear, top disappears, bottom clamps. */
+    /* Tiny window: strips shrink proportionally instead of dropping an edge,
+       so the side strips stay below the (very thin) top strip. */
     edges.top = 32;
     edges.left = 32;
     edges.right = 32;
     edges.bottom = 100;
     edges.separator = 1;
     CHECK(isogl_panel_compute(&layout, 40, 30, &edges) == 0);
-    CHECK(layout.edges.left == 0 && layout.edges.right == 0);
-    CHECK(layout.edges.top == 0);
-    CHECK(layout.edges.bottom == 30);
-    CHECK(layout.content.width >= 0 && layout.content.height >= 0);
-    CHECK(layout.content.x == 0 && layout.content.y == 0);
+    CHECK(layout.edges.left == 19 && layout.edges.right == 19);
+    CHECK(layout.edges.top == 7 && layout.edges.bottom == 21);
+    CHECK(layout.left.y == layout.edges.top);
+    CHECK(rect_is(&layout.content, 19, 7, 2, 2));
+    CHECK(layout.content.width >= 1 && layout.content.height >= 1);
 
     /* Negative values disable edges. */
     edges.top = -5;
@@ -77,18 +78,16 @@ int main(void) {
     CHECK(layout.edges.separator == 0);
     CHECK(rect_is(&layout.content, 0, 0, 320, 200));
 
-    /* Edges wider than the viewport collapse instead of overflowing. */
+    /* Edges wider than the viewport are scaled down, never dropped. */
     edges.top = 600;
     edges.left = 600;
     edges.right = 600;
     edges.bottom = 600;
     edges.separator = 1;
     CHECK(isogl_panel_compute(&layout, 800, 600, &edges) == 0);
-    CHECK(layout.edges.left == 0 && layout.edges.right == 0);
-    CHECK(layout.edges.top == 0);
-    CHECK(layout.edges.bottom == 600);
-    CHECK(layout.content.width == 800);
-    CHECK(layout.content.height == 0);
+    CHECK(layout.edges.left == 399 && layout.edges.right == 399);
+    CHECK(layout.edges.top == 299 && layout.edges.bottom == 299);
+    CHECK(rect_is(&layout.content, 399, 299, 2, 2));
 
     /* Invalid sizes. */
     CHECK(isogl_panel_compute(&layout, 0, 600, &edges) == -1);
