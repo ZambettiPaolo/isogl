@@ -9,6 +9,7 @@
 
 #include "cad.h"
 #include "console.h"
+#include "panels.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -31,34 +32,83 @@ static int isocad_panel_px(const isogl_sdl_host *host) {
     return px;
 }
 
-/* Fit the sheet into the visible area above the bottom strip by editing the
+/* Tool strips at the top, left and right: 32 logical points thick. */
+static int isocad_toolbar_px(const isogl_sdl_host *host) {
+    if (!host || host->fb_width < 2 || host->fb_height < 2) return 0;
+    double dpr = host->scale_y > 0.0 ? host->scale_y : 1.0;
+    int px = (int)lround((double)ISOCAD_PANEL_LOGICAL_THICKNESS * dpr);
+    if (px < 1) px = 1;
+    int max = host->fb_width < host->fb_height ? host->fb_width
+                                               : host->fb_height;
+    if (px > max / 3) px = max / 3;
+    if (px < 1) px = 1;
+    return px;
+}
+
+static IsocadUiInsets isocad_ui_insets(const isogl_sdl_host *host,
+                                       int toolbar_px, int panel_px) {
+    IsocadUiInsets insets = {toolbar_px, toolbar_px, toolbar_px, panel_px};
+    if (!host) return insets;
+
+    if (insets.left + insets.right >= host->fb_width) {
+        insets.left = 0;
+        insets.right = 0;
+    }
+    if (insets.top + insets.bottom >= host->fb_height) {
+        insets.top = 0;
+    }
+    return insets;
+}
+
+/* Fit the sheet into the visible area between the UI strips by editing the
  * model matrix.  The viewport stays the full window, so events, screen/world
  * conversions and pick keep using the same global matrices. */
-static void isocad_fit_scene(const isogl_sdl_host *host, int panel_px) {
+static void isocad_fit_scene(const isogl_sdl_host *host,
+                             const IsocadUiInsets *insets) {
     isogl_zoom_all_sheet();
-    if (!host || host->fb_height <= 1) return;
+    if (!host || !insets || host->fb_width <= 0 || host->fb_height <= 0) {
+        return;
+    }
 
-    float p = (float)panel_px / (float)host->fb_height;
-    float s = 1.0f - p;
+    int vx = insets->left;
+    int vy = insets->top;
+    int vw = host->fb_width - insets->left - insets->right;
+    int vh = host->fb_height - insets->top - insets->bottom;
+    if (vw < 1) vw = 1;
+    if (vh < 1) vh = 1;
+
+    float s = (float)vw / (float)host->fb_width;
+    float sy = (float)vh / (float)host->fb_height;
+    if (sy < s) s = sy;
+
+    float ax = isogl_view_matrix[0];
+    float ay = isogl_view_matrix[5];
+    if (fabsf(ax) < 1e-6f) ax = 1.0f;
+    if (fabsf(ay) < 1e-6f) ay = 1.0f;
+
+    /* NDC centre of the visible rectangle. */
+    float cx = 2.0f * ((float)vx + 0.5f * (float)vw) /
+               (float)host->fb_width - 1.0f;
+    float cy = 1.0f - 2.0f * ((float)vy + 0.5f * (float)vh) /
+               (float)host->fb_height;
 
     isogl_model_matrix[0] *= s;
     isogl_model_matrix[5] *= s;
-    isogl_model_matrix[12] *= s;
-    isogl_model_matrix[13] *= s;
-
-    float ay = (host->fb_width >= host->fb_height)
-                   ? 1.0f
-                   : (float)host->fb_width / (float)host->fb_height;
-    if (fabsf(ay) < 1e-6f) ay = 1.0f;
-    isogl_model_matrix[13] += p / ay;
+    isogl_model_matrix[12] = isogl_model_matrix[12] * s + cx / ax;
+    isogl_model_matrix[13] = isogl_model_matrix[13] * s + cy / ay;
 }
 
 /* px, py are framebuffer pixels, origin window top-left. */
-static int isocad_fb_in_panel(const isogl_sdl_host *host, int panel_px,
-                              float px, float py) {
-    (void)px;
-    if (!host || panel_px <= 0) return 0;
-    return py >= (float)(host->fb_height - panel_px);
+static int isocad_fb_in_ui(const isogl_sdl_host *host,
+                           const IsocadUiInsets *insets,
+                           float px, float py) {
+    if (!host || !insets) return 0;
+    if (px < (float)insets->left ||
+        px >= (float)(host->fb_width - insets->right)) {
+        return 1;
+    }
+    return py < (float)insets->top ||
+           py >= (float)(host->fb_height - insets->bottom);
 }
 
 /* Opaque UI strip over the scene.  Raw GL on the full-window viewport: no
@@ -517,7 +567,16 @@ int main(int argc, char **argv) {
     }
     isogl_sdl_host_update(&host);
     int panel_px = isocad_panel_px(&host);
-    isocad_fit_scene(&host, panel_px);
+    int toolbar_px = isocad_toolbar_px(&host);
+    IsocadUiInsets ui = isocad_ui_insets(&host, toolbar_px, panel_px);
+
+    /* The first SDL_PollEvent happens before the first frame: install the
+       full-window viewport so screen/world conversions and pick are valid.
+       The fit also needs the aspect part of the view matrix, so the viewport
+       comes first. */
+    isogl_viewport full_vp = {0, 0, host.fb_width, host.fb_height};
+    isogl_set_viewport(&full_vp);
+    isocad_fit_scene(&host, &ui);
 
     CadDocument doc;
     if (cad_document_init(&doc, font, 1.0f) != 0) {
@@ -539,10 +598,15 @@ int main(int argc, char **argv) {
     isocad_console_init(&console, font);
     isocad_console_layout(&console, host.fb_width, host.fb_height, panel_px);
 
-    /* The first SDL_PollEvent happens before the first frame: install the
-       full-window viewport so screen/world conversions and pick are valid. */
-    isogl_viewport full_vp = {0, 0, host.fb_width, host.fb_height};
-    isogl_set_viewport(&full_vp);
+    IsocadPanels panels;
+    if (isocad_panels_init(&panels) != 0) {
+        fprintf(stderr, "isocad panels unavailable: icons disabled\n");
+        memset(&panels, 0, sizeof(panels));
+        panels.hover = -1;
+    }
+    isocad_panels_layout(&panels, host.fb_width, host.fb_height,
+                         toolbar_px, panel_px);
+
     SDL_StartTextInput();
 
     int running = 1;
@@ -567,12 +631,17 @@ int main(int argc, char **argv) {
                         event.window.event == SDL_WINDOWEVENT_RESIZED) {
                         isogl_sdl_host_update(&host);
                         panel_px = isocad_panel_px(&host);
-                        isocad_console_layout(&console, host.fb_width,
-                                              host.fb_height, panel_px);
-                        isocad_fit_scene(&host, panel_px);
+                        toolbar_px = isocad_toolbar_px(&host);
+                        ui = isocad_ui_insets(&host, toolbar_px, panel_px);
                         isogl_viewport full = {0, 0, host.fb_width,
                                                host.fb_height};
                         isogl_set_viewport(&full);
+                        isocad_console_layout(&console, host.fb_width,
+                                              host.fb_height, panel_px);
+                        isocad_panels_layout(&panels, host.fb_width,
+                                             host.fb_height, toolbar_px,
+                                             panel_px);
+                        isocad_fit_scene(&host, &ui);
                         if (selecting && sel_moved) {
                             int mx = 0, my = 0;
                             SDL_GetMouseState(&mx, &my);
@@ -612,7 +681,7 @@ int main(int argc, char **argv) {
                             break;
                         case SDLK_f:
                             if (ctrl) {
-                                isocad_fit_scene(&host, panel_px);
+                                isocad_fit_scene(&host, &ui);
                                 if (selecting && sel_moved) {
                                     int mx = 0, my = 0;
                                     SDL_GetMouseState(&mx, &my);
@@ -642,7 +711,7 @@ int main(int argc, char **argv) {
                     isogl_sdl_host_local_to_pixels(&host,
                         (float)event.wheel.mouseX,
                         (float)event.wheel.mouseY, &px, &py);
-                    if (isocad_fb_in_panel(&host, panel_px, px, py)) break;
+                    if (isocad_fb_in_ui(&host, &ui, px, py)) break;
                     isogl_handle_zoom(event.wheel.y, px, py);
                     if (selecting && sel_moved) {
                         int mx = 0, my = 0;
@@ -658,7 +727,7 @@ int main(int argc, char **argv) {
                     isogl_sdl_host_local_to_pixels(&host,
                         (float)event.button.x, (float)event.button.y,
                         &px, &py);
-                    if (isocad_fb_in_panel(&host, panel_px, px, py)) break;
+                    if (isocad_fb_in_ui(&host, &ui, px, py)) break;
 
                     if (event.button.button == SDL_BUTTON_LEFT) {
                         if (isogl_screen_to_world(px, py,
@@ -710,7 +779,7 @@ int main(int argc, char **argv) {
                     isogl_sdl_host_local_to_pixels(&host,
                         (float)event.motion.x, (float)event.motion.y,
                         &px, &py);
-                    if (isocad_fb_in_panel(&host, panel_px, px, py)) break;
+                    if (isocad_fb_in_ui(&host, &ui, px, py)) break;
 
                     if (panning) {
                         float dx = 0.0f, dy = 0.0f;
@@ -746,8 +815,12 @@ int main(int argc, char **argv) {
 
         isogl_sdl_host_begin_frame(&host);
         panel_px = isocad_panel_px(&host);
+        toolbar_px = isocad_toolbar_px(&host);
+        ui = isocad_ui_insets(&host, toolbar_px, panel_px);
         isocad_console_layout(&console, host.fb_width, host.fb_height,
                               panel_px);
+        isocad_panels_layout(&panels, host.fb_width, host.fb_height,
+                             toolbar_px, panel_px);
 
         isogl_font_set_color(ISOCAD_SCENE_TEXT);
         isogl_clear(ISOCAD_SCENE_BG[0], ISOCAD_SCENE_BG[1],
@@ -759,10 +832,16 @@ int main(int argc, char **argv) {
         isogl_symbol_draw_all();
         isogl_draw_selection_overlay();
 
-        /* Opaque bottom strip and its text; both are screen-space overlays.
+        /* Opaque tool strips and console text; all screen-space overlays.
            The isogl viewport stays the full window. */
+        int mouse_x = 0, mouse_y = 0;
+        SDL_GetMouseState(&mouse_x, &mouse_y);
+        float cursor_x = 0.0f, cursor_y = 0.0f;
+        isogl_sdl_host_local_to_pixels(&host, (float)mouse_x, (float)mouse_y,
+                                       &cursor_x, &cursor_y);
         isocad_draw_panel_rect(&host, panel_px);
         isocad_console_draw(&console, isogl_shader_program_font);
+        isocad_panels_draw(&panels, cursor_x, cursor_y);
 
         isogl_sdl_host_swap(&host);
     }
@@ -773,6 +852,7 @@ int main(int argc, char **argv) {
     selection_contained = NULL;
     selection_hit = NULL;
 
+    isocad_panels_free(&panels);
     isocad_console_free(&console);
     SDL_StopTextInput();
 

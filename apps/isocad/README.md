@@ -55,7 +55,7 @@ Comandi:
 - drag sinistro: selezione d’area; sinistra→destra = window, destra→sinistra = crossing
 - drag con tasto centrale: pan
 - clic destro: pick e stampa degli ID (scorciatoia)
-- `Ctrl+F`: fit del foglio nell’area sopra la console
+- `Ctrl+F`: fit del foglio nell’area interna ai pannelli
 - `Ctrl+T`: alterna colori-spessore / colori-stampa
 - `Ctrl+Q`: esci
 - `Esc`: se la riga di comando contiene testo lo svuota; altrimenti annulla il
@@ -65,9 +65,27 @@ Comandi:
 
 Il pannello inferiore è un prototipo: una striscia opaca di **100 px logici**
 con **4 righe** (3 di storico + input) disegnate col font vettoriale. La scena
-è adattata sopra il pannello modificando la matrice modello, senza un secondo
-viewport. I comandi reali non sono ancora implementati: `Enter` fa solo eco.
-Click e rotella dentro il pannello vengono ignorati dalla scena.
+è adattata al rettangolo interno ai pannelli modificando la matrice modello,
+senza un secondo viewport. I comandi reali non sono ancora implementati:
+`Enter` fa solo eco. Click e rotella dentro un pannello vengono ignorati dalla
+scena.
+
+Attorno all'area di disegno ci sono tre pannelli con icone, spessi **32 px
+logici** (scalati con il device pixel ratio):
+
+- in alto: documento e storico (`nuovo`, `apri`, `salva`, `undo`, `redo`,
+  `stampa`);
+- a sinistra: strumenti di disegno (selezione, linea, cerchio, rettangolo,
+  polilinea, testo, quota, center mark);
+- a destra: vista e visualizzazione (zoom +, zoom −, pan, fit, griglia, snap,
+  spessore).
+
+Come la console, i pannelli sono overlay opachi in screen-space: lo sfondo usa
+scissor+clear e le icone sono segmenti `GL_LINES` disegnati con un programma
+pixel-ortografico dedicato al modulo `panels.c`. Il viewport isogl resta
+quello dell'intera finestra. Il foglio viene adattato all'area interna ai
+quattro pannelli con scala uniforme e centratura. Le icone sono un prototipo
+visivo: evidenziano l'hover ma non hanno ancora azioni associate.
 
 Durante il drag di selezione `cad` ricalcola il set esatto a ogni movimento:
 `cad_select_rect()` per le entità CAD e `isogl_symbol_hit()` per i simboli
