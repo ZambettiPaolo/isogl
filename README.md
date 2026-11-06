@@ -139,6 +139,7 @@ $PREFIX/lib/pkgconfig/isogl.pc
 $PREFIX/lib/pkgconfig/isogl-sdl.pc
 $PREFIX/share/isogl/shaders/*.glsl
 $PREFIX/share/isogl/fonts/ReliefSingleLineLinear.toml
+$PREFIX/share/isogl/drawings/architecture.toml
 ```
 
 `isogl.pc` non richiede SDL; `isogl-sdl.pc` richiede `isogl sdl2`.
@@ -186,8 +187,9 @@ isogl_cleanup();
 
 - `include/`, `src/`, `shaders/`, `fonts/` — la libreria (core senza SDL);
 - `hosts/isogl-sdl/` — helper opzionale SDL2 (`libisogl_sdl.a`, `isogl-sdl.pc`);
-- `examples/demo/` — demo/smoke test SDL; disegna l'architettura di isogl su A3
-  con le sole primitive della libreria (`architecture.c`);
+- `examples/demo/` — demo/smoke test SDL; disegno gerarchico
+  `architecture.toml` (sheet → groups → primitive) caricato da
+  `drawing_load.c` ed emesso con le sole primitive isogl;
 - `examples/gtk4/` — host GTK4 (`GtkGLArea`);
 - `examples/qt6/` — host Qt6 (`QOpenGLWidget`);
 - `apps/isocad/` — app CAD minima che consuma la libreria installata via
@@ -204,13 +206,23 @@ make example-qt6      # richiede Qt6
 make example-gtk4     # richiede libgtk-4-dev
 ```
 
-La demo `build/isogl-demo` contiene un disegno A3 dell'architettura di isogl:
-host/app, core `libisogl` SDL-free, overlay/pannelli, font/style/simboli e
-pipeline GPU. Ogni riquadro, freccia e etichetta è un segmento o una stringa
-isogl; nessun GL diretto nel builder.
+La demo `build/isogl-demo` carica un disegno gerarchico dell'architettura di
+isogl: host/app, core `libisogl` SDL-free, overlay/pannelli,
+font/style/simboli e pipeline GPU. Il file
+`examples/demo/architecture.toml` contiene `[sheet]`, `[[groups]]` (con
+parent, origine, angolo e scala) e `[[primitives]]` (`line`, `rect`, `circle`,
+`arrow`, `text`). Il loader `examples/demo/drawing_load.c` applica le
+trasformazioni dei gruppi, calcola i bounds e appende segmenti e stringhe alle
+API isogl: nessun GL diretto.
+
+Il file richiede A3; se i bounds non entrano nell'A3 (margine 10 mm), il loader
+passa all'A2 (o al formato successivo) e la demo chiama
+`isogl_zoom_all_sheet()`. Il disegno dell'architettura è pensato su A2, quindi
+viene promosso automaticamente.
 
 ```sh
 ./build/isogl-demo --assets "$PWD/_install/share/isogl"
+./build/isogl-demo --assets "$PWD/_install/share/isogl" --drawing FILE.toml
 ```
 
 Comandi demo: rotella = zoom, drag sinistro = pan, `Z` = fit, `T` = alterna

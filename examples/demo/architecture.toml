@@ -1,0 +1,1349 @@
+[sheet]
+format = "A3"
+orientation = "landscape"
+scale_num = 1
+scale_den = 1
+
+[[groups]]
+id = 0
+name = "root"
+parent = -1
+x = 0.000
+y = 0.000
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 1
+name = "title"
+parent = 0
+x = 28.000
+y = 368.200
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 2
+name = "hosts"
+parent = 0
+x = 28.000
+y = 330.400
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 3
+name = "core"
+parent = 0
+x = 28.000
+y = 137.200
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 4
+name = "gpu"
+parent = 0
+x = 28.000
+y = 84.000
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 5
+name = "legend"
+parent = 0
+x = 28.000
+y = 25.200
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 6
+name = "titleblock"
+parent = 0
+x = 364.000
+y = 25.200
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 7
+name = "renderer"
+parent = 3
+x = 7.000
+y = 77.000
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 8
+name = "font"
+parent = 3
+x = 238.000
+y = 131.600
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 9
+name = "style"
+parent = 3
+x = 371.000
+y = 131.600
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 10
+name = "symgeo"
+parent = 3
+x = 238.000
+y = 91.000
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 11
+name = "symreg"
+parent = 3
+x = 392.000
+y = 91.000
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 12
+name = "overlay"
+parent = 3
+x = 7.000
+y = 14.000
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 13
+name = "panel"
+parent = 3
+x = 238.000
+y = 21.000
+angle_deg = 0.0
+scale = 1.0
+
+[[primitives]]
+group = 0
+type = "rect"
+x0 = 14.000
+y0 = 14.000
+x1 = 574.000
+y1 = 401.800
+pattern = 0
+weight = 4
+layer = 0
+color = [0.80, 0.84, 0.90, 1.00]
+
+[[primitives]]
+group = 1
+type = "line"
+x0 = 0.000
+y0 = 0.000
+x1 = 532.000
+y1 = 0.000
+pattern = 0
+weight = 0
+layer = 0
+color = [0.80, 0.84, 0.90, 1.00]
+
+[[primitives]]
+group = 1
+type = "text"
+x = 0.000
+y = 22.400
+height_mm = 10.000
+angle_deg = 0.0
+text = "isogl"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 1
+type = "text"
+x = 0.000
+y = 14.000
+height_mm = 7.000
+angle_deg = 0.0
+text = "architecture"
+color = [0.98, 0.55, 0.80, 1.00]
+
+[[primitives]]
+group = 1
+type = "text"
+x = 0.000
+y = 5.600
+height_mm = 3.500
+angle_deg = 0.0
+text = "toolkit-independent 2D technical drawing renderer"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 532.000
+y1 = 33.600
+pattern = 1
+weight = 0
+layer = 0
+color = [0.58, 0.62, 0.70, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 4.200
+y = 29.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "HOSTS / APPLICATIONS"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "rect"
+x0 = 7.000
+y0 = 5.600
+x1 = 119.000
+y1 = 25.200
+pattern = 0
+weight = 2
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 15.400
+y = 19.600
+height_mm = 5.000
+angle_deg = 0.0
+text = "isocad"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 11.200
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "document / kernel / UI"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "rect"
+x0 = 133.000
+y0 = 5.600
+x1 = 217.000
+y1 = 25.200
+pattern = 0
+weight = 2
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 141.400
+y = 19.600
+height_mm = 5.000
+angle_deg = 0.0
+text = "SDL2 host"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 137.200
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "window / GL / swap"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "rect"
+x0 = 231.000
+y0 = 5.600
+x1 = 315.000
+y1 = 25.200
+pattern = 0
+weight = 2
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 239.400
+y = 19.600
+height_mm = 5.000
+angle_deg = 0.0
+text = "GTK4"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 235.200
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "GtkGLArea"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "rect"
+x0 = 329.000
+y0 = 5.600
+x1 = 413.000
+y1 = 25.200
+pattern = 0
+weight = 2
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 337.400
+y = 19.600
+height_mm = 5.000
+angle_deg = 0.0
+text = "Qt6"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 333.200
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "QOpenGLWidget"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "rect"
+x0 = 427.000
+y0 = 5.600
+x1 = 525.000
+y1 = 25.200
+pattern = 0
+weight = 2
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 435.400
+y = 19.600
+height_mm = 5.000
+angle_deg = 0.0
+text = "demo / tests"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 431.200
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "GL harness"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "arrow"
+x0 = 63.000
+y0 = 5.600
+x1 = 63.000
+y1 = -8.400
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 70.000
+y = -2.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "uses libisogl"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 2
+type = "arrow"
+x0 = 462.000
+y0 = 0.000
+x1 = 462.000
+y1 = -8.400
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 2
+type = "arrow"
+x0 = 462.000
+y0 = -8.400
+x1 = 462.000
+y1 = 0.000
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 2
+type = "text"
+x = 392.000
+y = -4.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "host contract"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 3
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 532.000
+y1 = 184.800
+pattern = 1
+weight = 0
+layer = 0
+color = [0.58, 0.62, 0.70, 1.00]
+
+[[primitives]]
+group = 3
+type = "text"
+x = 5.600
+y = 177.800
+height_mm = 7.000
+angle_deg = 0.0
+text = "libisogl / SDL-free core"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 3
+type = "text"
+x = 5.600
+y = 169.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "no toolkit types in include/isogl or src"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 210.000
+y1 = 82.600
+pattern = 0
+weight = 3
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 9.800
+y = 75.600
+height_mm = 7.000
+angle_deg = 0.0
+text = "isogl"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 9.800
+y = 65.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "viewport / matrices"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 9.800
+y = 58.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "sheet / segment VBO"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 9.800
+y = 51.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "pick FBO / zoom / pan"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 9.800
+y = 44.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "ISO 128 / ISO 3098"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "line"
+x0 = 9.800
+y0 = 35.000
+x1 = 70.000
+y1 = 35.000
+pattern = 0
+weight = 0
+layer = 0
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 77.000
+y = 36.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "0.18"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "line"
+x0 = 9.800
+y0 = 28.000
+x1 = 70.000
+y1 = 28.000
+pattern = 1
+weight = 2
+layer = 0
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 77.000
+y = 29.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "0.35 dashed"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "line"
+x0 = 9.800
+y0 = 21.000
+x1 = 70.000
+y1 = 21.000
+pattern = 3
+weight = 4
+layer = 0
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 7
+type = "text"
+x = 77.000
+y = 22.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "0.70 dash-dot"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 8
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 119.000
+y1 = 28.000
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 8
+type = "text"
+x = 9.800
+y = 21.000
+height_mm = 5.000
+angle_deg = 0.0
+text = "isogl_font"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 8
+type = "text"
+x = 9.800
+y = 12.600
+height_mm = 3.500
+angle_deg = 0.0
+text = "TOML vector font"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 8
+type = "text"
+x = 9.800
+y = 5.600
+height_mm = 3.500
+angle_deg = 0.0
+text = "glyph strings / VBO"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 9
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 119.000
+y1 = 28.000
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 9
+type = "text"
+x = 9.800
+y = 21.000
+height_mm = 5.000
+angle_deg = 0.0
+text = "isogl_style"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 9
+type = "text"
+x = 9.800
+y = 12.600
+height_mm = 3.500
+angle_deg = 0.0
+text = "ISO tables"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 9
+type = "text"
+x = 9.800
+y = 5.600
+height_mm = 3.500
+angle_deg = 0.0
+text = "weights / patterns"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 10
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 140.000
+y1 = 29.400
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 10
+type = "text"
+x = 8.400
+y = 22.400
+height_mm = 5.000
+angle_deg = 0.0
+text = "isogl_symbol_geometry"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 10
+type = "text"
+x = 8.400
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "pure geometry, no GL"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 11
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 133.000
+y1 = 29.400
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 11
+type = "text"
+x = 8.400
+y = 22.400
+height_mm = 5.000
+angle_deg = 0.0
+text = "isogl_symbol registry"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 11
+type = "text"
+x = 8.400
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "VBO / text / hit-pick"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 11
+type = "text"
+x = 8.400
+y = 4.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "explode"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 12
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 210.000
+y1 = 53.200
+pattern = 0
+weight = 3
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 12
+type = "text"
+x = 9.800
+y = 46.200
+height_mm = 7.000
+angle_deg = 0.0
+text = "isogl_overlay"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 12
+type = "text"
+x = 9.800
+y = 36.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "groups: quads, lines, text"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 12
+type = "text"
+x = 9.800
+y = 29.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "retained, dirty per group"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 12
+type = "text"
+x = 9.800
+y = 22.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "clip per vertex / string"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 12
+type = "text"
+x = 9.800
+y = 15.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "UI state, not document"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 13
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 119.000
+y1 = 39.200
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 13
+type = "text"
+x = 9.800
+y = 32.200
+height_mm = 5.000
+angle_deg = 0.0
+text = "isogl_panel"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 13
+type = "text"
+x = 9.800
+y = 23.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "edges / content rect"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 13
+type = "text"
+x = 9.800
+y = 16.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "strip quad emit"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 3
+type = "arrow"
+x0 = 238.000
+y0 = 145.600
+x1 = 217.000
+y1 = 145.600
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "line"
+x0 = 371.000
+y0 = 138.600
+x1 = 364.000
+y1 = 126.000
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "arrow"
+x0 = 364.000
+y0 = 126.000
+x1 = 217.000
+y1 = 126.000
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "arrow"
+x0 = 378.000
+y0 = 106.400
+x1 = 392.000
+y1 = 106.400
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "line"
+x0 = 392.000
+y0 = 91.000
+x1 = 392.000
+y1 = 81.200
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "arrow"
+x0 = 392.000
+y0 = 81.200
+x1 = 217.000
+y1 = 81.200
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "arrow"
+x0 = 238.000
+y0 = 40.600
+x1 = 217.000
+y1 = 40.600
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "line"
+x0 = 217.000
+y0 = 84.000
+x1 = 224.000
+y1 = 84.000
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "arrow"
+x0 = 224.000
+y0 = 84.000
+x1 = 224.000
+y1 = -8.400
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "text"
+x = 231.000
+y = 30.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "GL calls"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 3
+type = "arrow"
+x0 = 112.000
+y0 = 14.000
+x1 = 112.000
+y1 = -8.400
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 3
+type = "text"
+x = 119.000
+y = 2.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "overlay pass"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 532.000
+y1 = 44.800
+pattern = 1
+weight = 0
+layer = 0
+color = [0.58, 0.62, 0.70, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 5.600
+y = 39.200
+height_mm = 5.000
+angle_deg = 0.0
+text = "GPU / VRAM - OpenGL 3.3 core"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "rect"
+x0 = 14.000
+y0 = 5.600
+x1 = 119.000
+y1 = 30.800
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 22.400
+y = 23.800
+height_mm = 5.000
+angle_deg = 0.0
+text = "VBO / VAO"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 19.600
+y = 15.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "segment pages"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 19.600
+y = 9.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "glyph strings"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "rect"
+x0 = 133.000
+y0 = 5.600
+x1 = 301.000
+y1 = 30.800
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 141.400
+y = 23.800
+height_mm = 5.000
+angle_deg = 0.0
+text = "GLSL 330"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 138.600
+y = 15.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "segment / sheet"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 138.600
+y = 9.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "font / overlay / pick"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "rect"
+x0 = 315.000
+y0 = 5.600
+x1 = 413.000
+y1 = 30.800
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 323.400
+y = 23.800
+height_mm = 5.000
+angle_deg = 0.0
+text = "pick FBO"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 320.600
+y = 15.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "GL_R32UI"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 320.600
+y = 9.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "16 x 16"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "rect"
+x0 = 427.000
+y0 = 5.600
+x1 = 525.000
+y1 = 30.800
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 435.400
+y = 23.800
+height_mm = 5.000
+angle_deg = 0.0
+text = "raster"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 432.600
+y = 15.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "blend / clip"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 4
+type = "text"
+x = 432.600
+y = 9.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "dashes / no MSAA"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 5
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 238.000
+y1 = 47.600
+pattern = 0
+weight = 2
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 5
+type = "text"
+x = 5.600
+y = 40.600
+height_mm = 5.000
+angle_deg = 0.0
+text = "LEGEND"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 5
+type = "line"
+x0 = 5.600
+y0 = 30.800
+x1 = 56.000
+y1 = 30.800
+pattern = 0
+weight = 3
+layer = 0
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 5
+type = "text"
+x = 63.000
+y = 32.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "data / dependency"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 5
+type = "line"
+x0 = 5.600
+y0 = 22.400
+x1 = 56.000
+y1 = 22.400
+pattern = 1
+weight = 0
+layer = 0
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 5
+type = "text"
+x = 63.000
+y = 23.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "module / host boundary"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 5
+type = "arrow"
+x0 = 5.600
+y0 = 14.000
+x1 = 56.000
+y1 = 14.000
+head = 4.500
+pattern = 0
+weight = 1
+layer = 0
+color = [0.95, 0.78, 0.28, 1.00]
+
+[[primitives]]
+group = 5
+type = "text"
+x = 63.000
+y = 15.400
+height_mm = 3.500
+angle_deg = 0.0
+text = "flow / uses"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 5
+type = "text"
+x = 5.600
+y = 4.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "all geometry and text rendered by isogl"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 6
+type = "rect"
+x0 = 0.000
+y0 = 0.000
+x1 = 196.000
+y1 = 47.600
+pattern = 0
+weight = 3
+layer = 0
+color = [0.55, 0.75, 0.98, 1.00]
+
+[[primitives]]
+group = 6
+type = "text"
+x = 8.400
+y = 40.600
+height_mm = 5.000
+angle_deg = 0.0
+text = "isogl / architecture"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 6
+type = "line"
+x0 = 2.800
+y0 = 35.000
+x1 = 193.200
+y1 = 35.000
+pattern = 0
+weight = 0
+layer = 0
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 6
+type = "text"
+x = 8.400
+y = 28.000
+height_mm = 3.500
+angle_deg = 0.0
+text = "A2, 1:1, mm"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 6
+type = "text"
+x = 8.400
+y = 19.600
+height_mm = 3.500
+angle_deg = 0.0
+text = "ISO 128 / ISO 3098"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 6
+type = "text"
+x = 8.400
+y = 11.200
+height_mm = 3.500
+angle_deg = 0.0
+text = "demo drawing"
+color = [0.62, 0.68, 0.78, 1.00]
+

@@ -52,7 +52,7 @@ LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_style.c \
                $(SYMBOL_GEOMETRY_SRC) $(SYMBOL_SRC) \
                third_party/glad/glad.c third_party/tomlc99/toml.c
 SDL_HOST_SRCS := hosts/isogl-sdl/isogl_sdl.c
-DEMO_SRCS   := examples/demo/main.c examples/demo/architecture.c
+DEMO_SRCS   := examples/demo/main.c examples/demo/drawing_load.c
 TEST_SRCS   := tests/test_core.c apps/isocad/src/cad.c
 
 LIB_OBJS    := $(LIB_SRCS:%.c=$(BUILD)/%.o)
@@ -157,6 +157,7 @@ install: all
 	install -d $(DESTDIR)$(LIBDIR)/pkgconfig
 	install -d $(DESTDIR)$(DATADIR)/shaders
 	install -d $(DESTDIR)$(DATADIR)/fonts
+	install -d $(DESTDIR)$(DATADIR)/drawings
 	install -d $(DESTDIR)$(BINDIR)
 	install -m644 include/isogl/*.h $(DESTDIR)$(INCLUDEDIR)/isogl/
 	install -m644 hosts/isogl-sdl/isogl_sdl.h $(DESTDIR)$(INCLUDEDIR)/isogl-sdl/
@@ -168,6 +169,7 @@ install: all
 	    isogl-sdl.pc.in > $(DESTDIR)$(LIBDIR)/pkgconfig/isogl-sdl.pc
 	install -m644 shaders/*.glsl $(DESTDIR)$(DATADIR)/shaders/
 	install -m644 fonts/ReliefSingleLineLinear.toml $(DESTDIR)$(DATADIR)/fonts/
+	install -m644 examples/demo/architecture.toml $(DESTDIR)$(DATADIR)/drawings/
 	install -m755 $(DEMO) $(DESTDIR)$(BINDIR)/isogl-demo
 
 uninstall:
@@ -180,6 +182,7 @@ uninstall:
 	$(RM) $(DESTDIR)$(INCLUDEDIR)/isogl-sdl/isogl_sdl.h
 	$(RM) $(DESTDIR)$(DATADIR)/shaders/*.glsl
 	$(RM) $(DESTDIR)$(DATADIR)/fonts/ReliefSingleLineLinear.toml
+	$(RM) $(DESTDIR)$(DATADIR)/drawings/architecture.toml
 
 check-sdl-free: lib
 	@! grep -RIn --include='*.c' --include='*.h' \

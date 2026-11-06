@@ -1,5 +1,4 @@
 #include <SDL2/SDL.h>
-#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,39 +7,32 @@
 #include "isogl.h"
 #include "isogl-sdl/isogl_sdl.h"
 #include "isogl_font.h"
-#include "architecture.h"
+#include "drawing_load.h"
 
-/* isogl_zoom_all_sheet() keeps a fixed margin before the aspect correction,
- * which leaves the sheet small on wide windows.  Scale the model matrix around
- * the sheet centre so the drawing uses ~92% of the limiting NDC axis. */
-static void demo_fit(const isogl_sdl_host *host, float sheet_w, float sheet_h) {
-    isogl_zoom_all_sheet();
-    if (!host || host->fb_width <= 0 || host->fb_height <= 0) return;
+static const char *sheet_format_name(int format) {
+    switch (format) {
+        case ISOGL_SHEET_A4: return "A4";
+        case ISOGL_SHEET_A3: return "A3";
+        case ISOGL_SHEET_A2: return "A2";
+        case ISOGL_SHEET_A1: return "A1";
+        case ISOGL_SHEET_A0: return "A0";
+        default: return "?";
+    }
+}
 
-    isogl_viewport vp = {0, 0, host->fb_width, host->fb_height};
-    isogl_set_viewport(&vp);
-
-    float ex = fabsf(isogl_model_matrix[0]) * sheet_w * 0.5f *
-               fabsf(isogl_view_matrix[0]);
-    float ey = fabsf(isogl_model_matrix[5]) * sheet_h * 0.5f *
-               fabsf(isogl_view_matrix[5]);
-    float max_extent = ex > ey ? ex : ey;
-    if (max_extent < 1e-6f) return;
-
-    float factor = 0.92f / max_extent;
-    if (factor <= 1.0f) return;
-
-    isogl_model_matrix[0] *= factor;
-    isogl_model_matrix[5] *= factor;
-    isogl_model_matrix[12] *= factor;
-    isogl_model_matrix[13] *= factor;
+static const char *sheet_orientation_name(int orientation) {
+    return orientation == ISOGL_ORIENTATION_PORTRAIT ? "portrait" : "landscape";
 }
 
 int main(int argc, char **argv) {
     const char *asset_dir = NULL;
+    const char *drawing_path = NULL;
+
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--assets") == 0 && i + 1 < argc) {
             asset_dir = argv[++i];
+        } else if (strcmp(argv[i], "--drawing") == 0 && i + 1 < argc) {
+            drawing_path = argv[++i];
         }
     }
 
@@ -80,15 +72,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* A3 landscape, 1:1.  The diagram is built in sheet millimetres. */
-    if (isogl_set_sheet(420.0f, 297.0f, (isogl_scale){1, 1}) != 0) {
-        printf("Failed to create the sheet\n");
-        isogl_cleanup();
-        isogl_sdl_host_shutdown(&host);
-        SDL_Quit();
-        return 1;
-    }
-
     char font_path[4096];
     if (isogl_asset_path("fonts/ReliefSingleLineLinear.toml",
                          font_path, sizeof(font_path)) != 0) {
@@ -119,14 +102,26 @@ int main(int argc, char **argv) {
     }
 
     isogl_string_list strings = {0};
-    ArchDrawing drawing = {
-        .segments = &segments,
-        .strings = &strings,
-        .font = font,
-        .global_scale = 1.0f
-    };
-    if (arch_build(&drawing) != 0) {
-        printf("Failed to build the architecture drawing\n");
+
+    char asset_drawing[4096];
+    char local_drawing[] = "examples/demo/architecture.toml";
+    if (!drawing_path) {
+        FILE *probe = fopen(local_drawing, "r");
+        if (probe) {
+            fclose(probe);
+            drawing_path = local_drawing;
+        } else if (isogl_asset_path("drawings/architecture.toml",
+                                    asset_drawing,
+                                    sizeof(asset_drawing)) == 0) {
+            drawing_path = asset_drawing;
+        } else {
+            drawing_path = local_drawing;
+        }
+    }
+
+    DrawingSheetInfo sheet;
+    if (drawing_load(drawing_path, font, &segments, &strings, &sheet) != 0) {
+        printf("Failed to load drawing: %s\n", drawing_path);
         isogl_segment_list_free(&segments);
         isogl_string_list_free(&strings);
         isogl_font_free_data(font);
@@ -135,6 +130,31 @@ int main(int argc, char **argv) {
         SDL_Quit();
         return 1;
     }
+
+    isogl_scale scale = {sheet.scale_num, sheet.scale_den};
+    if (isogl_set_sheet(sheet.width_mm, sheet.height_mm, scale) != 0) {
+        printf("Failed to create the sheet\n");
+        isogl_segment_list_free(&segments);
+        isogl_string_list_free(&strings);
+        isogl_font_free_data(font);
+        isogl_cleanup();
+        isogl_sdl_host_shutdown(&host);
+        SDL_Quit();
+        return 1;
+    }
+
+    printf("drawing: %s\n", drawing_path);
+    printf("sheet: %s %s%s (%.0f x %.0f mm)\n",
+           sheet_format_name(sheet.format),
+           sheet_orientation_name(sheet.orientation),
+           sheet.promoted ? " - promoted from A3" : "",
+           sheet.width_mm, sheet.height_mm);
+    if (sheet.bounds.has_bounds) {
+        printf("drawing bounds: %.1f x %.1f mm\n",
+               sheet.bounds.xmax - sheet.bounds.xmin,
+               sheet.bounds.ymax - sheet.bounds.ymin);
+    }
+    fflush(stdout);
 
     isogl_vbo_array vbo_array;
     isogl_vbo_array_init(&vbo_array);
@@ -152,7 +172,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    demo_fit(&host, 420.0f, 297.0f);
+    isogl_zoom_all_sheet();
 
     float identity[16] = {
         1, 0, 0, 0,
@@ -171,13 +191,13 @@ int main(int argc, char **argv) {
                 case SDL_WINDOWEVENT:
                     if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
                         isogl_sdl_host_update(&host);
-                        demo_fit(&host, 420.0f, 297.0f);
+                        isogl_zoom_all_sheet();
                     }
                     break;
 
                 case SDL_KEYDOWN:
                     if (event.key.keysym.sym == SDLK_z) {
-                        demo_fit(&host, 420.0f, 297.0f);
+                        isogl_zoom_all_sheet();
                     } else if (event.key.keysym.sym == SDLK_t) {
                         isogl_toggle_color_thickness();
                     } else if (event.key.keysym.sym == SDLK_q ||

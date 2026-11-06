@@ -559,6 +559,9 @@ richiedono ancora un contesto GL.
 - `docs/generatore-di-simboli.html` — documento completo con i diagrammi.
 - `README.md` — architettura, contratto, build, install.
 - `apps/isocad/README.md` — modello del documento e stato dell'app.
+- `examples/demo/architecture.toml` — disegno gerarchico della demo
+  (`sheet` → `groups` → `primitives`), caricato da `examples/demo/drawing_load.c`
+  con trasformazioni di gruppo e promozione automatica A3 → A2.
 - `include/isogl/isogl.h`, `include/isogl/isogl_font.h`,
   `include/isogl/isogl_style.h`, `include/isogl/isogl_overlay.h`,
   `include/isogl/isogl_panel.h` — API, overlay e tabelle normative.
