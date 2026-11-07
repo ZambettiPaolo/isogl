@@ -57,6 +57,10 @@ Comandi:
 - clic destro: pick e stampa degli ID (scorciatoia)
 - `Ctrl+F`: fit del foglio nell’area interna ai pannelli
 - `Ctrl+T`: alterna colori-spessore / colori-stampa
+- `F2`: workspace Disegno (set attuale)
+- `F3`: workspace Modifica
+- `F4`: workspace Annotazione
+- `F5`: workspace Vista/Stampa
 - `Ctrl+Q`: esci
 - `Esc`: se la riga di comando contiene testo lo svuota; altrimenti annulla il
   drag e svuota la selezione
@@ -80,6 +84,13 @@ logici** (scalati con il device pixel ratio):
   polilinea, testo, quota, center mark);
 - a destra: vista e visualizzazione (zoom +, zoom −, pan, fit, griglia, snap,
   spessore).
+
+I pannelli sono quattro **workspace globali** selezionati da F2–F5: Disegno,
+Modifica, Annotazione, Vista/Stampa. Tutti i dock cambiano insieme; la pagina
+attiva resta nel dock, le altre sono gruppi retained trasformati fuori campo e
+con `visible = 0`. Il cambio è istantaneo e il content rect/fit/input filtering
+restano invariati; solo la pagina attiva riceve hover e tooltip.
+`panel_deck.c` contiene la matematica pura di slot e parcheggio.
 
 Tutti gli sfondi (alto, sinistro, destro e console), le icone, l'hover e il
 tooltip passano da un unico **overlay a gruppi** (`isogl_overlay`). Il CAD crea
@@ -172,17 +183,39 @@ orizzontale con frecce esterne chiuse, verticale con pallini e testo spostato
 lungo la linea, inclinata con frecce miste e testo a destra. Il center mark è
 un secondo simbolo al centro del cerchio. La geometria arriva dal modulo puro condiviso
 `isogl_symbol_geometry`; il registry `isogl_symbol` possiede VBO, stringa,
-hit/pick ed explode. Per manipolare un
-simbolo il CAD usa `isogl_symbol_explode`, che trasferisce segmenti e testo al
-CAD e distrugge il simbolo.
+hit/pick ed explode. Per modificare un simbolo il CAD richiama
+`isogl_symbol_update_dimension`/`update_center_mark` con un descrittore
+completo: ID, pick e selezione restano invariati. Per trasferire la geometria
+al CAD usa `isogl_symbol_explode`, che emette segmenti e testo e distrugge il
+simbolo.
+
+### Contratto reale e lacune
+
+isogl possiede record, copia del descrittore, VBO e glyph string; il CAD
+possiede solo l'`isogl_symbol_id` opaco. Il CAD non legge VBO, stringhe,
+descrittore, tipo o geometria interna: usa solo
+`isogl_symbol_hit/bounds/pick_at/get_selected`, l'ID e gli item di `explode`.
+`pick_at` e `draw_all` operano sul registry, non su `CadDocument.symbols`.
+`bounds` deriva dalla geometria di pick: con `pick_text = 0` il testo non è
+incluso.
+
+Oggi **non esistono** getter di tipo/descrittore né un'API di punti di
+controllo/handle; per modificare serve riapplicare un descrittore completo.
+`update_*` non è transazionale tra VBO e testo. `isocad` conserva solo gli ID e
+scarta i descrittori, quindi non può ancora modificare i simboli. La direzione
+futura è un record CAD `CadSymbolRef { id, type, desc }` con
+`cad_update_*_symbol`, `cad_remove_symbol`, `cad_explode_symbol`; solo in
+seguito, se serve un contratto generico, getter isogl per tipo, parametri,
+control point e item di pick.
 
 ## Simboli e ambiente di test
 
 Il confine è: il CAD possiede la geometria di gruppi e primitive; isogl possiede
 i simboli. Un simbolo ha un `isogl_symbol_id` opaco; il CAD può chiedere
-`isogl_symbol_hit/bounds/pick` e, per manipolarlo, `isogl_symbol_explode`
-(segmenti + testi, simbolo distrutto). Il CAD non legge i VBO interni del
-simbolo.
+`isogl_symbol_hit/bounds/pick`, aggiornarlo in place con
+`isogl_symbol_update_dimension/center_mark` e trasferirne la geometria con
+`isogl_symbol_explode` (segmenti + testi, simbolo distrutto). Il CAD non legge
+i VBO interni del simbolo.
 
 La verifica usa:
 
@@ -230,5 +263,7 @@ simboli isogl con registry, hit/pick/explode, ambiente di test gerarchico e
 testo incrementale per entità. L’interfaccia usa un overlay a gruppi
 (`isogl_overlay`) con pannelli parametrici (`isogl_panel`): pannelli, icone come
 gruppi di linee locali, hover con tooltip e console come gruppo testo; 6–8 draw
-call UI. Editing, azioni dei pulsanti, archi, polilinee, export/stampa e modello
-CAD gerarchico sono i passi successivi.
+call UI. I pannelli hanno **quattro workspace** (F2–F5): la pagina attiva sta
+nel dock, le altre restano retained fuori campo e nascoste; il cambio è
+istantaneo. Editing, azioni dei pulsanti, archi, polilinee, export/stampa e
+modello CAD gerarchico sono i passi successivi.

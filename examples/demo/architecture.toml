@@ -130,6 +130,15 @@ y = 21.000
 angle_deg = 0.0
 scale = 1.0
 
+[[groups]]
+id = 14
+name = "symflow"
+parent = 3
+x = 0.000
+y = 0.000
+angle_deg = 0.0
+scale = 1.0
+
 [[primitives]]
 group = 0
 type = "rect"
@@ -1347,3 +1356,114 @@ angle_deg = 0.0
 text = "demo drawing"
 color = [0.62, 0.68, 0.78, 1.00]
 
+
+# ---- symbol contract and example (group 14, local to the core) ----------
+[[primitives]]
+group = 14
+type = "rect"
+x0 = 392.000
+y0 = 9.800
+x1 = 532.000
+y1 = 60.000
+pattern = 0
+weight = 2
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[primitives]]
+group = 14
+type = "text"
+x = 396.000
+y = 19.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "aligned dimension + center mark"
+color = [0.94, 0.96, 1.00, 1.00]
+
+[[primitives]]
+group = 14
+type = "text"
+x = 300.000
+y = 62.000
+height_mm = 3.500
+angle_deg = 0.0
+text = "SYMBOLS (existing API)"
+color = [0.98, 0.55, 0.80, 1.00]
+
+[[primitives]]
+group = 14
+type = "text"
+x = 242.000
+y = 84.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "CAD descriptor in"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 14
+type = "text"
+x = 392.000
+y = 84.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "pick returns symbol ID"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 14
+type = "text"
+x = 392.000
+y = 74.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "CAD never reads VBO/text"
+color = [0.62, 0.68, 0.78, 1.00]
+
+[[primitives]]
+group = 14
+type = "text"
+x = 392.000
+y = 66.800
+height_mm = 3.500
+angle_deg = 0.0
+text = "no type/control-point getter yet"
+color = [0.62, 0.68, 0.78, 1.00]
+
+# Real isogl symbols created by the demo through the existing registry API.
+[[symbols]]
+group = 14
+type = "dimension"
+p1x = 402.000
+p1y = 34.800
+p2x = 502.000
+p2y = 34.800
+p3x = 402.000
+p3y = 49.800
+distance = 0.0
+text_offset_mm = 0.0
+text_height_mm = 3.5
+sheet_scale = 1.0
+text_left = ""
+text_right = " mm"
+arrow_left = 2
+arrow_right = 2
+precision = 1
+pick_text = 1
+mark_points = 1
+pattern = 0
+weight = 1
+layer = 0
+color = [0.40, 0.88, 1.00, 1.00]
+
+[[symbols]]
+group = 14
+type = "center_mark"
+cx = 517.000
+cy = 39.800
+size_mm = 6.0
+sheet_scale = 1.0
+pattern = 0
+weight = 1
+layer = 0
+color = [0.98, 0.55, 0.80, 1.00]

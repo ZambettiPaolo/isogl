@@ -670,6 +670,18 @@ int main(int argc, char **argv) {
                         case SDLK_t:
                             if (ctrl) isogl_toggle_color_thickness();
                             break;
+                        case SDLK_F2:
+                            isocad_panels_set_page(&panels, 0);
+                            break;
+                        case SDLK_F3:
+                            isocad_panels_set_page(&panels, 1);
+                            break;
+                        case SDLK_F4:
+                            isocad_panels_set_page(&panels, 2);
+                            break;
+                        case SDLK_F5:
+                            isocad_panels_set_page(&panels, 3);
+                            break;
                         default:
                             break;
                     }

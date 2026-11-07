@@ -6,20 +6,18 @@
 #include <isogl/isogl_panel.h>
 #include <stddef.h>
 
-#define ISOCAD_PANEL_LOGICAL_THICKNESS 32.0f
-#define ISOCAD_PANEL_MAX_ICONS         32
+#include "panel_deck.h"
 
-typedef enum {
-    ISOCAD_PANEL_TOP = 0,
-    ISOCAD_PANEL_LEFT,
-    ISOCAD_PANEL_RIGHT
-} IsocadPanelSide;
+#define ISOCAD_PANEL_LOGICAL_THICKNESS 32.0f
+#define ISOCAD_PANEL_MAX_ICONS         96
+#define ISOCAD_PANEL_PAGES             ISOCAD_DECK_PAGE_COUNT
 
 typedef struct {
     const char *name;
     IsocadPanelSide side;
-    float cx, cy;                 /* cell centre, framebuffer px, top-left */
-    float half;                   /* half cell side */
+    int page;                     /* 0..ISOCAD_PANEL_PAGES-1 */
+    float cx, cy;                 /* active-page cell centre, top-left px */
+    float half;                   /* active-page half cell; 0 if hidden */
     isogl_overlay_group group;    /* icon primitives, local coords */
 } IsocadPanelIcon;
 
@@ -30,6 +28,8 @@ typedef struct {
     IsocadPanelIcon icons[ISOCAD_PANEL_MAX_ICONS];
     int icon_count;
     int hover;                    /* icon index or -1 */
+    int active_page;
+    int last_page;
 
     isogl_overlay_group panel_group;
     isogl_overlay_group hover_group;
@@ -57,6 +57,11 @@ void isocad_panels_emit(IsocadPanels *p, const isogl_panel_layout *layout,
                         float cursor_x, float cursor_y);
 
 int isocad_panels_hover(const IsocadPanels *p);
+
+/* Switch the active panel page (F2..F5).  Inactive pages stay retained but
+ * are parked outside the visible strips and hidden. */
+void isocad_panels_set_page(IsocadPanels *p, int page);
+int isocad_panels_get_page(const IsocadPanels *p);
 
 /* Re-emit every icon group from the registry, for a runtime icon change. */
 void isocad_panels_rebuild_icons(IsocadPanels *p);

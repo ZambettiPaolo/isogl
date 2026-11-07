@@ -15,7 +15,7 @@ SDL2_LIBS   := $(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null)
 CFLAGS      ?= -O2 -g
 CFLAGS      += -std=c11 -Wall -Wextra -MMD -MP -fPIC
 CPPFLAGS    += -Iinclude -Iinclude/isogl -Ithird_party/tomlc99 \
-               -Iapps/isocad/src -Ihosts \
+               -Iapps/isocad/src -Iexamples/demo -Ihosts \
                -DISOGL_DEFAULT_ASSET_DIR=\"$(DATADIR)\"
 LDLIBS      := -ldl -lm
 
@@ -35,6 +35,10 @@ SYMBOL_GEOMETRY_TEST_OBJS := $(BUILD)/tests/test_symbol_geometry.o \
 TEST_PANEL_LAYOUT := $(BUILD)/test-panel-layout
 PANEL_LAYOUT_TEST_OBJS := $(BUILD)/tests/test_panel_layout.o \
                           $(BUILD)/src/isogl_panel.o
+TEST_PANEL_DECK := $(BUILD)/test-panel-deck
+PANEL_DECK_TEST_OBJS := $(BUILD)/tests/test_panel_deck.o \
+                        $(BUILD)/apps/isocad/src/panel_deck.o \
+                        $(BUILD)/src/isogl_panel.o
 TEST_SYMBOLS := $(BUILD)/test-symbols
 TEST_SYMBOLS_SRCS := tests/test_symbols.c tests/fake_cad.c
 TEST_SYMBOLS_OBJS := $(TEST_SYMBOLS_SRCS:%.c=$(BUILD)/%.o)
@@ -44,6 +48,9 @@ TEST_VIEWPORT_OBJS := $(TEST_VIEWPORT_SRCS:%.c=$(BUILD)/%.o)
 TEST_OVERLAY := $(BUILD)/test-overlay
 TEST_OVERLAY_SRCS := tests/test_overlay.c
 TEST_OVERLAY_OBJS := $(TEST_OVERLAY_SRCS:%.c=$(BUILD)/%.o)
+TEST_DRAWING_LOAD := $(BUILD)/test-drawing-load
+DRAWING_LOAD_TEST_OBJS := $(BUILD)/tests/test_drawing_load.o \
+                          $(BUILD)/examples/demo/drawing_load.o
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
 SYMBOL_SRC := src/isogl_symbol.c
@@ -70,7 +77,7 @@ sdl-host: $(SDL_HOST_LIB)
 # library objects are compiled without them: a stray SDL include fails the
 # build by construction.
 $(SDL_HOST_OBJS) $(DEMO_OBJS) $(TEST_OBJS) $(TEST_SYMBOLS_OBJS) \
-    $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS): TARGET_CFLAGS := $(SDL2_CFLAGS)
+    $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS) $(DRAWING_LOAD_TEST_OBJS): TARGET_CFLAGS := $(SDL2_CFLAGS)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -106,6 +113,13 @@ $(TEST_PANEL_LAYOUT): $(PANEL_LAYOUT_TEST_OBJS)
 test-panel-layout: $(TEST_PANEL_LAYOUT)
 	./$(TEST_PANEL_LAYOUT)
 
+$(TEST_PANEL_DECK): $(PANEL_DECK_TEST_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(PANEL_DECK_TEST_OBJS) -lm $(LDFLAGS) -o $@
+
+test-panel-deck: $(TEST_PANEL_DECK)
+	./$(TEST_PANEL_DECK)
+
 $(TEST_SYMBOLS): $(TEST_SYMBOLS_OBJS) $(LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(TEST_SYMBOLS_OBJS) $(LIB) $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
@@ -129,6 +143,14 @@ $(TEST_OVERLAY): $(TEST_OVERLAY_OBJS) $(LIB)
 test-overlay: $(TEST_OVERLAY)
 	./$(TEST_OVERLAY) .
 
+$(TEST_DRAWING_LOAD): $(DRAWING_LOAD_TEST_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(DRAWING_LOAD_TEST_OBJS) $(LIB) \
+	    $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-drawing-load: $(TEST_DRAWING_LOAD)
+	./$(TEST_DRAWING_LOAD) .
+
 run: $(DEMO)
 	./$(DEMO)
 
@@ -148,7 +170,7 @@ example-gtk4: lib
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
-test: test-symbol-geometry test-panel-layout test-overlay test-symbols test-viewport $(TEST)
+test: test-symbol-geometry test-panel-layout test-panel-deck test-overlay test-drawing-load test-symbols test-viewport $(TEST)
 	./$(TEST) .
 
 install: all

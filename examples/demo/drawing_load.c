@@ -81,17 +81,23 @@ static void draw_color(toml_table_t *t, float color[4]) {
     }
 }
 
+static void draw_style_fields(toml_table_t *t, uint8_t *pattern,
+                              uint8_t *weight, uint8_t *layer,
+                              float color[4]) {
+    int p = draw_int(t, "pattern", 0);
+    int w = draw_int(t, "weight", 3);
+    int l = draw_int(t, "layer", 0);
+    if (p < 0 || p >= LINE_TYPE_COUNT) p = 0;
+    if (w < 0 || w >= LINE_THICKNESS_COUNT) w = 3;
+    if (l < 0 || l > 31) l = 0;
+    *pattern = (uint8_t)p;
+    *weight = (uint8_t)w;
+    *layer = (uint8_t)l;
+    draw_color(t, color);
+}
+
 static void draw_style(toml_table_t *t, DrawPrimitive *p) {
-    int pattern = draw_int(t, "pattern", 0);
-    int weight = draw_int(t, "weight", 3);
-    int layer = draw_int(t, "layer", 0);
-    if (pattern < 0 || pattern >= LINE_TYPE_COUNT) pattern = 0;
-    if (weight < 0 || weight >= LINE_THICKNESS_COUNT) weight = 3;
-    if (layer < 0 || layer > 31) layer = 0;
-    p->pattern = (uint8_t)pattern;
-    p->weight = (uint8_t)weight;
-    p->layer = (uint8_t)layer;
-    draw_color(t, p->color);
+    draw_style_fields(t, &p->pattern, &p->weight, &p->layer, p->color);
 }
 
 static int draw_group_index(const DrawGroup *groups, int count, int id) {
@@ -330,6 +336,147 @@ static int draw_emit_primitive(isogl_segment_list *segments,
     return -1;
 }
 
+/* ---- symbols ----------------------------------------------------------- */
+
+typedef struct {
+    const isogl_font_data *font;
+    double sheet_scale;
+} DrawTextMetrics;
+
+static double draw_symbol_text_width(void *user, const char *utf8,
+                                     double height_mm) {
+    const DrawTextMetrics *metrics = user;
+    if (!metrics || !metrics->font || !utf8 || height_mm <= 0.0) return 0.0;
+
+    double font_height = (double)metrics->font->height;
+    if (font_height <= 0.0) return 0.0;
+
+    double scale = metrics->sheet_scale > 0.0 ? metrics->sheet_scale : 1.0;
+    return isogl_font_text_advance(metrics->font, utf8) * height_mm /
+           (font_height * scale);
+}
+
+typedef struct {
+    DrawingBounds *bounds;
+} DrawSymbolBoundsCtx;
+
+static int draw_symbol_pick_emit(void *user, const IsoglSymPickItem *item) {
+    DrawSymbolBoundsCtx *ctx = user;
+    if (!ctx || !ctx->bounds || !item) return -1;
+
+    if (item->kind == ISOGL_SYM_PICK_SEGMENT) {
+        draw_bounds_add(ctx->bounds, item->x0, item->y0);
+        draw_bounds_add(ctx->bounds, item->x1, item->y1);
+    } else {
+        for (int i = 0; i < 4; ++i) {
+            draw_bounds_add(ctx->bounds, item->corners[i][0],
+                            item->corners[i][1]);
+        }
+    }
+    return 0;
+}
+
+static int draw_symbol_bounds(const DrawingSymbolSpec *spec,
+                              const isogl_font_data *font,
+                              DrawingBounds *bounds) {
+    DrawSymbolBoundsCtx ctx = {bounds};
+    IsoglSymPickEmitter emitter = {&ctx, draw_symbol_pick_emit};
+
+    if (spec->type == DRAW_SYMBOL_DIMENSION) {
+        IsoglDimensionDesc d = spec->dimension;
+        d.pick_text = 1;   /* include the text OBB in the drawing bounds */
+        DrawTextMetrics metrics = {font, d.sheet_scale};
+        IsoglSymMetrics sym_metrics = {&metrics, draw_symbol_text_width};
+        return isogl_dimension_pick_geometry(&d, &sym_metrics, &emitter);
+    }
+
+    return isogl_center_mark_pick_geometry(&spec->center_mark, &emitter);
+}
+
+static int draw_parse_symbol(toml_table_t *t, const DrawGroup *groups,
+                             int group_count, double default_sheet_scale,
+                             DrawingSymbolSpec *out) {
+    if (!t || !out) return -1;
+
+    memset(out, 0, sizeof(*out));
+    out->group = draw_int(t, "group", 0);
+
+    DrawXform xf;
+    if (draw_group_xform_rec(groups, group_count, out->group, 0, &xf) != 0) {
+        return -1;
+    }
+
+    char type[32];
+    draw_string(t, "type", type, sizeof(type), "dimension");
+
+    uint8_t pattern = 0;
+    uint8_t weight = 1;
+    uint8_t layer = 0;
+    float color[4] = {1, 1, 1, 1};
+    draw_style_fields(t, &pattern, &weight, &layer, color);
+
+    if (strcmp(type, "dimension") == 0) {
+        out->type = DRAW_SYMBOL_DIMENSION;
+        IsoglDimensionDesc *d = &out->dimension;
+
+        double x0 = draw_double(t, "p1x", 0.0);
+        double y0 = draw_double(t, "p1y", 0.0);
+        double x1 = draw_double(t, "p2x", 0.0);
+        double y1 = draw_double(t, "p2y", 0.0);
+        double px = draw_double(t, "p3x", 0.0);
+        double py = draw_double(t, "p3y", 0.0);
+        draw_xform_point(&xf, x0, y0, &d->x0, &d->y0);
+        draw_xform_point(&xf, x1, y1, &d->x1, &d->y1);
+        draw_xform_point(&xf, px, py, &d->px, &d->py);
+
+        d->distance = draw_double(t, "distance", 0.0);
+        d->text_offset_mm = draw_double(t, "text_offset_mm", 0.0);
+        d->text_height_mm = draw_double(t, "text_height_mm", 3.5);
+        d->sheet_scale = draw_double(t, "sheet_scale", default_sheet_scale);
+        if (d->sheet_scale <= 0.0) d->sheet_scale = 1.0;
+        draw_string(t, "text_left", d->text_left, sizeof(d->text_left), "");
+        draw_string(t, "text_right", d->text_right, sizeof(d->text_right), "");
+        d->precision = draw_int(t, "precision", 1);
+        d->pick_text = draw_int(t, "pick_text", 1);
+        int arrow_left = draw_int(t, "arrow_left", ISOGL_DIM_ARROW_OPEN);
+        int arrow_right = draw_int(t, "arrow_right", ISOGL_DIM_ARROW_OPEN);
+        if (arrow_left < 0 || arrow_left > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+            arrow_left = ISOGL_DIM_ARROW_OPEN;
+        }
+        if (arrow_right < 0 || arrow_right > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+            arrow_right = ISOGL_DIM_ARROW_OPEN;
+        }
+        d->arrow_left = (IsoglDimensionArrow)arrow_left;
+        d->arrow_right = (IsoglDimensionArrow)arrow_right;
+        d->mark_points = draw_int(t, "mark_points", 0);
+        d->pattern = pattern;
+        d->weight = weight;
+        d->layer = layer;
+        memcpy(d->color, color, sizeof(d->color));
+        return 0;
+    }
+
+    if (strcmp(type, "center_mark") == 0 || strcmp(type, "center") == 0) {
+        out->type = DRAW_SYMBOL_CENTER_MARK;
+        IsoglCenterMarkDesc *d = &out->center_mark;
+
+        double cx = draw_double(t, "cx", 0.0);
+        double cy = draw_double(t, "cy", 0.0);
+        draw_xform_point(&xf, cx, cy, &d->cx, &d->cy);
+
+        d->size_mm = draw_double(t, "size_mm", 8.0);
+        d->sheet_scale = draw_double(t, "sheet_scale", default_sheet_scale);
+        if (d->sheet_scale <= 0.0) d->sheet_scale = 1.0;
+        d->pattern = pattern;
+        d->weight = weight;
+        d->layer = layer;
+        memcpy(d->color, color, sizeof(d->color));
+        return 0;
+    }
+
+    return -1;
+}
+
 static int draw_sheet_format(const char *name) {
     if (strcmp(name, "A4") == 0) return ISOGL_SHEET_A4;
     if (strcmp(name, "A3") == 0) return ISOGL_SHEET_A3;
@@ -371,7 +518,8 @@ static int draw_sheet_fits(int format, int orientation,
 int drawing_load(const char *path, isogl_font_data *font,
                  isogl_segment_list *segments,
                  isogl_string_list *strings,
-                 DrawingSheetInfo *sheet) {
+                 DrawingSheetInfo *sheet,
+                 DrawingSymbols *symbols) {
     if (!path || !segments || !strings || !sheet) return -1;
 
     FILE *fp = fopen(path, "r");
@@ -412,8 +560,7 @@ int drawing_load(const char *path, isogl_font_data *font,
 
     DrawGroup groups[DRAW_MAX_GROUPS];
     int group_count = 0;
-    toml_array_t *group_array = toml_array_in(doc, "groups");
-    if (!group_array) {
+    toml_array_t *group_array = toml_array_in(doc, "groups");    if (!group_array) {
         toml_free(doc);
         fprintf(stderr, "drawing_load: missing [[groups]]\n");
         return -1;
@@ -504,6 +651,34 @@ int drawing_load(const char *path, isogl_font_data *font,
     }
 
     float global_scale = (float)sheet->scale_num / (float)sheet->scale_den;
+
+    DrawingSymbols parsed_symbols;
+    memset(&parsed_symbols, 0, sizeof(parsed_symbols));
+
+    toml_array_t *symbol_array = toml_array_in(doc, "symbols");
+    if (symbol_array) {
+        int count = toml_array_nelem(symbol_array);
+        for (int i = 0; i < count; ++i) {
+            if (parsed_symbols.count >= DRAW_MAX_SYMBOLS) {
+                toml_free(doc);
+                fprintf(stderr, "drawing_load: too many symbols\n");
+                return -1;
+            }
+            toml_table_t *t = toml_table_at(symbol_array, i);
+            if (!t) continue;
+
+            DrawingSymbolSpec *spec =
+                &parsed_symbols.items[parsed_symbols.count];
+            if (draw_parse_symbol(t, groups, group_count, global_scale,
+                                  spec) != 0) {
+                toml_free(doc);
+                fprintf(stderr, "drawing_load: invalid symbol %d\n", i);
+                return -1;
+            }
+            parsed_symbols.count++;
+        }
+    }
+
     DrawingBounds bounds = {0, 0, 0, 0, 0};
 
     for (int i = 0; i < primitive_count; ++i) {
@@ -522,6 +697,16 @@ int drawing_load(const char *path, isogl_font_data *font,
             return -1;
         }
     }
+
+    for (size_t i = 0; i < parsed_symbols.count; ++i) {
+        if (draw_symbol_bounds(&parsed_symbols.items[i], font, &bounds) != 0) {
+            toml_free(doc);
+            fprintf(stderr, "drawing_load: failed to bound symbol %zu\n", i);
+            return -1;
+        }
+    }
+
+    if (symbols) *symbols = parsed_symbols;
 
     toml_free(doc);
 

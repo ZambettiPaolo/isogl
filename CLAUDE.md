@@ -252,9 +252,10 @@ Due domini separati:
   CAD-side, con generatore ed explode del CAD.
 - **simboli isogl** (quota, center mark): isogl possiede record e geometria. Il
   CAD conserva solo un `isogl_symbol_id` opaco; usa
-  `isogl_symbol_hit/bounds/pick` e, per manipolare, `isogl_symbol_explode`, che
-  emette segmenti e run di testo e distrugge il simbolo. Il CAD crea poi
-  primitive proprie; nessuna lettura dei VBO interni del simbolo.
+  `isogl_symbol_hit/bounds/pick` e, per modificare, richiama
+  `isogl_symbol_update_dimension`/`update_center_mark` con un descrittore
+  completo; `isogl_symbol_explode` trasferisce segmenti e testo al CAD e
+  distrugge il simbolo. Nessuna lettura dei VBO interni del simbolo.
 
 Implementazione:
 
@@ -280,6 +281,58 @@ Implementazione:
   render, pick, hit, selezione, explode e trasferimento al CAD.
   `tests/test_symbol_geometry.c` è headless.
 
+### Contratto reale e lacune
+
+**Ownership e copia.** isogl possiede record, **copia** del descrittore, VBO e
+glyph string. Il CAD possiede solo l'`isogl_symbol_id` opaco. Modificare il
+descrittore del chiamante dopo la creazione non cambia il simbolo: serve un
+`update_*` con il descrittore completo. Gli ID sono monotoni, non riusati; un ID
+distrutto resta morto (tombstone).
+
+**API attuale.**
+
+| Funzione | Contratto |
+|---|---|
+| `isogl_symbol_init(font)` / `cleanup()` | registry GL; il font deve sopravvivere; cleanup prima di `isogl_cleanup()` |
+| `isogl_symbol_create_dimension/center_mark` | copia il descrittore, genera render+pick, crea VBO/stringa; ritorna ID o 0 |
+| `isogl_symbol_update_dimension/center_mark` | rigenera in place, conserva ID/pick/selezione; richiede il descrittore completo; non transazionale VBO+testo |
+| `isogl_symbol_destroy(id)` | rimuove VBO/stringa e invalida l'ID |
+| `isogl_symbol_draw_all()` | disegna tutti i simboli vivi; non esiste un filtro di visibilità per simbolo |
+| `isogl_symbol_pick_at(px,py,extent,...)` | pick GPU sul registry; ritorna gli ID simbolo; non legge `CadDocument.symbols` |
+| `isogl_symbol_hit/bounds` | geometria analitica di **pick**; con `pick_text = 0` il testo è escluso, quindi bounds è più piccolo del render |
+| `isogl_symbol_set/get_selected` | flag persistente su VBO e stringa |
+| `isogl_symbol_explode(id, out)` | riemette geometria render e distrugge il simbolo; se l'emitter fallisce il simbolo resta vivo. Gli item emessi non hanno ID CAD |
+
+**Regola CAD.** Il CAD può trattare l'ID come handle opaco e leggere solo ID,
+`hit`/`bounds`/`pick_at`/`get_selected` e gli item di `explode`. Non può leggere
+o conservare VBO, glyph string, descrittore, tipo, control point o geometria
+interna. Oggi **non esiste** un getter ID-addressed di questi dati.
+
+**Lacune documentate.** Mancano: getter di tipo/descrittore, API di control
+point/handle, enumerazione per ID degli item render/pick, setter parziali,
+rimozione/explode lato isocad. Per modificare un simbolo il CAD deve conservare
+o ricostruire il descrittore completo. `isocad` oggi conserva solo gli ID e
+scarta i descrittori dopo la creazione, quindi non può ancora modificare i
+simboli.
+
+**Direzione futura preferita (senza toccare isogl).** Sostituire
+`isogl_symbol_id *symbols` con un record CAD:
+
+```c
+typedef struct {
+    isogl_symbol_id id;
+    CadSymbolType type;          /* dimension | center mark */
+    union {
+        IsoglDimensionDesc dimension;
+        IsoglCenterMarkDesc center_mark;
+    } desc;
+} CadSymbolRef;
+```
+
+e aggiungere `cad_update_*_symbol`, `cad_remove_symbol`,
+`cad_explode_symbol`. Solo se servirà un contratto generico si aggiungeranno
+getter isogl per tipo, descrittore, control point e item di pick.
+
 ## Overlay e pannelli
 
 L'interfaccia screen-space non usa scissor+clear né uno shader privato dell'app.
@@ -304,6 +357,15 @@ Trigger di aggiornamento: hover, input di testo, resize/DPR, cambio icone
 CPU retained sono **stato UI**, non geometria del documento: l'eccezione al
 divieto di copia RAM dei segmenti vale solo per l'overlay.
 
+I pannelli sono organizzati in **quattro workspace globali** selezionati da
+F2–F5: la pagina attiva sta nel dock, le altre restano gruppi retained
+trasformati fuori campo e con `visible = 0`. Il cambio è istantaneo (niente
+slide in v1): l'overlay ricostruisce la geometria visibile per un frame, poi
+torna al costo statico. `content`, fit e filtro input non cambiano; hover e
+tooltip considerano solo la pagina attiva. `apps/isocad/src/panel_deck.c`
+contiene solo la matematica pura di slot/parcheggio ed è testato headless;
+`panels.c` possiede le pagine, le icone e il passaggio di pagina.
+
 `isogl_panel*` è il layout puro dei pannelli (`top/left/right/bottom`,
 `separator`, `content`) più l'emissione dei quad di sfondo/separatore. Il CAD usa
 `content` per il fit della scena e gli inset per filtrare l'input, e disegna il
@@ -311,9 +373,10 @@ contenuto dei pannelli in pixel con le primitive dell'overlay. Le linee
 dell'overlay sono `GL_LINES` a 1 px: **non esiste** un helper che le converta in
 quad spessi.
 
-Test: `make test-panel-layout` (headless, solo `-lm`) e `make test-overlay`
-(GL, FBO). `apps/isocad/src/panels.c` compone i gruppi icona e il tooltip;
-`console.c` emette le righe nel gruppo testo.
+Test: `make test-panel-layout` (headless), `make test-panel-deck` (headless),
+`make test-overlay` (GL, FBO), `make test-drawing-load` (GL, loader gerarchico
+e simboli). `apps/isocad/src/panels.c` compone i gruppi icona, le pagine e il
+tooltip; `console.c` emette le righe nel gruppo testo.
 
 Il testo dell'overlay è disegnato con
 `isogl_draw_string_list_ex(..., apply_selection = 0)`: il rettangolo di
@@ -537,10 +600,12 @@ make lib                    # solo il core, senza SDL installato
 make sdl-host               # solo libisogl_sdl.a
 make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
 make test-panel-layout      # headless: layout pannelli, niente GL/SDL
+make test-panel-deck        # headless: slot e parcheggio pagine, niente GL/SDL
 make test-overlay           # GL: overlay a gruppi, batch, clip, testo
+make test-drawing-load      # GL: loader TOML gerarchico + simboli
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
-make test                   # geometry + panel layout + overlay + symbols + viewport + core
+make test                   # geometry + layout + deck + overlay + drawing + symbols + viewport + core
 make check-sdl-free         # nessun riferimento SDL nel core
 make example-qt6            # host Qt6 (opzionale)
 make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)

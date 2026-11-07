@@ -114,10 +114,12 @@ make                     # build/libisogl.a + libisogl_sdl.a + build/isogl-demo
 make lib                 # solo il core, compila senza SDL installato
 make test-symbol-geometry # headless: geometria pura, niente GL/SDL
 make test-panel-layout    # headless: matematica dei pannelli, niente GL/SDL
+make test-panel-deck      # headless: slot e parcheggio pagine, niente GL/SDL
 make test-overlay         # GL: overlay a gruppi, batch, clip, testo
+make test-drawing-load    # GL: loader TOML gerarchico + simboli
 make test-symbols         # GL: fake CAD gerarchico + fixture TOML
 make test-viewport        # GL: viewport, coordinate, pick HiDPI, selezione
-make test                 # geometria + layout + overlay + symbols + viewport + test FBO
+make test                 # geometria + layout + deck + overlay + drawing + symbols + viewport + test FBO
 make check-sdl-free       # il core non deve contenere riferimenti SDL
 make example-qt6          # host Qt6 (opzionale, richiede Qt6)
 make example-gtk4         # host GTK4 (opzionale, richiede libgtk-4-dev)

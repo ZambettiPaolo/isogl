@@ -7,6 +7,7 @@
 #include "isogl.h"
 #include "isogl-sdl/isogl_sdl.h"
 #include "isogl_font.h"
+#include "isogl_symbol.h"
 #include "drawing_load.h"
 
 static const char *sheet_format_name(int format) {
@@ -120,7 +121,9 @@ int main(int argc, char **argv) {
     }
 
     DrawingSheetInfo sheet;
-    if (drawing_load(drawing_path, font, &segments, &strings, &sheet) != 0) {
+    DrawingSymbols symbol_specs;
+    if (drawing_load(drawing_path, font, &segments, &strings, &sheet,
+                     &symbol_specs) != 0) {
         printf("Failed to load drawing: %s\n", drawing_path);
         isogl_segment_list_free(&segments);
         isogl_string_list_free(&strings);
@@ -173,6 +176,35 @@ int main(int argc, char **argv) {
     }
 
     isogl_zoom_all_sheet();
+
+    if (isogl_symbol_init(font) != 0) {
+        printf("Failed to initialize the symbol registry\n");
+        isogl_string_list_free(&strings);
+        isogl_vbo_array_free(&vbo_array);
+        isogl_font_free_data(font);
+        isogl_cleanup();
+        isogl_sdl_host_shutdown(&host);
+        SDL_Quit();
+        return 1;
+    }
+
+    size_t created = 0;
+    for (size_t i = 0; i < symbol_specs.count; ++i) {
+        DrawingSymbolSpec *spec = &symbol_specs.items[i];
+        isogl_symbol_id id = 0;
+        if (spec->type == DRAW_SYMBOL_DIMENSION) {
+            id = isogl_symbol_create_dimension(&spec->dimension);
+        } else {
+            id = isogl_symbol_create_center_mark(&spec->center_mark);
+        }
+        if (id == 0) {
+            fprintf(stderr, "symbol %zu: creation failed\n", i);
+        } else {
+            created++;
+        }
+    }
+    printf("symbols: %zu/%zu created\n", created, symbol_specs.count);
+    fflush(stdout);
 
     float identity[16] = {
         1, 0, 0, 0,
@@ -246,10 +278,12 @@ int main(int argc, char **argv) {
         isogl_draw_string_list(&strings, isogl_shader_program_font,
                                isogl_model_matrix, isogl_view_matrix,
                                identity);
+        isogl_symbol_draw_all();
         isogl_sdl_host_swap(&host);
         SDL_Delay(20);
     }
 
+    isogl_symbol_cleanup();
     isogl_string_list_free(&strings);
     isogl_vbo_array_free(&vbo_array);
     isogl_font_free_data(font);
