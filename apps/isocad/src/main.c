@@ -8,7 +8,9 @@
 #include <math.h>
 
 #include "cad.h"
+#include "cad_commands.h"
 #include "console.h"
+#include "console_cmd.h"
 #include "panels.h"
 
 #ifndef M_PI
@@ -246,10 +248,13 @@ static int isocad_pick_extent(const isogl_sdl_host *host) {
     return (int)lround((double)ISOGL_PICK_DEFAULT_EXTENT * s);
 }
 
-static void pick_and_print(CadDocument *doc, isogl_sdl_host *host,
-                           float px, float py, size_t max_entities) {
+/* Returns the nearest symbol ID in the pick box, or 0 when none was hit. */
+static isogl_symbol_id pick_and_print(CadDocument *doc, isogl_sdl_host *host,
+                                      float px, float py,
+                                      size_t max_entities) {
     uint32_t ids[4096];
     size_t count = 0;
+    isogl_symbol_id first_symbol = 0;
     int extent = isocad_pick_extent(host);
 
     if (isogl_pick_at(&doc->parts, &doc->strings, px, py, extent,
@@ -274,8 +279,10 @@ static void pick_and_print(CadDocument *doc, isogl_sdl_host *host,
             printf(" %u", symbol_ids[i]);
         }
         printf("\n");
+        first_symbol = (isogl_symbol_id)symbol_ids[0];
     }
     fflush(stdout);
+    return first_symbol;
 }
 
 typedef enum {
@@ -347,13 +354,44 @@ static void selection_set_free(CadSelection *set) {
     set->capacity = 0;
 }
 
+/* Remove one symbol from the caller-owned persistent selection. */
+static void selection_drop_symbol(CadSelection *set, uint32_t symbol) {
+    if (!set) return;
+    size_t out = 0;
+    for (size_t i = 0; i < set->count; ++i) {
+        if (set->refs[i].kind == CAD_SEL_SYMBOL &&
+            set->refs[i].id == symbol) {
+            continue;
+        }
+        set->refs[out++] = set->refs[i];
+    }
+    set->count = out;
+}
+
 static void selection_clear_all(CadDocument *doc, CadSelection *set) {
     selection_set_clear(set);
     if (!doc) return;
     cad_selection_clear(doc);
     for (size_t i = 0; i < doc->symbol_count; ++i) {
-        isogl_symbol_set_selected(doc->symbols[i], 0);
+        isogl_symbol_set_selected(doc->symbols[i].id, 0);
     }
+}
+
+/* Single click: the first symbol under the cursor replaces the persistent
+ * selection.  Drag selection and its CAD/symbol sets are untouched. */
+static void click_select_symbol(CadDocument *doc, IsocadConsole *console,
+                                CadSelection *selection,
+                                isogl_symbol_id symbol) {
+    if (!doc || !console || !selection || symbol == 0) return;
+
+    selection_clear_all(doc, selection);
+    if (isogl_symbol_set_selected(symbol, 1) != 0) return;
+
+    selection_set_append(selection, CAD_SEL_SYMBOL, symbol);
+    const CadSymbolRef *ref = cad_symbol_find_const(doc, symbol);
+    char line[ISOCAD_CONSOLE_MAX_INPUT + 1];
+    isocad_symbol_summary(ref, line, sizeof(line));
+    isocad_console_echo(console, line);
 }
 
 static int selection_compute(isogl_sdl_host *host, isogl_point start_world,
@@ -421,7 +459,7 @@ static void selection_apply_rect(CadDocument *doc, isogl_point start_world,
     };
 
     for (size_t i = 0; i < doc->symbol_count; ++i) {
-        isogl_symbol_id symbol = doc->symbols[i];
+        isogl_symbol_id symbol = doc->symbols[i].id;
         isogl_symbol_set_selected(symbol, 0);
         if (isogl_symbol_hit(symbol, &query, crossing) == 1) {
             isogl_symbol_set_selected(symbol, 1);
@@ -560,6 +598,14 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* The symbol sheet scale is a module-wide, read-only context.  Set it
+       before creating symbols so their paper-sized geometry is correct. */
+    if (isogl_symbol_set_sheet_scale((double)doc.sheet_scale) != 0) {
+        fprintf(stderr, "Failed to set the symbol sheet scale\n");
+        shutdown_all(&host, &doc, font);
+        return 1;
+    }
+
     build_demo_document(&doc, sheet_w, sheet_h);
 
     float identity[16] = {
@@ -649,9 +695,31 @@ int main(int argc, char **argv) {
                             isocad_console_backspace(&console);
                             break;
                         case SDLK_RETURN:
-                        case SDLK_KP_ENTER:
-                            isocad_console_enter(&console);
+                        case SDLK_KP_ENTER: {
+                            char command_line[ISOCAD_CONSOLE_MAX_INPUT + 1];
+                            memcpy(command_line, console.input,
+                                   sizeof(command_line));
+                            if (isocad_console_enter(&console)) {
+                                IsocadCommand command;
+                                IsocadCommandKind kind =
+                                    isocad_command_parse(command_line,
+                                                         &command);
+                                if (kind != ISOCAD_CMD_NONE) {
+                                    int rc = isocad_command_execute(
+                                        &doc, &console, &command);
+                                    if (kind == ISOCAD_CMD_SYM_REMOVE &&
+                                        rc == 0) {
+                                        selection_drop_symbol(
+                                            &selection, command.symbol);
+                                    }
+                                } else if (command.recognized &&
+                                           command.error[0]) {
+                                    isocad_console_echo(&console,
+                                                        command.error);
+                                }
+                            }
                             break;
+                        }
                         case SDLK_q:
                             if (ctrl) running = 0;
                             break;
@@ -742,8 +810,14 @@ int main(int argc, char **argv) {
                             isogl_sdl_host_local_to_pixels(&host,
                                 (float)event.button.x,
                                 (float)event.button.y, &px, &py);
-                            pick_and_print(&doc, &host, px, py,
-                                           pick_max_entities);
+                            isogl_symbol_id picked_symbol =
+                                pick_and_print(&doc, &host, px, py,
+                                               pick_max_entities);
+                            if (picked_symbol != 0) {
+                                click_select_symbol(&doc, &console,
+                                                    &selection,
+                                                    picked_symbol);
+                            }
                             isogl_clear_selection_rect();
                         } else {
                             selection_finish(&doc, &host, sel_start_world,

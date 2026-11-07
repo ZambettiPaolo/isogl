@@ -65,15 +65,51 @@ Comandi:
 - `Esc`: se la riga di comando contiene testo lo svuota; altrimenti annulla il
   drag e svuota la selezione
 - testo digitato: va alla riga di comando, sempre attiva; `Enter` echeggia la
-  riga nelle 3 righe di storico; `Backspace` cancella
+  riga nelle 3 righe di storico e, se riconosciuta, la esegue; `Backspace`
+  cancella
+
+### Comandi della console (prototipo)
+
+I comandi operano sui record CAD dei simboli (`CadSymbolRef`: ID, tipo e copia
+dei parametri) e usano solo i metadati pubblici `isogl_symbol_param_desc`. La
+console mostra una riga di riepilogo; i dettagli e i valori aggiornati vanno su
+stdout.
+
+```text
+sym list                  elenca S<id> <tipo> su stdout
+sym info <id>             tipo, descrizione e ogni parametro: key, label,
+                          help, unit, kind, count, valore/i
+sym set <id> <key> ...    modifica un parametro e rigenera il simbolo
+sym points <id>           elenca i punti di controllo con indici e label
+sym remove <id>           distrugge il simbolo e rimuove il riferimento
+save <path>               scrive una sezione schema v2 [[symbols]] + params
+```
+
+Forme di `sym set` per tipo di parametro:
+
+```text
+points <i> <x> <y>
+texts <i> <testo libero fino a fine riga>
+segments <i> <x0> <y0> <x1> <y1>
+number <valore>
+integer|enum <intero>
+boolean 0|1|true|false
+color <r> <g> <b> [<a>]
+```
+
+`SCALE` e i parametri con `editable = 0` sono rifiutati. Un aggiornamento
+invalido lascia intatti simbolo, geometria e copia dei parametri: la console
+lavora su una copia temporanea e chiama `cad_symbol_params_update`, che a sua
+volta usa `isogl_symbol_params_update` (ID, pick ID e selezione preservati) e
+poi rinfresca la copia del documento con un nuovo `params_get`.
 
 Il pannello inferiore è un prototipo: una striscia opaca di **100 px logici**
 con **4 righe** (3 di storico + input) disegnate col font vettoriale. Lo sfondo
 è un quad come gli altri pannelli; il modulo console possiede solo il testo.
 La scena è adattata al rettangolo interno ai pannelli modificando la matrice
-modello, senza un secondo viewport. I comandi reali non sono ancora
-implementati: `Enter` fa solo eco. Click e rotella dentro un pannello vengono
-ignorati dalla scena.
+modello, senza un secondo viewport. `Enter` esegue i comandi `sym`/`save`
+descritti sopra; una riga non riconosciuta resta un semplice eco. Click e
+rotella dentro un pannello vengono ignorati dalla scena.
 
 Attorno all'area di disegno ci sono tre pannelli con icone, spessi **32 px
 logici** (scalati con il device pixel ratio):
@@ -131,9 +167,11 @@ disponibile come anteprima veloce, ma in isocad è disattivato
 Il pan centrale non interrompe la selezione: il rettangolo segue la vista.
 Al rilascio i riferimenti vengono stampati nel terminale come `E<id>` (entità
 CAD) e `S<id>` (simbolo isogl). L’OBB del testo è calcolato dagli advance reali
-del font (`isogl_font_text_advance`). Il click singolo stampa ancora il pick e
-non aggiorna il set persistente: la politica topmost/centro è un passo
-successivo.
+del font (`isogl_font_text_advance`). Il click singolo sinistro, se il pick
+restituisce almeno un simbolo, seleziona il primo (il candidato più vicino al
+cursore), sostituisce il set persistente e mostra in console un riepilogo
+`S<id> <tipo> <n>p`; il drag resta invariato. La politica topmost/centro tra
+più simboli sovrapposti è ancora un passo successivo.
 
 Il pick copre i VBO dei segmenti (linee, cerchi, rettangoli), le stringhe di
 testo e i simboli isogl. Il testo viene disegnato nel pick pass con un
@@ -165,8 +203,11 @@ ogni volta un `IsoglDimensionDesc` completo:
 - le linee di riferimento partono 3 mm dopo il punto misurato;
 - precisione, altezza testo e `pick_text`.
 
-Poi chiama `cad_add_dimension_symbol()` e conserva solo l’`isogl_symbol_id` nel
-`CadDocument`.
+Poi chiama `cad_add_dimension_symbol()`, che crea il simbolo e registra nel
+`CadDocument` un `CadSymbolRef { id, type, params }`: l’ID opaco, il puntatore
+al tipo C persistente e una copia profonda dei parametri tipizzati. La copia è
+il record CAD usato da console, salvataggio e futura UI proprietà; non è una
+copia dei segmenti.
 
 - **render**: linea di quota, due linee di riferimento, frecce secondo il tipo
   scelto (0–3 segmenti ciascuna) e un run di testo; il VBO e la stringa
@@ -212,10 +253,9 @@ rigenerazione conserva ID, pick ID e selezione. `params_get` espone il
 parametro `SCALE` in sola lettura con la scala applicata; `params_update`
 ignora un eventuale `SCALE` in ingresso. Se un simbolo non riesce a
 rigenerarsi, conserva geometria e scala precedenti; il setter prosegue con gli
-altri e restituisce `-1` se almeno uno ha fallito. `isocad` non chiama ancora
-il setter e continua a passare `doc->sheet_scale` ai wrapper: l'argomento è
-ignorato, quindi per allineare il disegno alla scala del documento il chiamante
-deve invocare `isogl_symbol_set_sheet_scale`.
+altri e restituisce `-1` se almeno uno ha fallito. `isocad` imposta la scala
+globale da `doc->sheet_scale` prima di creare i simboli; gli argomenti di scala
+dei wrapper restano ignorati.
 
 **Aggiornamento atomico per simbolo.** `params_update` prepara nuova
 geometria, tutte le glyph string e la copia dei parametri prima di mutare il
@@ -227,13 +267,20 @@ precedente. Limite residuo: gli array condivisi di VBO e stringhe non sono
 transazionali a livello globale, quindi un cambio di scala può riuscire per
 alcuni simboli e fallire per altri; l'atomicità è per singolo simbolo.
 
-Restano da implementare: file v2 con `type` + `[symbols.params]`
-(skip/preservazione dei tipi sconosciuti); pannello proprietà e `CadSymbolRef`
-in isocad (oggi conserva solo gli ID, non usa `params_get` e non chiama
-`isogl_symbol_set_sheet_scale`); liste dinamiche; transazione globale degli
-array condivisi. La direzione è un record CAD
-`CadSymbolRef { id, type, params }` con `cad_update_*_symbol`,
-`cad_remove_symbol`, `cad_explode_symbol`.
+Stato in isocad: il documento conserva `CadSymbolRef { id, type, params }`
+con copia profonda dei parametri; `cad_symbol_find`,
+`cad_symbol_update_params` e `cad_remove_symbol` gestiscono il record. La
+console espone `sym list/info/set/points/remove` e `save <path>`. Il writer
+schema v2 è **save-only**: usa solo stdio e i metadati pubblici, scrive
+`[[symbols]]` con `type`, `group = 0` e `[symbols.params]`, omette `SCALE` ed è
+l’unico formato prodotto. isocad non include un parser TOML e non carica un
+disegno completo; il round-trip del file resta compito di
+`examples/demo/drawing_load`.
+
+Restano da implementare: pannello proprietà visuale e handle di editing
+(la modifica oggi è solo da console); liste dinamiche; transazione globale
+degli array condivisi; preservazione dei tipi sconosciuti nel writer;
+caricamento di un disegno completo nell’app.
 
 ## Simboli e ambiente di test
 
@@ -254,7 +301,9 @@ La verifica usa:
 - `tests/test_symbol_geometry.c`: geometria pura headless.
 
 ```sh
-make test-symbol-geometry
+make test-symbol-geometry   # geometria pura, headless
+make test-console-cmd       # parser console, headless
+make test-cad-symbols       # CadSymbolRef, update/remove/writer, GL
 make test-symbols
 make test
 ```
@@ -264,9 +313,15 @@ make test
 - `CadLayer`: nome, colore di stampa, peso e tipo di linea ISO predefiniti.
 - `CadEntity`: linea, cerchio, rettangolo o testo, con layer, pattern e peso.
   Le quote e i center mark non sono entità CAD: sono simboli isogl.
-- `CadDocument`: array di entità con `next_id` monotono, riferimenti ai simboli
-  isogl (`isogl_symbol_id *symbols`) e specchio GPU (`isogl_vbo_array` per i
-  segmenti, `isogl_string_list` per il testo).
+- `CadDocument`: array di entità con `next_id` monotono, record dei simboli
+  isogl (`CadSymbolRef *symbols`, con ID, tipo e copia dei parametri) e
+  specchio GPU (`isogl_vbo_array` per i segmenti, `isogl_string_list` per il
+  testo).
+- `CadSymbolRef`: vista CAD di un simbolo isogl. Il registry possiede VBO,
+  stringhe e geometria; il documento possiede solo ID, puntatore al tipo C
+  persistente e copia profonda dei parametri. L’ID resta stabile; la copia
+  parametri si aggiorna con `cad_symbol_update_params` (nuovo `params_get`) e
+  viene liberata con `cad_remove_symbol`/`cad_document_free`.
 
 Ogni entità geometrica ha il proprio VBO. Quando un'entità viene modificata
 l'app ricostruisce solo la sua lista di segmenti e chiama
@@ -286,8 +341,10 @@ stringhe; a scala il limite sono i VBO e le draw call, non i byte.
 Milestone A + UI screen-space: foglio, linee, cerchi, rettangoli, testo
 vettoriale, pattern e pesi ISO, zoom/pan, modalità colori-spessore/stampa,
 selezione d’area persistente taggata CAD/simbolo, quota e center mark come
-simboli isogl con registry, hit/pick/explode, ambiente di test gerarchico e
-testo incrementale per entità. L’interfaccia usa un overlay a gruppi
+simboli isogl con registry, hit/pick/explode, record CAD con tipo+copia
+parametri, modifica da console (`sym list/info/set/points/remove`, `save`),
+ambiente di test gerarchico e testo incrementale per entità. L’interfaccia usa
+un overlay a gruppi
 (`isogl_overlay`) con pannelli parametrici (`isogl_panel`): pannelli, icone come
 gruppi di linee locali, hover con tooltip e console come gruppo testo; 6–8 draw
 call UI. I pannelli hanno **quattro workspace** (F2–F5): la pagina attiva sta

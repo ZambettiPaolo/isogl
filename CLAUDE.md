@@ -37,8 +37,9 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
 Stato: Milestone A + UI screen-space. Esistono foglio, linee, cerchi,
 rettangoli, testo, pattern e pesi ISO, zoom/pan, modalità colori-spessore,
 selezione d’area persistente e i primi simboli isogl (quota, center mark) con
-registry, hit/pick/explode. L’app usa già riferimenti simbolo al posto della
-vecchia `CAD_DIMENSION` e ID entità monotoni.
+registry, hit/pick/explode. L’app usa record `CadSymbolRef { id, type, params }`
+al posto della vecchia `CAD_DIMENSION`, espone metadati e modifica parametri da
+console (`sym list/info/set/points/remove`, `save`) e usa ID entità monotoni.
 
 L’interfaccia di isocad usa un **overlay screen-space a gruppi**:
 `isogl_overlay` batcha quad, linee e testo in un unico pass, con
@@ -195,9 +196,15 @@ Regole che ne derivano:
 - `CadLayer`: nome, colore di stampa, peso e tipo di linea ISO predefiniti.
 - `CadEntity`: linea, cerchio, rettangolo o testo; layer, pattern, peso,
   visibilità, `vbo_id`.
-- `CadDocument`: array di entità con `next_id` monotono, riferimenti ai simboli
-  isogl (`isogl_symbol_id *symbols`), specchio GPU (`isogl_vbo_array` per i
+- `CadDocument`: array di entità con `next_id` monotono, record dei simboli
+  isogl (`CadSymbolRef *symbols`), specchio GPU (`isogl_vbo_array` per i
   segmenti, `isogl_string_list` per il testo), font, scala foglio.
+- `CadSymbolRef`: ID opaco, puntatore al tipo C persistente e copia profonda di
+  `isogl_symbol_params`. Il registry possiede VBO/stringhe/geometria; il CAD
+  usa solo i parametri per console, salvataggio e futura UI proprietà. La copia
+  si rinfresca con `cad_symbol_update_params` (dopo
+  `isogl_symbol_params_update`, ID/pick/selezione preservati) e si libera con
+  `cad_remove_symbol`/`cad_document_free`.
 - Ogni entità geometrica ha oggi il proprio VBO. La modifica di un'entità
   ricostruisce solo la sua lista di segmenti e chiama
   `isogl_vbo_array_update()`; il resto resta in VRAM.
@@ -294,13 +301,23 @@ Implementazione:
   sconosciuto) e `tests/test_drawing_load.c` coprono params, trasformazione,
   skip, bounds, creazione, pick e round-trip writer→loader; la vecchia fixture
   resta per la compatibilità p1x.
-- L'app `isocad` usa riferimenti simbolo: `CadDocument` conserva
-  `isogl_symbol_id *symbols`; `cad_add_dimension_symbol` /
-  `cad_add_center_mark_symbol` creano il simbolo e ne registrano l’ID. La
-  selezione è taggata (`CAD_SEL_ENTITY` / `CAD_SEL_SYMBOL`): le entità CAD
-  usano `cad_selection_apply`, i simboli `isogl_symbol_set_selected`, e il
-  rettangolo interroga i simboli con `isogl_symbol_hit`. La demo mostra quota e
-  center mark come simboli.
+- L'app `isocad` usa record simbolo: `CadDocument` conserva
+  `CadSymbolRef { id, type, params }`; `cad_add_dimension_symbol` /
+  `cad_add_center_mark_symbol` creano il simbolo e registrano ID, tipo e copia
+  profonda dei parametri (`params_get`). `cad_symbol_find`,
+  `cad_symbol_update_params` e `cad_remove_symbol` gestiscono il record senza
+  leggere VBO interni. La console espone `sym list/info/set/points/remove` e
+  `save <path>`: interpreta i valori dai metadati pubblici
+  (`isogl_symbol_param_desc`), rifiuta `SCALE`/parametri non editabili, lavora
+  su una copia temporanea e poi chiama `cad_symbol_params_update`. Il writer
+  schema v2 è **save-only** (stdio + metadati, `[[symbols]]` con type,
+  `group = 0`, `[symbols.params]`, `SCALE` omesso); isocad non ha un parser
+  TOML e non carica un disegno completo. La selezione è taggata
+  (`CAD_SEL_ENTITY` / `CAD_SEL_SYMBOL`): le entità CAD usano
+  `cad_selection_apply`, i simboli `isogl_symbol_set_selected`, e il
+  rettangolo interroga i simboli con `isogl_symbol_hit`. Un click sinistro
+  singolo seleziona il primo simbolo del pick e mostra il riepilogo in console.
+  La demo mostra quota e center mark come simboli.
 - L'ambiente di verifica è `tests/fake_cad.*` (fake CAD gerarchico, non il CAD
   di produzione) + il disegno strutturato
   `tests/fixtures/test_drawing.toml`; `tests/test_symbols.c` verifica load,
@@ -390,19 +407,18 @@ glyph string o segmenti interni; l'ID resta l'handle per pick/selezione/explode.
 La scala è globale e di sola lettura: si cambia solo con
 `isogl_symbol_set_sheet_scale`.
 
-**Lacune e passi successivi.** Restano: file v2 con `type` +
-`[symbols.params]` e skip/preservazione dei tipi sconosciuti (slice 3);
-pannello proprietà e `CadSymbolRef` in isocad; ridimensionamento dinamico delle
-liste (in v1 i tipi built-in hanno lunghezze fisse min=max); `isocad` conserva
-ancora solo gli ID, non usa `params_get` e non chiama ancora
-`isogl_symbol_set_sheet_scale` (continua a passare `doc->sheet_scale` ai
-wrapper, che ora è ignorato); transazione globale degli array condivisi.
+**Lacune e passi successivi.** Restano: pannello proprietà visuale e handle di
+editing (la modifica è solo da console); ridimensionamento dinamico delle liste
+(in v1 i tipi built-in hanno lunghezze fisse min=max); transazione globale degli
+array condivisi; preservazione dei tipi sconosciuti nel writer; caricamento di
+un disegno completo nell’app. `isocad` imposta la scala globale da
+`doc->sheet_scale` prima di creare i simboli.
 
-**Direzione CAD.** `CadSymbolRef` conterrà il nome del tipo e una copia di
-`isogl_symbol_params` (o li interrogherà con `params_get`) per salvataggio,
-undo e pannello proprietà; `cad_update_*_symbol` chiamerà `params_update`,
-`cad_remove_symbol`/`cad_explode_symbol` aggiorneranno il documento senza
-lasciare ID morti.
+**Direzione CAD.** `CadSymbolRef` è ora il record `{ id, type, params }`;
+`cad_symbol_params_update` chiama `params_update` e rinfresca la copia con
+`params_get`, `cad_remove_symbol` aggiorna il documento senza lasciare ID vivi.
+Restano `cad_explode_symbol` e l’undo. La UI proprietà userà la stessa copia
+parametri e i metadati del tipo.
 
 ## Overlay e pannelli
 
@@ -596,6 +612,8 @@ fidarti.
 | `include/isogl/isogl_panel.h` | layout pannelli puro + emitter | fatto |
 | `apps/isocad/src/panels.c` | gruppi icona, hover, tooltip | fatto |
 | `apps/isocad/src/console.c` | gruppo testo, nessuna string list nel modulo | fatto |
+| `apps/isocad/src/console_cmd.c` | parser comandi puro (headless) | fatto |
+| `apps/isocad/src/cad_commands.c` | esegue sym/save sui `CadSymbolRef` | fatto |
 
 Nota: `isogl_vbo_array_set_transform()` esiste, ma `isocad` non lo usa; la
 matrice relativa dei VBO documento è sempre identità. L'overlay a gruppi applica
@@ -621,8 +639,10 @@ rimozione/undo delle entità e il modello gerarchico del CAD.
    tratteggio, due entità sovrapposte.
 5. Prima entità reale: la quota. È implementata come simbolo isogl, con
    generatore puro condiviso, registry, explode e trasferimento al CAD. L'app
-   usa riferimenti simbolo e selezione taggata. Restano il modello CAD
-   gerarchico e il poligono regolare CAD-side.
+   usa `CadSymbolRef` (ID+tipo+params) e selezione taggata; la console modifica
+   i parametri e `save` scrive la sezione schema v2 (save-only). Restano il
+   modello CAD gerarchico, il pannello proprietà/handle e il poligono regolare
+   CAD-side.
 6. Pagine VBO solo quando il profilo mostra che le draw call per entità sono
    il collo di bottiglia. Fino ad allora resta un VBO per entità: il generatore
    non dipende dal backend. Il batching non è per stile (lo stile è per
@@ -676,21 +696,25 @@ make test-panel-deck        # headless: slot e parcheggio pagine, niente GL/SDL
 make test-overlay           # GL: overlay a gruppi, batch, clip, testo
 make test-drawing-load      # GL: loader TOML gerarchico + simboli
 make test-symbol-params     # GL: registry tipi C, parametri, get/update
+make test-console-cmd       # headless: parser comandi sym/save
+make test-cad-symbols       # GL: CadSymbolRef, update/remove, writer v2
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
-make test                   # geometry + layout + deck + overlay + drawing + symbols + viewport + core
+make test                   # geometry + layout + deck + overlay + drawing + params + console + cad-symbols + symbols + viewport + core
 make check-sdl-free         # nessun riferimento SDL nel core
 make example-qt6            # host Qt6 (opzionale)
 make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)
 make -B SANITIZE=1 test
 ```
 
-`tests/test_symbol_geometry.c` e `tests/test_panel_layout.c` girano senza
-finestra e senza linkare SDL/GL. `tests/test_overlay.c` usa un contesto GL
-(Xvfb in CI) e un FBO. `tests/test_symbols.c` usa un contesto GL e il disegno
-strutturato `tests/fixtures/test_drawing.toml`; il fake CAD
-`tests/fake_cad.*` non è il CAD di produzione. I test di `tests/test_core.c`
-richiedono ancora un contesto GL.
+`tests/test_symbol_geometry.c`, `tests/test_panel_layout.c` e
+`tests/test_console_cmd.c` girano senza finestra e senza linkare SDL/GL.
+`tests/test_overlay.c` usa un contesto GL (Xvfb in CI) e un FBO.
+`tests/test_cad_symbols.c` usa un contesto GL e verifica `CadSymbolRef`,
+update/remove, il writer schema v2 e l'esecuzione dei comandi console.
+`tests/test_symbols.c` usa un contesto GL e il disegno strutturato
+`tests/fixtures/test_drawing.toml`; il fake CAD `tests/fake_cad.*` non è il CAD
+di produzione. I test di `tests/test_core.c` richiedono ancora un contesto GL.
 
 ## Riferimenti
 

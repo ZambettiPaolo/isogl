@@ -53,6 +53,15 @@ DRAWING_LOAD_TEST_OBJS := $(BUILD)/tests/test_drawing_load.o \
                           $(BUILD)/examples/demo/drawing_load.o
 TEST_SYMBOL_PARAMS := $(BUILD)/test-symbol-params
 SYMBOL_PARAMS_TEST_OBJS := $(BUILD)/tests/test_symbol_params.o
+TEST_CAD_SYMBOLS := $(BUILD)/test-cad-symbols
+CAD_SYMBOLS_TEST_OBJS := $(BUILD)/tests/test_cad_symbols.o \
+                         $(BUILD)/apps/isocad/src/cad.o \
+                         $(BUILD)/apps/isocad/src/cad_commands.o \
+                         $(BUILD)/apps/isocad/src/console.o \
+                         $(BUILD)/apps/isocad/src/console_cmd.o
+TEST_CONSOLE_CMD := $(BUILD)/test-console-cmd
+CONSOLE_CMD_TEST_OBJS := $(BUILD)/tests/test_console_cmd.o \
+                         $(BUILD)/apps/isocad/src/console_cmd.o
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
 SYMBOL_SRC := src/isogl_symbol.c
@@ -80,7 +89,8 @@ sdl-host: $(SDL_HOST_LIB)
 # build by construction.
 $(SDL_HOST_OBJS) $(DEMO_OBJS) $(TEST_OBJS) $(TEST_SYMBOLS_OBJS) \
     $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS) $(DRAWING_LOAD_TEST_OBJS) \
-    $(SYMBOL_PARAMS_TEST_OBJS): TARGET_CFLAGS := $(SDL2_CFLAGS)
+    $(SYMBOL_PARAMS_TEST_OBJS) $(CAD_SYMBOLS_TEST_OBJS): \
+    TARGET_CFLAGS := $(SDL2_CFLAGS)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -162,6 +172,21 @@ $(TEST_SYMBOL_PARAMS): $(SYMBOL_PARAMS_TEST_OBJS) $(LIB)
 test-symbol-params: $(TEST_SYMBOL_PARAMS)
 	./$(TEST_SYMBOL_PARAMS) .
 
+$(TEST_CAD_SYMBOLS): $(CAD_SYMBOLS_TEST_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CAD_SYMBOLS_TEST_OBJS) $(LIB) \
+	    $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-cad-symbols: $(TEST_CAD_SYMBOLS)
+	./$(TEST_CAD_SYMBOLS) .
+
+$(TEST_CONSOLE_CMD): $(CONSOLE_CMD_TEST_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CONSOLE_CMD_TEST_OBJS) -lm $(LDFLAGS) -o $@
+
+test-console-cmd: $(TEST_CONSOLE_CMD)
+	./$(TEST_CONSOLE_CMD)
+
 run: $(DEMO)
 	./$(DEMO)
 
@@ -181,7 +206,9 @@ example-gtk4: lib
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
-test: test-symbol-geometry test-panel-layout test-panel-deck test-overlay test-drawing-load test-symbol-params test-symbols test-viewport $(TEST)
+test: test-symbol-geometry test-panel-layout test-panel-deck test-overlay \
+      test-drawing-load test-symbol-params test-console-cmd test-cad-symbols \
+      test-symbols test-viewport $(TEST)
 	./$(TEST) .
 
 install: all
@@ -230,8 +257,11 @@ clean:
 
 -include $(LIB_OBJS:.o=.d) $(SDL_HOST_OBJS:.o=.d) $(DEMO_OBJS:.o=.d) \
          $(TEST_OBJS:.o=.d) $(BUILD)/tests/test_symbol_geometry.d \
-         $(TEST_SYMBOLS_OBJS:.o=.d) $(TEST_VIEWPORT_OBJS:.o=.d)
+         $(TEST_SYMBOLS_OBJS:.o=.d) $(TEST_VIEWPORT_OBJS:.o=.d) \
+         $(SYMBOL_PARAMS_TEST_OBJS:.o=.d) $(CAD_SYMBOLS_TEST_OBJS:.o=.d) \
+         $(CONSOLE_CMD_TEST_OBJS:.o=.d)
 
-.PHONY: all lib sdl-host run test test-symbol-geometry test-symbols \
-        test-viewport check-sdl-free example-qt6 example-gtk4 \
-        install uninstall clean
+.PHONY: all lib sdl-host run test test-symbol-geometry test-panel-layout \
+        test-panel-deck test-overlay test-drawing-load test-symbol-params \
+        test-console-cmd test-cad-symbols test-symbols test-viewport \
+        check-sdl-free example-qt6 example-gtk4 install uninstall clean

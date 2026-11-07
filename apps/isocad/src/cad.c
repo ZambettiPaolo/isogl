@@ -390,9 +390,11 @@ int cad_document_init(CadDocument *doc, isogl_font_data *font, float sheet_scale
 void cad_document_free(CadDocument *doc) {
     if (!doc) return;
 
-    /* Symbols are isogl-owned; the document owns only their references. */
+    /* Symbols are isogl-owned; the document keeps the ID, type pointer and an
+       owned parameter copy. */
     for (size_t i = 0; i < doc->symbol_count; ++i) {
-        isogl_symbol_destroy(doc->symbols[i]);
+        isogl_symbol_destroy(doc->symbols[i].id);
+        isogl_symbol_params_free(doc->symbols[i].params);
     }
     free(doc->symbols);
     doc->symbols = NULL;
@@ -410,17 +412,102 @@ void cad_document_free(CadDocument *doc) {
 int cad_document_add_symbol(CadDocument *doc, isogl_symbol_id symbol) {
     if (!doc || symbol == 0) return -1;
 
+    /* The parameter copy is the document's view of the symbol.  If it cannot
+       be obtained the symbol has no CAD-side record, so destroy it instead of
+       leaving an untracked live object. */
+    isogl_symbol_params *params = NULL;
+    if (isogl_symbol_params_get(symbol, &params) != 0 || !params) {
+        isogl_symbol_destroy(symbol);
+        return -1;
+    }
+
     if (doc->symbol_count == doc->symbol_capacity) {
         size_t capacity = doc->symbol_capacity ? doc->symbol_capacity * 2 : 8;
-        isogl_symbol_id *grown =
+        CadSymbolRef *grown =
             realloc(doc->symbols, capacity * sizeof(*grown));
-        if (!grown) return -1;
+        if (!grown) {
+            isogl_symbol_params_free(params);
+            isogl_symbol_destroy(symbol);
+            return -1;
+        }
         doc->symbols = grown;
         doc->symbol_capacity = capacity;
     }
 
-    doc->symbols[doc->symbol_count++] = symbol;
+    CadSymbolRef *ref = &doc->symbols[doc->symbol_count++];
+    ref->id = symbol;
+    ref->type = params->type;
+    ref->params = params;
     return 0;
+}
+
+CadSymbolRef *cad_symbol_find(CadDocument *doc, isogl_symbol_id symbol) {
+    if (!doc || symbol == 0) return NULL;
+    for (size_t i = 0; i < doc->symbol_count; ++i) {
+        if (doc->symbols[i].id == symbol) return &doc->symbols[i];
+    }
+    return NULL;
+}
+
+const CadSymbolRef *cad_symbol_find_const(const CadDocument *doc,
+                                          isogl_symbol_id symbol) {
+    if (!doc || symbol == 0) return NULL;
+    for (size_t i = 0; i < doc->symbol_count; ++i) {
+        if (doc->symbols[i].id == symbol) return &doc->symbols[i];
+    }
+    return NULL;
+}
+
+isogl_symbol_params *cad_symbol_params(const CadSymbolRef *ref) {
+    return ref ? ref->params : NULL;
+}
+
+int cad_symbol_update_params(CadDocument *doc, isogl_symbol_id symbol,
+                             const isogl_symbol_params *params) {
+    if (!doc || !params) return -1;
+
+    CadSymbolRef *ref = cad_symbol_find(doc, symbol);
+    if (!ref) return -1;
+
+    if (isogl_symbol_params_update(symbol, params) != 0) return -1;
+
+    /* Refresh the document copy from the registry so it carries the applied
+       global scale.  The update already committed; if the readback fails the
+       old copy is stale but the geometry and ID remain valid. */
+    isogl_symbol_params *fresh = NULL;
+    if (isogl_symbol_params_get(symbol, &fresh) != 0 || !fresh) return -1;
+
+    isogl_symbol_params_free(ref->params);
+    ref->params = fresh;
+    ref->type = fresh->type;
+    return 0;
+}
+
+int cad_remove_symbol(CadDocument *doc, isogl_symbol_id symbol) {
+    if (!doc || symbol == 0) return -1;
+
+    size_t index = doc->symbol_count;
+    for (size_t i = 0; i < doc->symbol_count; ++i) {
+        if (doc->symbols[i].id == symbol) {
+            index = i;
+            break;
+        }
+    }
+    if (index == doc->symbol_count) return -1;
+
+    /* Destroy first: once the registry entry is gone the record cannot be
+       used, so the CAD copy is removed unconditionally afterwards. */
+    int rc = isogl_symbol_destroy(symbol);
+    isogl_symbol_params_free(doc->symbols[index].params);
+
+    /* Preserve document order; the list is small and stable ordering keeps
+       `sym list` deterministic. */
+    if (index + 1 < doc->symbol_count) {
+        memmove(&doc->symbols[index], &doc->symbols[index + 1],
+                (doc->symbol_count - index - 1) * sizeof(doc->symbols[0]));
+    }
+    doc->symbol_count--;
+    return rc;
 }
 
 static int cad_symbol_style(CadDocument *doc, int layer,
@@ -453,10 +540,8 @@ isogl_symbol_id cad_add_dimension_symbol(CadDocument *doc, int layer,
 
     isogl_symbol_id id = isogl_symbol_create_dimension(&d);
     if (id == 0) return 0;
-    if (cad_document_add_symbol(doc, id) != 0) {
-        isogl_symbol_destroy(id);
-        return 0;
-    }
+    /* On failure cad_document_add_symbol() already destroyed the symbol. */
+    if (cad_document_add_symbol(doc, id) != 0) return 0;
     return id;
 }
 
@@ -473,10 +558,8 @@ isogl_symbol_id cad_add_center_mark_symbol(CadDocument *doc, int layer,
 
     isogl_symbol_id id = isogl_symbol_create_center_mark(&d);
     if (id == 0) return 0;
-    if (cad_document_add_symbol(doc, id) != 0) {
-        isogl_symbol_destroy(id);
-        return 0;
-    }
+    /* On failure cad_document_add_symbol() already destroyed the symbol. */
+    if (cad_document_add_symbol(doc, id) != 0) return 0;
     return id;
 }
 
@@ -683,4 +766,161 @@ void cad_document_rebuild_text(CadDocument *doc) {
         if (entity->type != CAD_TEXT) continue;
         cad_text_append(doc, entity);
     }
+}
+
+/* ---- schema-v2 symbol section writer (save only) ----------------------- */
+
+static int cad_write_double(FILE *out, double value) {
+    if (!isfinite(value)) return -1;
+    char buffer[64];
+    int n = snprintf(buffer, sizeof(buffer), "%.17g", value);
+    if (n < 0 || (size_t)n >= sizeof(buffer)) return -1;
+    /* TOML distinguishes integers from floats: force a decimal point. */
+    if (!strpbrk(buffer, ".eE")) {
+        if ((size_t)n + 2 >= sizeof(buffer)) return -1;
+        buffer[n++] = '.';
+        buffer[n++] = '0';
+        buffer[n] = '\0';
+    }
+    return fputs(buffer, out) < 0 ? -1 : 0;
+}
+
+static int cad_write_string(FILE *out, const char *text) {
+    if (!text) text = "";
+    if (fputc('"', out) == EOF) return -1;
+    for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+        switch (*p) {
+            case '"': if (fputs("\\\"", out) < 0) return -1; break;
+            case '\\': if (fputs("\\\\", out) < 0) return -1; break;
+            case '\n': if (fputs("\\n", out) < 0) return -1; break;
+            case '\r': if (fputs("\\r", out) < 0) return -1; break;
+            case '\t': if (fputs("\\t", out) < 0) return -1; break;
+            default:
+                if (*p < 0x20) {
+                    if (fprintf(out, "\\u%04X", *p) < 0) return -1;
+                } else if (fputc(*p, out) == EOF) {
+                    return -1;
+                }
+                break;
+        }
+    }
+    return fputc('"', out) == EOF ? -1 : 0;
+}
+
+static int cad_write_param(FILE *out, const isogl_symbol_param *p) {
+    const isogl_symbol_param_desc *desc = p ? p->desc : NULL;
+    if (!desc) return -1;
+
+    if (fprintf(out, "%s = ", desc->key) < 0) return -1;
+    int rc = 0;
+
+    switch (desc->kind) {
+        case ISOGL_SYM_PARAM_POINTS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputc(',', out) == EOF) return -1;
+                if (fputs("[", out) < 0 ||
+                    cad_write_double(out, p->value.points[i].x) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    cad_write_double(out, p->value.points[i].y) != 0 ||
+                    fputs("]", out) < 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_TEXTS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (cad_write_string(out, p->value.texts[i]) != 0) return -1;
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_SEGMENTS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                const isogl_symbol_segment *s = &p->value.segments[i];
+                if (i > 0 && fputc(',', out) == EOF) return -1;
+                if (fputs("[", out) < 0 ||
+                    cad_write_double(out, s->x0) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    cad_write_double(out, s->y0) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    cad_write_double(out, s->x1) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    cad_write_double(out, s->y1) != 0 ||
+                    fputs("]", out) < 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_NUMBER:
+            rc = cad_write_double(out, p->value.number);
+            break;
+
+        case ISOGL_SYM_PARAM_INTEGER:
+        case ISOGL_SYM_PARAM_ENUM:
+            rc = fprintf(out, "%d", p->value.integer) < 0 ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_BOOLEAN:
+            rc = fputs(p->value.boolean ? "true" : "false", out) < 0 ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_COLOR:
+            if (fputc('[', out) == EOF) return -1;
+            for (int i = 0; i < 4; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (cad_write_double(out, p->value.color[i]) != 0) return -1;
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_SCALE:
+            /* Global sheet scale; never saved per symbol. */
+            return 0;
+
+        default:
+            return -1;
+    }
+    return rc;
+}
+
+int cad_symbols_write_v2(FILE *out, const CadDocument *doc) {
+    if (!out || !doc) return -1;
+
+    for (size_t i = 0; i < doc->symbol_count; ++i) {
+        const CadSymbolRef *ref = &doc->symbols[i];
+        if (!ref->params || !ref->type || !ref->type->name) continue;
+
+        if (fputs("[[symbols]]\ntype = ", out) < 0 ||
+            cad_write_string(out, ref->type->name) != 0 ||
+            fputs("\ngroup = 0\n\n[symbols.params]\n", out) < 0) {
+            return -1;
+        }
+
+        for (size_t j = 0; j < ref->params->param_count; ++j) {
+            const isogl_symbol_param *p = &ref->params->params[j];
+            if (!p->desc) return -1;
+            if (p->desc->kind == ISOGL_SYM_PARAM_SCALE) continue;
+            if (cad_write_param(out, p) != 0) return -1;
+            if (fputc('\n', out) == EOF) return -1;
+        }
+        if (fputc('\n', out) == EOF) return -1;
+    }
+    return ferror(out) ? -1 : 0;
+}
+
+int cad_save_symbols_v2(const char *path, const CadDocument *doc) {
+    if (!path || !doc) return -1;
+    FILE *out = fopen(path, "w");
+    if (!out) return -1;
+    int rc = cad_symbols_write_v2(out, doc);
+    if (fclose(out) != 0) rc = -1;
+    return rc;
 }

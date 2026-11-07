@@ -6,6 +6,7 @@
 #include <isogl/glad.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define CAD_MAX_LAYERS 8
 
@@ -40,6 +41,19 @@ typedef struct {
     } geom;
 } CadEntity;
 
+/*
+ * CAD-side record for an isogl-owned symbol.  The registry keeps ownership of
+ * the live geometry; the document keeps an opaque ID plus a deep copy of the
+ * typed parameters and a pointer to the persistent C type descriptor.  The
+ * parameter copy is what the property UI, save and undo operate on; it is not
+ * a copy of the symbol's segments.
+ */
+typedef struct {
+    isogl_symbol_id id;
+    const isogl_symbol_type *type;  /* from params_get; type registry persists */
+    isogl_symbol_params *params;    /* owned deep copy, applied sheet scale */
+} CadSymbolRef;
+
 typedef struct {
     CadLayer layers[CAD_MAX_LAYERS];
     int layer_count;
@@ -47,7 +61,7 @@ typedef struct {
     size_t count;
     size_t capacity;
     uint32_t next_id;              /* monotonic CAD entity ID */
-    isogl_symbol_id *symbols;      /* refs to isogl-owned symbols */
+    CadSymbolRef *symbols;         /* refs to isogl-owned symbols */
     size_t symbol_count;
     size_t symbol_capacity;
     isogl_vbo_array parts;
@@ -85,8 +99,48 @@ isogl_symbol_id cad_add_dimension_symbol(CadDocument *doc, int layer,
 isogl_symbol_id cad_add_center_mark_symbol(CadDocument *doc, int layer,
                                            const IsoglCenterMarkDesc *desc);
 
-/* Append an existing symbol reference to the document (low-level helper). */
+/*
+ * Append an existing symbol reference to the document (low-level helper).
+ * On entry the symbol is isogl-owned; on success the document stores its ID,
+ * type and a deep copy of its current parameters.  On failure the symbol is
+ * destroyed and no reference is appended.
+ */
 int cad_document_add_symbol(CadDocument *doc, isogl_symbol_id symbol);
+
+/* Look up a symbol reference by ID.  The returned pointer is invalidated by
+ * append/remove; the ID itself stays stable. */
+CadSymbolRef *cad_symbol_find(CadDocument *doc, isogl_symbol_id symbol);
+const CadSymbolRef *cad_symbol_find_const(const CadDocument *doc,
+                                          isogl_symbol_id symbol);
+
+/* Parameter copy owned by the reference; never NULL for a live reference. */
+isogl_symbol_params *cad_symbol_params(const CadSymbolRef *ref);
+
+/*
+ * Replace a symbol's typed parameters.  Calls isogl_symbol_params_update()
+ * (ID, pick ID and selection are preserved) and then refreshes the document's
+ * parameter copy with a fresh params_get() so it reflects the applied global
+ * sheet scale.  On failure the reference keeps its previous copy.
+ */
+int cad_symbol_update_params(CadDocument *doc, isogl_symbol_id symbol,
+                             const isogl_symbol_params *params);
+
+/*
+ * Destroy the isogl-owned symbol, free the document's parameter copy and
+ * remove the reference.  The symbol ID is not reused.  Callers that keep a
+ * persistent selection must drop the matching CAD_SEL_SYMBOL entries.
+ */
+int cad_remove_symbol(CadDocument *doc, isogl_symbol_id symbol);
+
+/*
+ * Write a schema-v2 symbol section ([[symbols]] with type, group = 0 and
+ * [symbols.params]) using only stdio and the public parameter metadata.  The
+ * SCALE parameter is omitted because the sheet scale is global.  This is a
+ * save-only writer: isocad has no TOML parser and cannot load a full drawing.
+ * Return 0 on success, -1 on I/O or metadata failure.
+ */
+int cad_symbols_write_v2(FILE *out, const CadDocument *doc);
+int cad_save_symbols_v2(const char *path, const CadDocument *doc);
 
 /*
  * Area selection for CAD entities in paper mm.  contained receives entities

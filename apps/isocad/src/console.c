@@ -138,6 +138,19 @@ int isocad_console_enter(IsocadConsole *c) {
     return 1;
 }
 
+void isocad_console_echo(IsocadConsole *c, const char *line) {
+    if (!c || !line || line[0] == '\0') return;
+
+    for (size_t i = ISOCAD_CONSOLE_HISTORY_LINES - 1; i > 0; --i) {
+        memcpy(c->history[i], c->history[i - 1], sizeof(c->history[i]));
+    }
+    snprintf(c->history[0], sizeof(c->history[0]), "%s", line);
+    if (c->history_count < ISOCAD_CONSOLE_HISTORY_LINES) {
+        c->history_count++;
+    }
+    c->dirty = 1;
+}
+
 void isocad_console_clear_input(IsocadConsole *c) {
     if (!c || c->input_len == 0) return;
     c->input[0] = '\0';

@@ -52,6 +52,10 @@ void isocad_console_backspace(IsocadConsole *c);
 int  isocad_console_enter(IsocadConsole *c);   /* 1 if a line was echoed */
 void isocad_console_clear_input(IsocadConsole *c);
 
+/* Push a result line into history (shifting the three history lines) without
+ * touching the input line.  The line is truncated to the console width. */
+void isocad_console_echo(IsocadConsole *c, const char *line);
+
 /* Emit the text lines into the overlay group when the content or layout
  * changed.  The overlay draws them later. */
 void isocad_console_emit(IsocadConsole *c, const isogl_panel_layout *layout);
