@@ -51,6 +51,8 @@ TEST_OVERLAY_OBJS := $(TEST_OVERLAY_SRCS:%.c=$(BUILD)/%.o)
 TEST_DRAWING_LOAD := $(BUILD)/test-drawing-load
 DRAWING_LOAD_TEST_OBJS := $(BUILD)/tests/test_drawing_load.o \
                           $(BUILD)/examples/demo/drawing_load.o
+TEST_SYMBOL_PARAMS := $(BUILD)/test-symbol-params
+SYMBOL_PARAMS_TEST_OBJS := $(BUILD)/tests/test_symbol_params.o
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
 SYMBOL_SRC := src/isogl_symbol.c
@@ -77,7 +79,8 @@ sdl-host: $(SDL_HOST_LIB)
 # library objects are compiled without them: a stray SDL include fails the
 # build by construction.
 $(SDL_HOST_OBJS) $(DEMO_OBJS) $(TEST_OBJS) $(TEST_SYMBOLS_OBJS) \
-    $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS) $(DRAWING_LOAD_TEST_OBJS): TARGET_CFLAGS := $(SDL2_CFLAGS)
+    $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS) $(DRAWING_LOAD_TEST_OBJS) \
+    $(SYMBOL_PARAMS_TEST_OBJS): TARGET_CFLAGS := $(SDL2_CFLAGS)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -151,6 +154,14 @@ $(TEST_DRAWING_LOAD): $(DRAWING_LOAD_TEST_OBJS) $(LIB)
 test-drawing-load: $(TEST_DRAWING_LOAD)
 	./$(TEST_DRAWING_LOAD) .
 
+$(TEST_SYMBOL_PARAMS): $(SYMBOL_PARAMS_TEST_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(SYMBOL_PARAMS_TEST_OBJS) $(LIB) \
+	    $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-symbol-params: $(TEST_SYMBOL_PARAMS)
+	./$(TEST_SYMBOL_PARAMS) .
+
 run: $(DEMO)
 	./$(DEMO)
 
@@ -170,7 +181,7 @@ example-gtk4: lib
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
-test: test-symbol-geometry test-panel-layout test-panel-deck test-overlay test-drawing-load test-symbols test-viewport $(TEST)
+test: test-symbol-geometry test-panel-layout test-panel-deck test-overlay test-drawing-load test-symbol-params test-symbols test-viewport $(TEST)
 	./$(TEST) .
 
 install: all

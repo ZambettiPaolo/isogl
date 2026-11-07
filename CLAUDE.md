@@ -294,44 +294,67 @@ distrutto resta morto (tombstone).
 | Funzione | Contratto |
 |---|---|
 | `isogl_symbol_init(font)` / `cleanup()` | registry GL; il font deve sopravvivere; cleanup prima di `isogl_cleanup()` |
-| `isogl_symbol_create_dimension/center_mark` | copia il descrittore, genera render+pick, crea VBO/stringa; ritorna ID o 0 |
-| `isogl_symbol_update_dimension/center_mark` | rigenera in place, conserva ID/pick/selezione; richiede il descrittore completo; non transazionale VBO+testo |
-| `isogl_symbol_destroy(id)` | rimuove VBO/stringa e invalida l'ID |
+| `isogl_symbol_register_type(type)` / `find_type` / `type_count` / `type_at` | registry pubblico dei tipi C; nomi duplicati rifiutati; `dimension`/`center_mark` registrati all'init |
+| `isogl_symbol_create(type_name, params, scale)` | crea un'istanza di un tipo C registrato; copia i parametri; genera render+pick |
+| `isogl_symbol_params_create/free` | alloca/libera un set di parametri conforme allo schema del tipo |
+| `isogl_symbol_params_get(id, &out)` | copia profonda dei parametri correnti e della scala di contesto |
+| `isogl_symbol_params_update(id, params)` | rigenera in place da parametri tipizzati; conserva ID, pick e selezione |
+| `isogl_symbol_params_set_text(...)` | sostituisce un elemento testo con copia UTF-8 |
+| `isogl_symbol_create_dimension/center_mark` | wrapper compatibili che costruiscono i parametri generici |
+| `isogl_symbol_update_dimension/center_mark` | wrapper compatibili; la scala resta quella del simbolo (sola lettura) |
+| `isogl_symbol_destroy(id)` | rimuove VBO/stringhe e invalida l'ID |
 | `isogl_symbol_draw_all()` | disegna tutti i simboli vivi; non esiste un filtro di visibilità per simbolo |
 | `isogl_symbol_pick_at(px,py,extent,...)` | pick GPU sul registry; ritorna gli ID simbolo; non legge `CadDocument.symbols` |
 | `isogl_symbol_hit/bounds` | geometria analitica di **pick**; con `pick_text = 0` il testo è escluso, quindi bounds è più piccolo del render |
-| `isogl_symbol_set/get_selected` | flag persistente su VBO e stringa |
+| `isogl_symbol_set/get_selected` | flag persistente su VBO e stringhe |
 | `isogl_symbol_explode(id, out)` | riemette geometria render e distrugge il simbolo; se l'emitter fallisce il simbolo resta vivo. Gli item emessi non hanno ID CAD |
 
-**Regola CAD.** Il CAD può trattare l'ID come handle opaco e leggere solo ID,
-`hit`/`bounds`/`pick_at`/`get_selected` e gli item di `explode`. Non può leggere
-o conservare VBO, glyph string, descrittore, tipo, control point o geometria
-interna. Oggi **non esiste** un getter ID-addressed di questi dati.
-
-**Lacune documentate.** Mancano: getter di tipo/descrittore, API di control
-point/handle, enumerazione per ID degli item render/pick, setter parziali,
-rimozione/explode lato isocad. Per modificare un simbolo il CAD deve conservare
-o ricostruire il descrittore completo. `isocad` oggi conserva solo gli ID e
-scarta i descrittori dopo la creazione, quindi non può ancora modificare i
-simboli.
-
-**Direzione futura preferita (senza toccare isogl).** Sostituire
-`isogl_symbol_id *symbols` con un record CAD:
+Il tipo C dichiara i parametri e le descrizioni per l'editor:
 
 ```c
 typedef struct {
-    isogl_symbol_id id;
-    CadSymbolType type;          /* dimension | center mark */
-    union {
-        IsoglDimensionDesc dimension;
-        IsoglCenterMarkDesc center_mark;
-    } desc;
-} CadSymbolRef;
+    const char *key, *label, *help, *unit;
+    isogl_symbol_param_kind kind;
+    size_t min_count, max_count;
+    int editable;
+} isogl_symbol_param_desc;
+
+typedef struct isogl_symbol_type {
+    const char *name, *label, *description;
+    const isogl_symbol_param_desc *params;
+    size_t param_count;
+    int (*init_params)(isogl_symbol_params *);
+    int (*validate)(const isogl_symbol_params *);
+    int (*generate)(const isogl_symbol_params *,
+                    const isogl_symbol_gen_context *,
+                    IsoglSymEmitter *, IsoglSymPickEmitter *);
+} isogl_symbol_type;
 ```
 
-e aggiungere `cad_update_*_symbol`, `cad_remove_symbol`,
-`cad_explode_symbol`. Solo se servirà un contratto generico si aggiungeranno
-getter isogl per tipo, descrittore, control point e item di pick.
+I parametri sono liste tipizzate (`POINTS`, `TEXTS`, `SEGMENTS`), scalari
+(`NUMBER`, `INTEGER`, `BOOLEAN`, `ENUM`, `COLOR`) e la `SCALE` di contesto in
+sola lettura. Dimension e center mark sono adapter sui generatori puri
+esistenti; un tipo custom è nuovo codice C registrato dall'app.
+
+**Regola CAD.** Il CAD può leggere i metadati del tipo e i valori correnti con
+`params_get`/`type_at`, e modificare con `params_update`. Non può leggere VBO,
+glyph string o segmenti interni; l'ID resta l'handle per pick/selezione/explode.
+La scala è di contesto e non è modificabile dai parametri.
+
+**Lacune e passi successivi.** Restano: `isogl_symbol_set_sheet_scale()` con
+rigenerazione globale (slice 2); file v2 con `type` + `[symbols.params]` e
+skip/preservazione dei tipi sconosciuti (slice 3); pannello proprietà e
+`CadSymbolRef` in isocad; aggiornamento atomico VBO+stringhe (oggi il percorso
+generico crea prima le stringhe nuove, ma un fallimento in append può lasciare
+uno stato parziale); ridimensionamento dinamico delle liste (in v1 i tipi
+built-in hanno lunghezze fisse min=max); `isocad` conserva ancora solo gli ID e
+non usa `params_get`.
+
+**Direzione CAD.** `CadSymbolRef` conterrà il nome del tipo e una copia di
+`isogl_symbol_params` (o li interrogherà con `params_get`) per salvataggio,
+undo e pannello proprietà; `cad_update_*_symbol` chiamerà `params_update`,
+`cad_remove_symbol`/`cad_explode_symbol` aggiorneranno il documento senza
+lasciare ID morti.
 
 ## Overlay e pannelli
 
@@ -375,7 +398,8 @@ quad spessi.
 
 Test: `make test-panel-layout` (headless), `make test-panel-deck` (headless),
 `make test-overlay` (GL, FBO), `make test-drawing-load` (GL, loader gerarchico
-e simboli). `apps/isocad/src/panels.c` compone i gruppi icona, le pagine e il
+e simboli), `make test-symbol-params` (GL, registry tipi C e parametri).
+`apps/isocad/src/panels.c` compone i gruppi icona, le pagine e il
 tooltip; `console.c` emette le righe nel gruppo testo.
 
 Il testo dell'overlay è disegnato con
@@ -603,6 +627,7 @@ make test-panel-layout      # headless: layout pannelli, niente GL/SDL
 make test-panel-deck        # headless: slot e parcheggio pagine, niente GL/SDL
 make test-overlay           # GL: overlay a gruppi, batch, clip, testo
 make test-drawing-load      # GL: loader TOML gerarchico + simboli
+make test-symbol-params     # GL: registry tipi C, parametri, get/update
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
 make test                   # geometry + layout + deck + overlay + drawing + symbols + viewport + core

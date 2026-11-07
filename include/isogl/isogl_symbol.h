@@ -21,6 +21,120 @@ extern "C" {
 
 typedef uint32_t isogl_symbol_id;
 
+/* ---- Generic, C-defined symbol types ------------------------------------
+ *
+ * A symbol type is code: it declares a parameter schema (with UI metadata),
+ * validates values and generates render/pick items.  The file format stores
+ * type name + parameter values only; it never defines generation logic.
+ * The type descriptor and its strings must outlive every symbol using it.
+ */
+
+typedef enum {
+    ISOGL_SYM_PARAM_POINTS = 0,  /* list of isogl_symbol_point */
+    ISOGL_SYM_PARAM_TEXTS,       /* list of UTF-8 strings           */
+    ISOGL_SYM_PARAM_SEGMENTS,    /* list of isogl_symbol_segment    */
+    ISOGL_SYM_PARAM_SCALE,       /* read-only sheet scale (number)  */
+    ISOGL_SYM_PARAM_NUMBER,
+    ISOGL_SYM_PARAM_INTEGER,
+    ISOGL_SYM_PARAM_BOOLEAN,
+    ISOGL_SYM_PARAM_ENUM,
+    ISOGL_SYM_PARAM_COLOR        /* float[4]                        */
+} isogl_symbol_param_kind;
+
+typedef struct {
+    const char *key;             /* stable key for files/UI */
+    const char *label;           /* human-readable name */
+    const char *help;            /* optional description; may be NULL */
+    const char *unit;            /* "mm", "deg", ""; may be NULL */
+    isogl_symbol_param_kind kind;
+    size_t min_count;            /* lists: minimum elements */
+    size_t max_count;            /* lists: maximum; 0 = unbounded. Scalars: 1 */
+    int editable;                /* 0 for scale and derived values */
+} isogl_symbol_param_desc;
+
+typedef struct {
+    double x, y;
+} isogl_symbol_point;
+
+typedef struct {
+    double x0, y0, x1, y1;
+} isogl_symbol_segment;
+
+typedef struct {
+    const isogl_symbol_param_desc *desc;  /* points into the type schema */
+    size_t count;                         /* 1 for scalars */
+    union {
+        isogl_symbol_point *points;
+        char **texts;                     /* owned UTF-8 strings */
+        isogl_symbol_segment *segments;
+        double number;                    /* NUMBER and SCALE */
+        int integer;
+        int boolean;
+        float color[4];
+    } value;
+} isogl_symbol_param;
+
+struct isogl_symbol_type;
+
+typedef struct {
+    const struct isogl_symbol_type *type; /* not owned */
+    isogl_symbol_param *params;           /* owned array, param_count entries */
+    size_t param_count;
+    double sheet_scale;                   /* read-only context copy */
+} isogl_symbol_params;
+
+typedef struct {
+    const isogl_font_data *font;          /* not owned; may be NULL */
+    double sheet_scale;
+} isogl_symbol_gen_context;
+
+typedef struct isogl_symbol_type {
+    const char *name;                     /* stable, e.g. "dimension" */
+    const char *label;                    /* UI name */
+    const char *description;              /* UI description; may be NULL */
+    const isogl_symbol_param_desc *params;
+    size_t param_count;
+
+    /* Optional: fill defaults after isogl_symbol_params_create(). */
+    int (*init_params)(isogl_symbol_params *params);
+    /* Validate all parameter values; return 0/-1. */
+    int (*validate)(const isogl_symbol_params *params);
+    /* Pure generation: no GL. Emit render and pick items. */
+    int (*generate)(const isogl_symbol_params *params,
+                    const isogl_symbol_gen_context *ctx,
+                    IsoglSymEmitter *render,
+                    IsoglSymPickEmitter *pick);
+} isogl_symbol_type;
+
+int isogl_symbol_register_type(const isogl_symbol_type *type);
+const isogl_symbol_type *isogl_symbol_find_type(const char *name);
+size_t isogl_symbol_type_count(void);
+const isogl_symbol_type *isogl_symbol_type_at(size_t index);
+
+/* Create an instance of a registered C-defined type.  sheet_scale is copied
+ * into params->sheet_scale and passed to the generator. */
+isogl_symbol_id isogl_symbol_create(const char *type_name,
+                                    const isogl_symbol_params *params,
+                                    double sheet_scale);
+
+/* Allocate params matching the type schema.  Lists start at min_count,
+ * scalars at zero; init_params() fills type defaults. */
+isogl_symbol_params *isogl_symbol_params_create(const char *type_name);
+void isogl_symbol_params_free(isogl_symbol_params *params);
+
+/* Deep copy the current parameters of a live symbol. */
+int isogl_symbol_params_get(isogl_symbol_id id, isogl_symbol_params **out);
+
+/* Replace all parameters of a live symbol, regenerating it in place.  ID,
+ * pick ID and the selection flag are preserved. */
+int isogl_symbol_params_update(isogl_symbol_id id,
+                               const isogl_symbol_params *params);
+
+/* Replace one text element, copying utf8 (NULL becomes ""). */
+int isogl_symbol_params_set_text(isogl_symbol_params *params,
+                                 size_t param_index, size_t element,
+                                 const char *utf8);
+
 /* font is used for dimension text layout; it must stay alive until cleanup. */
 int isogl_symbol_init(isogl_font_data *font);
 void isogl_symbol_cleanup(void);

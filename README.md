@@ -117,6 +117,7 @@ make test-panel-layout    # headless: matematica dei pannelli, niente GL/SDL
 make test-panel-deck      # headless: slot e parcheggio pagine, niente GL/SDL
 make test-overlay         # GL: overlay a gruppi, batch, clip, testo
 make test-drawing-load    # GL: loader TOML gerarchico + simboli
+make test-symbol-params   # GL: registry tipi C, parametri, get/update
 make test-symbols         # GL: fake CAD gerarchico + fixture TOML
 make test-viewport        # GL: viewport, coordinate, pick HiDPI, selezione
 make test                 # geometria + layout + deck + overlay + drawing + symbols + viewport + test FBO

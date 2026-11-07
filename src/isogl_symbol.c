@@ -6,25 +6,37 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum {
-    ISOGL_SYMBOL_DIMENSION = 0,
-    ISOGL_SYMBOL_CENTER_MARK = 1
-} IsoglSymbolType;
+/* ---- model -------------------------------------------------------------- */
+
+typedef struct {
+    char *utf8;
+    double x, y, height_mm, angle;
+    int align;
+    float color[4];
+} SymTextItem;
+
+typedef struct {
+    isogl_segment_list segments;
+    SymTextItem *texts;
+    size_t text_count, text_capacity;
+    IsoglSymPickItem *picks;
+    size_t pick_count, pick_capacity;
+} SymBuild;
 
 typedef struct {
     int alive;
     int visible;
     int selected;
-    IsoglSymbolType type;
-    union {
-        IsoglDimensionDesc dimension;
-        IsoglCenterMarkDesc center_mark;
-    } desc;
+    const isogl_symbol_type *type;
+    isogl_symbol_params params;
+    double sheet_scale;
     GLuint vbo_id;
+    IsoglSymPickItem *picks;
+    size_t pick_count;
 } IsoglSymbol;
 
 static IsoglSymbol *symbols = NULL;
-static size_t symbol_slots = 0;       /* highest assigned ID */
+static size_t symbol_slots = 0;
 static size_t symbol_capacity = 0;
 static uint32_t next_symbol_id = 1;
 static isogl_vbo_array symbol_parts;
@@ -32,8 +44,20 @@ static isogl_string_list symbol_strings;
 static isogl_font_data *symbol_font = NULL;
 static int symbol_initialized = 0;
 
-static IsoglSymbol *sym_get(isogl_symbol_id id) {
-    if (id == 0 || (size_t)id > symbol_slots) return NULL;
+static const isogl_symbol_type **symbol_types = NULL;
+static size_t symbol_type_count = 0;
+static size_t symbol_type_capacity = 0;
+static int builtins_registered = 0;
+
+static char *sym_strdup(const char *text) {
+    if (!text) text = "";
+    size_t length = strlen(text) + 1;
+    char *copy = malloc(length);
+    if (copy) memcpy(copy, text, length);
+    return copy;
+}
+
+static IsoglSymbol *sym_get(isogl_symbol_id id) {    if (id == 0 || (size_t)id > symbol_slots) return NULL;
     IsoglSymbol *s = &symbols[id - 1];
     return s->alive ? s : NULL;
 }
@@ -72,29 +96,692 @@ static IsoglSymbol *sym_new_record(isogl_symbol_id *out_id) {
     return s;
 }
 
-static double sym_text_width(void *user, const char *utf8, double height_mm) {
-    const IsoglDimensionDesc *d = user;
-    if (!symbol_font || !utf8 || height_mm <= 0.0) return 0.0;
+/* ---- parameter helpers -------------------------------------------------- */
 
-    double font_height = (double)symbol_font->height;
-    double scale = (d && d->sheet_scale > 0.0) ? d->sheet_scale : 1.0;
+static int sym_kind_is_list(isogl_symbol_param_kind kind) {
+    return kind == ISOGL_SYM_PARAM_POINTS ||
+           kind == ISOGL_SYM_PARAM_TEXTS ||
+           kind == ISOGL_SYM_PARAM_SEGMENTS;
+}
+
+static void sym_param_free(isogl_symbol_param *p) {
+    if (!p || !p->desc) return;
+    switch (p->desc->kind) {
+        case ISOGL_SYM_PARAM_POINTS:
+            free(p->value.points);
+            break;
+        case ISOGL_SYM_PARAM_TEXTS:
+            for (size_t i = 0; i < p->count; ++i) {
+                free(p->value.texts[i]);
+            }
+            free(p->value.texts);
+            break;
+        case ISOGL_SYM_PARAM_SEGMENTS:
+            free(p->value.segments);
+            break;
+        default:
+            break;
+    }
+}
+
+static int sym_param_resize(isogl_symbol_param *p, size_t count) {
+    if (!p || !p->desc) return -1;
+    if (!sym_kind_is_list(p->desc->kind)) {
+        return count == 1 ? 0 : -1;
+    }
+
+    switch (p->desc->kind) {
+        case ISOGL_SYM_PARAM_POINTS: {
+            isogl_symbol_point *items = NULL;
+            if (count > 0) {
+                items = realloc(p->value.points, count * sizeof(*items));
+                if (!items) return -1;
+                if (count > p->count) {
+                    memset(items + p->count, 0,
+                           (count - p->count) * sizeof(*items));
+                }
+            } else {
+                free(p->value.points);
+            }
+            p->value.points = items;
+            break;
+        }
+        case ISOGL_SYM_PARAM_SEGMENTS: {
+            isogl_symbol_segment *items = NULL;
+            if (count > 0) {
+                items = realloc(p->value.segments, count * sizeof(*items));
+                if (!items) return -1;
+                if (count > p->count) {
+                    memset(items + p->count, 0,
+                           (count - p->count) * sizeof(*items));
+                }
+            } else {
+                free(p->value.segments);
+            }
+            p->value.segments = items;
+            break;
+        }
+        case ISOGL_SYM_PARAM_TEXTS: {
+            char **items = NULL;
+            if (count > 0) {
+                items = calloc(count, sizeof(*items));
+                if (!items) return -1;
+            }
+            size_t keep = count < p->count ? count : p->count;
+            for (size_t i = 0; i < keep; ++i) items[i] = p->value.texts[i];
+            for (size_t i = count; i < p->count; ++i) free(p->value.texts[i]);
+            for (size_t i = keep; i < count; ++i) {
+                items[i] = malloc(1);
+                if (!items[i]) {
+                    for (size_t j = 0; j < count; ++j) free(items[j]);
+                    free(items);
+                    return -1;
+                }
+                items[i][0] = '\0';
+            }
+            free(p->value.texts);
+            p->value.texts = items;
+            break;
+        }
+        default:
+            return -1;
+    }
+
+    p->count = count;
+    return 0;
+}
+
+static void sym_params_free_contents(isogl_symbol_params *params) {
+    if (!params) return;
+    if (params->params) {
+        for (size_t i = 0; i < params->param_count; ++i) {
+            sym_param_free(&params->params[i]);
+        }
+    }
+    free(params->params);
+    memset(params, 0, sizeof(*params));
+}
+
+static int sym_params_alloc(const isogl_symbol_type *type,
+                            isogl_symbol_params *out, double sheet_scale) {
+    if (!type || !out) return -1;
+    memset(out, 0, sizeof(*out));
+    out->type = type;
+    out->param_count = type->param_count;
+    out->sheet_scale = sheet_scale > 0.0 ? sheet_scale : 1.0;
+    out->params = calloc(type->param_count, sizeof(isogl_symbol_param));
+    if (!out->params) return -1;
+
+    for (size_t i = 0; i < type->param_count; ++i) {
+        const isogl_symbol_param_desc *desc = &type->params[i];
+        isogl_symbol_param *p = &out->params[i];
+        p->desc = desc;
+
+        if (sym_kind_is_list(desc->kind)) {
+            if (sym_param_resize(p, desc->min_count) != 0) {
+                sym_params_free_contents(out);
+                return -1;
+            }
+        } else {
+            p->count = 1;
+            if (desc->kind == ISOGL_SYM_PARAM_COLOR) {
+                p->value.color[0] = 1.0f;
+                p->value.color[1] = 1.0f;
+                p->value.color[2] = 1.0f;
+                p->value.color[3] = 1.0f;
+            } else if (desc->kind == ISOGL_SYM_PARAM_SCALE) {
+                p->value.number = out->sheet_scale;
+            }
+        }
+    }
+
+    if (type->init_params && type->init_params(out) != 0) {
+        sym_params_free_contents(out);
+        return -1;
+    }
+    return 0;
+}
+
+static int sym_params_copy(const isogl_symbol_params *src,
+                           isogl_symbol_params *out, double sheet_scale) {
+    if (!src || !src->type || !out) return -1;
+    if (sym_params_alloc(src->type, out, sheet_scale) != 0) return -1;
+
+    for (size_t i = 0; i < src->param_count; ++i) {
+        const isogl_symbol_param *s = &src->params[i];
+        isogl_symbol_param *d = &out->params[i];
+        if (!s->desc || !d->desc || s->desc->kind != d->desc->kind) {
+            sym_params_free_contents(out);
+            return -1;
+        }
+
+        if (sym_kind_is_list(s->desc->kind)) {
+            if (sym_param_resize(d, s->count) != 0) {
+                sym_params_free_contents(out);
+                return -1;
+            }
+            if (s->desc->kind == ISOGL_SYM_PARAM_POINTS) {
+                if (s->count > 0) {
+                    memcpy(d->value.points, s->value.points,
+                           s->count * sizeof(isogl_symbol_point));
+                }
+            } else if (s->desc->kind == ISOGL_SYM_PARAM_SEGMENTS) {
+                if (s->count > 0) {
+                    memcpy(d->value.segments, s->value.segments,
+                           s->count * sizeof(isogl_symbol_segment));
+                }
+            } else {
+                for (size_t j = 0; j < s->count; ++j) {
+                    free(d->value.texts[j]);
+                    d->value.texts[j] =
+                        sym_strdup(s->value.texts[j] ? s->value.texts[j] : "");
+                    if (!d->value.texts[j]) {
+                        sym_params_free_contents(out);
+                        return -1;
+                    }
+                }
+            }
+        } else if (s->desc->kind == ISOGL_SYM_PARAM_COLOR) {
+            memcpy(d->value.color, s->value.color, sizeof(d->value.color));
+        } else if (s->desc->kind == ISOGL_SYM_PARAM_NUMBER ||
+                   s->desc->kind == ISOGL_SYM_PARAM_SCALE) {
+            d->value.number = s->value.number;
+        } else if (s->desc->kind == ISOGL_SYM_PARAM_INTEGER ||
+                   s->desc->kind == ISOGL_SYM_PARAM_BOOLEAN ||
+                   s->desc->kind == ISOGL_SYM_PARAM_ENUM) {
+            d->value.integer = s->value.integer;
+        }
+    }
+
+    out->sheet_scale = sheet_scale > 0.0 ? sheet_scale : out->sheet_scale;
+    for (size_t i = 0; i < out->param_count; ++i) {
+        if (out->params[i].desc &&
+            out->params[i].desc->kind == ISOGL_SYM_PARAM_SCALE) {
+            out->params[i].value.number = out->sheet_scale;
+        }
+    }
+    return 0;
+}
+
+static int sym_params_validate(const isogl_symbol_type *type,
+                               const isogl_symbol_params *params) {
+    if (!type || !params || params->type != type ||
+        params->param_count != type->param_count || !params->params) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < type->param_count; ++i) {
+        const isogl_symbol_param_desc *desc = &type->params[i];
+        const isogl_symbol_param *p = &params->params[i];
+        if (p->desc != desc) return -1;
+
+        if (sym_kind_is_list(desc->kind)) {
+            if (p->count < desc->min_count) return -1;
+            if (desc->max_count != 0 && p->count > desc->max_count) return -1;
+            if (desc->kind == ISOGL_SYM_PARAM_POINTS && p->count &&
+                !p->value.points) return -1;
+            if (desc->kind == ISOGL_SYM_PARAM_SEGMENTS && p->count &&
+                !p->value.segments) return -1;
+            if (desc->kind == ISOGL_SYM_PARAM_TEXTS && p->count &&
+                !p->value.texts) return -1;
+        } else if (p->count != 1) {
+            return -1;
+        }
+    }
+
+    return type->validate ? type->validate(params) : 0;
+}
+
+static int sym_params_set_text_internal(isogl_symbol_params *params,
+                                        size_t param_index, size_t element,
+                                        const char *utf8) {
+    if (!params || param_index >= params->param_count) return -1;
+    isogl_symbol_param *p = &params->params[param_index];
+    if (!p->desc || p->desc->kind != ISOGL_SYM_PARAM_TEXTS ||
+        element >= p->count) {
+        return -1;
+    }
+    char *copy = sym_strdup(utf8 ? utf8 : "");
+    if (!copy) return -1;
+    free(p->value.texts[element]);
+    p->value.texts[element] = copy;
+    return 0;
+}
+
+int isogl_symbol_params_set_text(isogl_symbol_params *params,
+                                 size_t param_index, size_t element,
+                                 const char *utf8) {
+    return sym_params_set_text_internal(params, param_index, element, utf8);
+}
+
+/* ---- built-in types: dimension and center mark -------------------------- */
+
+enum {
+    DIM_POINTS = 0, DIM_TEXTS, DIM_SEGMENTS, DIM_SCALE,
+    DIM_DISTANCE, DIM_TEXT_OFFSET, DIM_TEXT_HEIGHT,
+    DIM_PRECISION, DIM_PICK_TEXT, DIM_MARK_POINTS,
+    DIM_ARROW_LEFT, DIM_ARROW_RIGHT,
+    DIM_PATTERN, DIM_WEIGHT, DIM_LAYER, DIM_COLOR,
+    DIM_PARAM_COUNT
+};
+
+static const isogl_symbol_param_desc DIM_PARAMS[DIM_PARAM_COUNT] = {
+    [DIM_POINTS] = {
+        "points", "Punti misurati", "P1, P2, P3 del simbolo", "mm",
+        ISOGL_SYM_PARAM_POINTS, 3, 3, 1
+    },
+    [DIM_TEXTS] = {
+        "texts", "Testi", "Prefisso e suffisso del valore", "",
+        ISOGL_SYM_PARAM_TEXTS, 2, 2, 1
+    },
+    [DIM_SEGMENTS] = {
+        "segments", "Segmenti", "Non usati dalla quota", "",
+        ISOGL_SYM_PARAM_SEGMENTS, 0, 0, 0
+    },
+    [DIM_SCALE] = {
+        "scale", "Scala foglio", "Sola lettura; rigenera il simbolo", "1:n",
+        ISOGL_SYM_PARAM_SCALE, 1, 1, 0
+    },
+    [DIM_DISTANCE] = {
+        "distance", "Offset linea", "0 = ricavato da P3", "mm",
+        ISOGL_SYM_PARAM_NUMBER, 1, 1, 1
+    },
+    [DIM_TEXT_OFFSET] = {
+        "text_offset_mm", "Offset testo", "Lungo la linea di quota", "mm",
+        ISOGL_SYM_PARAM_NUMBER, 1, 1, 1
+    },
+    [DIM_TEXT_HEIGHT] = {
+        "text_height_mm", "Altezza testo", "Altezza ISO su carta", "mm",
+        ISOGL_SYM_PARAM_NUMBER, 1, 1, 1
+    },
+    [DIM_PRECISION] = {
+        "precision", "Decimali", "Cifre del valore automatico", "",
+        ISOGL_SYM_PARAM_INTEGER, 1, 1, 1
+    },
+    [DIM_PICK_TEXT] = {
+        "pick_text", "Testo selezionabile", "Include l'OBB del testo", "",
+        ISOGL_SYM_PARAM_BOOLEAN, 1, 1, 1
+    },
+    [DIM_MARK_POINTS] = {
+        "mark_points", "Punti di riferimento", "Segmento da 0.5 mm", "",
+        ISOGL_SYM_PARAM_BOOLEAN, 1, 1, 1
+    },
+    [DIM_ARROW_LEFT] = {
+        "arrow_left", "Freccia sinistra", "Stile della punta a P1", "",
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+    },
+    [DIM_ARROW_RIGHT] = {
+        "arrow_right", "Freccia destra", "Stile della punta a P2", "",
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+    },
+    [DIM_PATTERN] = {
+        "pattern", "Tipo linea ISO", "Pattern della quota", "",
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+    },
+    [DIM_WEIGHT] = {
+        "weight", "Peso ISO", "Spessore della quota", "",
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+    },
+    [DIM_LAYER] = {
+        "layer", "Layer", "Layer di stile", "",
+        ISOGL_SYM_PARAM_INTEGER, 1, 1, 1
+    },
+    [DIM_COLOR] = {
+        "color", "Colore", "Colore di stampa", "",
+        ISOGL_SYM_PARAM_COLOR, 1, 1, 1
+    }
+};
+
+enum {
+    CEN_POINTS = 0, CEN_TEXTS, CEN_SEGMENTS, CEN_SCALE,
+    CEN_SIZE, CEN_PATTERN, CEN_WEIGHT, CEN_LAYER, CEN_COLOR,
+    CEN_PARAM_COUNT
+};
+
+static const isogl_symbol_param_desc CEN_PARAMS[CEN_PARAM_COUNT] = {
+    [CEN_POINTS] = {
+        "points", "Punto centrale", "Centro del center mark", "mm",
+        ISOGL_SYM_PARAM_POINTS, 1, 1, 1
+    },
+    [CEN_TEXTS] = {
+        "texts", "Testi", "Non usati dal center mark", "",
+        ISOGL_SYM_PARAM_TEXTS, 0, 0, 0
+    },
+    [CEN_SEGMENTS] = {
+        "segments", "Segmenti", "Non usati dal center mark", "",
+        ISOGL_SYM_PARAM_SEGMENTS, 0, 0, 0
+    },
+    [CEN_SCALE] = {
+        "scale", "Scala foglio", "Sola lettura; rigenera il simbolo", "1:n",
+        ISOGL_SYM_PARAM_SCALE, 1, 1, 0
+    },
+    [CEN_SIZE] = {
+        "size_mm", "Dimensione", "Lunghezza braccio su carta", "mm",
+        ISOGL_SYM_PARAM_NUMBER, 1, 1, 1
+    },
+    [CEN_PATTERN] = {
+        "pattern", "Tipo linea ISO", "Pattern del center mark", "",
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+    },
+    [CEN_WEIGHT] = {
+        "weight", "Peso ISO", "Spessore del center mark", "",
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+    },
+    [CEN_LAYER] = {
+        "layer", "Layer", "Layer di stile", "",
+        ISOGL_SYM_PARAM_INTEGER, 1, 1, 1
+    },
+    [CEN_COLOR] = {
+        "color", "Colore", "Colore di stampa", "",
+        ISOGL_SYM_PARAM_COLOR, 1, 1, 1
+    }
+};
+
+static double sym_gen_text_width(void *user, const char *utf8,
+                                 double height_mm) {
+    const isogl_symbol_gen_context *ctx = user;
+    if (!ctx || !ctx->font || !utf8 || height_mm <= 0.0) return 0.0;
+
+    double font_height = (double)ctx->font->height;
     if (font_height <= 0.0) return 0.0;
 
-    return isogl_font_text_advance(symbol_font, utf8) * height_mm /
+    double scale = ctx->sheet_scale > 0.0 ? ctx->sheet_scale : 1.0;
+    return isogl_font_text_advance(ctx->font, utf8) * height_mm /
            (font_height * scale);
 }
 
-typedef struct {
-    isogl_segment_list segments;
-    int has_text;
-    char text[128];
-    double text_x, text_y, text_height_mm, text_angle;
-    double sheet_scale;
-} SymBuild;
+static int sym_dimension_init(isogl_symbol_params *params) {
+    if (!params || params->param_count != DIM_PARAM_COUNT) return -1;
+
+    for (size_t i = 0; i < 3; ++i) {
+        params->params[DIM_POINTS].value.points[i].x = 0.0;
+        params->params[DIM_POINTS].value.points[i].y = 0.0;
+    }
+    for (size_t i = 0; i < 2; ++i) {
+        sym_params_set_text_internal(params, DIM_TEXTS, i, "");
+    }
+    params->params[DIM_DISTANCE].value.number = 0.0;
+    params->params[DIM_TEXT_OFFSET].value.number = 0.0;
+    params->params[DIM_TEXT_HEIGHT].value.number = 3.5;
+    params->params[DIM_PRECISION].value.integer = 1;
+    params->params[DIM_PICK_TEXT].value.boolean = 1;
+    params->params[DIM_MARK_POINTS].value.boolean = 0;
+    params->params[DIM_ARROW_LEFT].value.integer = ISOGL_DIM_ARROW_OPEN;
+    params->params[DIM_ARROW_RIGHT].value.integer = ISOGL_DIM_ARROW_OPEN;
+    params->params[DIM_PATTERN].value.integer = 0;
+    params->params[DIM_WEIGHT].value.integer = LINE_THICKNESS_0_35;
+    params->params[DIM_LAYER].value.integer = 0;
+    params->params[DIM_COLOR].value.color[0] = 1.0f;
+    params->params[DIM_COLOR].value.color[1] = 1.0f;
+    params->params[DIM_COLOR].value.color[2] = 1.0f;
+    params->params[DIM_COLOR].value.color[3] = 1.0f;
+    return 0;
+}
+
+static int sym_dimension_validate(const isogl_symbol_params *params) {
+    if (!params || params->param_count != DIM_PARAM_COUNT) return -1;
+
+    const isogl_symbol_param *points = &params->params[DIM_POINTS];
+    const isogl_symbol_param *texts = &params->params[DIM_TEXTS];
+    if (points->count != 3 || texts->count != 2) return -1;
+
+    double height = params->params[DIM_TEXT_HEIGHT].value.number;
+    if (!(height > 0.0) || !isfinite(height)) return -1;
+
+    int precision = params->params[DIM_PRECISION].value.integer;
+    if (precision < 0 || precision > 12) return -1;
+
+    int left = params->params[DIM_ARROW_LEFT].value.integer;
+    int right = params->params[DIM_ARROW_RIGHT].value.integer;
+    if (left < ISOGL_DIM_ARROW_NONE ||
+        left > ISOGL_DIM_ARROW_CLOSED_OUTSIDE ||
+        right < ISOGL_DIM_ARROW_NONE ||
+        right > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+        return -1;
+    }
+
+    int pattern = params->params[DIM_PATTERN].value.integer;
+    int weight = params->params[DIM_WEIGHT].value.integer;
+    int layer = params->params[DIM_LAYER].value.integer;
+    if (pattern < 0 || pattern >= LINE_TYPE_COUNT) return -1;
+    if (weight < 0 || weight >= LINE_THICKNESS_COUNT) return -1;
+    if (layer < 0 || layer > 31) return -1;
+    return 0;
+}
+
+static int sym_dimension_generate(const isogl_symbol_params *params,
+                                  const isogl_symbol_gen_context *ctx,
+                                  IsoglSymEmitter *render,
+                                  IsoglSymPickEmitter *pick) {
+    if (!params || !ctx ||
+        sym_dimension_validate(params) != 0) return -1;
+
+    IsoglDimensionDesc d;
+    memset(&d, 0, sizeof(d));
+    const isogl_symbol_param *points = &params->params[DIM_POINTS];
+    const isogl_symbol_param *texts = &params->params[DIM_TEXTS];
+
+    d.x0 = points->value.points[0].x;
+    d.y0 = points->value.points[0].y;
+    d.x1 = points->value.points[1].x;
+    d.y1 = points->value.points[1].y;
+    d.px = points->value.points[2].x;
+    d.py = points->value.points[2].y;
+
+    snprintf(d.text_left, sizeof(d.text_left), "%s",
+             texts->value.texts[0] ? texts->value.texts[0] : "");
+    snprintf(d.text_right, sizeof(d.text_right), "%s",
+             texts->value.texts[1] ? texts->value.texts[1] : "");
+
+    d.distance = params->params[DIM_DISTANCE].value.number;
+    d.text_offset_mm = params->params[DIM_TEXT_OFFSET].value.number;
+    d.text_height_mm = params->params[DIM_TEXT_HEIGHT].value.number;
+    d.sheet_scale = ctx->sheet_scale;
+    d.precision = params->params[DIM_PRECISION].value.integer;
+    d.pick_text = params->params[DIM_PICK_TEXT].value.boolean;
+    d.mark_points = params->params[DIM_MARK_POINTS].value.boolean;
+    d.arrow_left =
+        (IsoglDimensionArrow)params->params[DIM_ARROW_LEFT].value.integer;
+    d.arrow_right =
+        (IsoglDimensionArrow)params->params[DIM_ARROW_RIGHT].value.integer;
+    d.pattern = (uint8_t)params->params[DIM_PATTERN].value.integer;
+    d.weight = (uint8_t)params->params[DIM_WEIGHT].value.integer;
+    d.layer = (uint8_t)params->params[DIM_LAYER].value.integer;
+    memcpy(d.color, params->params[DIM_COLOR].value.color, sizeof(d.color));
+
+    IsoglSymMetrics metrics = {(void *)ctx, sym_gen_text_width};
+    int rc = 0;
+    if (render && render->emit) {
+        rc = isogl_dimension_geometry(&d, &metrics, render);
+    }
+    if (rc == 0 && pick && pick->emit) {
+        rc = isogl_dimension_pick_geometry(&d, &metrics, pick);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
+static int sym_center_init(isogl_symbol_params *params) {
+    if (!params || params->param_count != CEN_PARAM_COUNT) return -1;
+    params->params[CEN_POINTS].value.points[0].x = 0.0;
+    params->params[CEN_POINTS].value.points[0].y = 0.0;
+    params->params[CEN_SIZE].value.number = 8.0;
+    params->params[CEN_PATTERN].value.integer = 0;
+    params->params[CEN_WEIGHT].value.integer = LINE_THICKNESS_0_35;
+    params->params[CEN_LAYER].value.integer = 0;
+    params->params[CEN_COLOR].value.color[0] = 1.0f;
+    params->params[CEN_COLOR].value.color[1] = 1.0f;
+    params->params[CEN_COLOR].value.color[2] = 1.0f;
+    params->params[CEN_COLOR].value.color[3] = 1.0f;
+    return 0;
+}
+
+static int sym_center_validate(const isogl_symbol_params *params) {
+    if (!params || params->param_count != CEN_PARAM_COUNT) return -1;
+    if (params->params[CEN_POINTS].count != 1) return -1;
+    double size = params->params[CEN_SIZE].value.number;
+    if (!(size > 0.0) || !isfinite(size)) return -1;
+    int pattern = params->params[CEN_PATTERN].value.integer;
+    int weight = params->params[CEN_WEIGHT].value.integer;
+    int layer = params->params[CEN_LAYER].value.integer;
+    if (pattern < 0 || pattern >= LINE_TYPE_COUNT) return -1;
+    if (weight < 0 || weight >= LINE_THICKNESS_COUNT) return -1;
+    if (layer < 0 || layer > 31) return -1;
+    return 0;
+}
+
+static int sym_center_generate(const isogl_symbol_params *params,
+                               const isogl_symbol_gen_context *ctx,
+                               IsoglSymEmitter *render,
+                               IsoglSymPickEmitter *pick) {
+    if (!params || !ctx || sym_center_validate(params) != 0) return -1;
+
+    IsoglCenterMarkDesc d;
+    memset(&d, 0, sizeof(d));
+    d.cx = params->params[CEN_POINTS].value.points[0].x;
+    d.cy = params->params[CEN_POINTS].value.points[0].y;
+    d.size_mm = params->params[CEN_SIZE].value.number;
+    d.sheet_scale = ctx->sheet_scale;
+    d.pattern = (uint8_t)params->params[CEN_PATTERN].value.integer;
+    d.weight = (uint8_t)params->params[CEN_WEIGHT].value.integer;
+    d.layer = (uint8_t)params->params[CEN_LAYER].value.integer;
+    memcpy(d.color, params->params[CEN_COLOR].value.color, sizeof(d.color));
+
+    int rc = 0;
+    if (render && render->emit) {
+        rc = isogl_center_mark_geometry(&d, render);
+    }
+    if (rc == 0 && pick && pick->emit) {
+        rc = isogl_center_mark_pick_geometry(&d, pick);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
+static const isogl_symbol_type dimension_type = {
+    .name = "dimension",
+    .label = "Quota allineata",
+    .description = "Quota con linea, riferimenti, frecce e testo",
+    .params = DIM_PARAMS,
+    .param_count = DIM_PARAM_COUNT,
+    .init_params = sym_dimension_init,
+    .validate = sym_dimension_validate,
+    .generate = sym_dimension_generate
+};
+
+static const isogl_symbol_type center_mark_type = {
+    .name = "center_mark",
+    .label = "Center mark",
+    .description = "Croce di centro",
+    .params = CEN_PARAMS,
+    .param_count = CEN_PARAM_COUNT,
+    .init_params = sym_center_init,
+    .validate = sym_center_validate,
+    .generate = sym_center_generate
+};
+
+/* ---- type registry ------------------------------------------------------ */
+
+int isogl_symbol_register_type(const isogl_symbol_type *type) {
+    if (!type || !type->name || type->name[0] == '\0' ||
+        !type->params || type->param_count == 0 || !type->generate) {
+        return -1;
+    }
+    if (strcmp(type->name, "dimension") == 0 && type != &dimension_type) {
+        return -1;
+    }
+    if (strcmp(type->name, "center_mark") == 0 && type != &center_mark_type) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < symbol_type_count; ++i) {
+        if (strcmp(symbol_types[i]->name, type->name) == 0) return -1;
+    }
+
+    if (symbol_type_count == symbol_type_capacity) {
+        size_t capacity = symbol_type_capacity ? symbol_type_capacity * 2 : 8;
+        const isogl_symbol_type **grown =
+            realloc(symbol_types, capacity * sizeof(*grown));
+        if (!grown) return -1;
+        symbol_types = grown;
+        symbol_type_capacity = capacity;
+    }
+
+    symbol_types[symbol_type_count++] = type;
+    return 0;
+}
+
+const isogl_symbol_type *isogl_symbol_find_type(const char *name) {
+    if (!name) return NULL;
+    for (size_t i = 0; i < symbol_type_count; ++i) {
+        if (strcmp(symbol_types[i]->name, name) == 0) return symbol_types[i];
+    }
+    return NULL;
+}
+
+size_t isogl_symbol_type_count(void) {
+    return symbol_type_count;
+}
+
+const isogl_symbol_type *isogl_symbol_type_at(size_t index) {
+    if (index >= symbol_type_count) return NULL;
+    return symbol_types[index];
+}
+
+static int sym_register_builtins(void) {
+    if (builtins_registered) return 0;
+
+    const isogl_symbol_type *found = isogl_symbol_find_type("dimension");
+    if (found && found != &dimension_type) return -1;
+    if (!found && isogl_symbol_register_type(&dimension_type) != 0) return -1;
+
+    found = isogl_symbol_find_type("center_mark");
+    if (found && found != &center_mark_type) return -1;
+    if (!found && isogl_symbol_register_type(&center_mark_type) != 0) return -1;
+
+    builtins_registered = 1;
+    return 0;
+}
+
+/* ---- generation staging ------------------------------------------------- */
+
+static int sym_build_push_text(SymBuild *b, const IsoglSymItem *item) {
+    if (b->text_count == b->text_capacity) {
+        size_t capacity = b->text_capacity ? b->text_capacity * 2 : 4;
+        SymTextItem *grown = realloc(b->texts, capacity * sizeof(*grown));
+        if (!grown) return -1;
+        b->texts = grown;
+        b->text_capacity = capacity;
+    }
+
+    SymTextItem *t = &b->texts[b->text_count];
+    memset(t, 0, sizeof(*t));
+    t->utf8 = sym_strdup(item->utf8 ? item->utf8 : "");
+    if (!t->utf8) return -1;
+    t->x = item->x;
+    t->y = item->y;
+    t->height_mm = item->height_mm;
+    t->angle = item->angle;
+    t->align = item->align;
+    memcpy(t->color, item->color, sizeof(t->color));
+    b->text_count++;
+    return 0;
+}
+
+static int sym_build_push_pick(SymBuild *b, const IsoglSymPickItem *item) {
+    if (b->pick_count == b->pick_capacity) {
+        size_t capacity = b->pick_capacity ? b->pick_capacity * 2 : 16;
+        IsoglSymPickItem *grown =
+            realloc(b->picks, capacity * sizeof(*grown));
+        if (!grown) return -1;
+        b->picks = grown;
+        b->pick_capacity = capacity;
+    }
+    b->picks[b->pick_count++] = *item;
+    return 0;
+}
 
 static int sym_build_item(void *user, const IsoglSymItem *item) {
     SymBuild *b = user;
-    if (!item) return -1;
+    if (!b || !item) return -1;
 
     if (item->kind == ISOGL_SYM_SEGMENT) {
         isogl_vertex a;
@@ -112,182 +799,230 @@ static int sym_build_item(void *user, const IsoglSymItem *item) {
         c.position[1] = (float)item->y1;
         c.distanceFromStart =
             (float)hypot(item->x1 - item->x0, item->y1 - item->y0);
-
         return isogl_segment_list_push_pair(&b->segments, a, c);
     }
 
     if (item->kind == ISOGL_SYM_TEXT) {
-        if (item->utf8) {
-            snprintf(b->text, sizeof(b->text), "%s", item->utf8);
-        }
-        b->text_x = item->x;
-        b->text_y = item->y;
-        b->text_height_mm = item->height_mm;
-        b->text_angle = item->angle;
-        b->has_text = 1;
+        return sym_build_push_text(b, item);
     }
     return 0;
 }
 
-static int sym_build_geometry(IsoglSymbolType type, const void *desc,
-                              SymBuild *build) {
-    if (!desc || !build) return -1;
+static int sym_build_pick_item(void *user, const IsoglSymPickItem *item) {
+    SymBuild *b = user;
+    if (!b || !item) return -1;
+    return sym_build_push_pick(b, item);
+}
+
+static void sym_build_free_contents(SymBuild *b) {
+    if (!b) return;
+    isogl_segment_list_free(&b->segments);
+    for (size_t i = 0; i < b->text_count; ++i) free(b->texts[i].utf8);
+    free(b->texts);
+    free(b->picks);
+    memset(b, 0, sizeof(*b));
+}
+
+static int sym_build(const isogl_symbol_type *type,
+                     const isogl_symbol_params *params, double scale,
+                     SymBuild *build) {
+    if (!type || !params || !build) return -1;
 
     memset(build, 0, sizeof(*build));
     if (isogl_segment_list_init(&build->segments, 16) != 0) return -1;
 
-    build->sheet_scale = (type == ISOGL_SYMBOL_DIMENSION)
-                       ? ((const IsoglDimensionDesc *)desc)->sheet_scale
-                       : ((const IsoglCenterMarkDesc *)desc)->sheet_scale;
-    if (!(build->sheet_scale > 0.0)) build->sheet_scale = 1.0;
+    isogl_symbol_gen_context ctx = {
+        .font = symbol_font,
+        .sheet_scale = scale > 0.0 ? scale : 1.0
+    };
+    IsoglSymEmitter render = {build, sym_build_item};
+    IsoglSymPickEmitter pick = {build, sym_build_pick_item};
 
-    IsoglSymEmitter emitter = {build, sym_build_item};
-    IsoglSymMetrics metrics = {(void *)desc, sym_text_width};
-    int rc = (type == ISOGL_SYMBOL_DIMENSION)
-           ? isogl_dimension_geometry(desc, &metrics, &emitter)
-           : isogl_center_mark_geometry(desc, &emitter);
-
-    if (rc != 0 || (build->segments.size == 0 && !build->has_text)) {
-        isogl_segment_list_free(&build->segments);
+    int rc = type->generate(params, &ctx, &render, &pick);
+    if (rc != 0 ||
+        (build->segments.size == 0 && build->text_count == 0)) {
+        sym_build_free_contents(build);
         return -1;
     }
     return 0;
 }
 
-static isogl_symbol_id sym_create_common(const void *desc,
-                                         IsoglSymbolType type) {
-    if (!symbol_initialized || !symbol_font || !desc) return 0;
+/* ---- GL resources ------------------------------------------------------- */
 
-    SymBuild build;
-    if (sym_build_geometry(type, desc, &build) != 0) return 0;
-
-    isogl_symbol_id id = 0;
-    IsoglSymbol *s = sym_new_record(&id);
-    if (!s) {
-        isogl_segment_list_free(&build.segments);
-        return 0;
-    }
-
-    s->type = type;
-    if (type == ISOGL_SYMBOL_DIMENSION) {
-        s->desc.dimension = *(const IsoglDimensionDesc *)desc;
-    } else {
-        s->desc.center_mark = *(const IsoglCenterMarkDesc *)desc;
-    }
-
-    GLuint vbo = 0;
-    if (build.segments.size > 0) {
-        vbo = isogl_vbo_array_add(&symbol_parts, &build.segments,
-                                  ISOGL_VBO_SEGMENT);
-        if (vbo == 0) {
-            isogl_segment_list_free(&build.segments);
-            s->alive = 0;
-            return 0;
-        }
-        isogl_vbo_array_set_pick_id(&symbol_parts, vbo, id);
-    }
-    isogl_segment_list_free(&build.segments);
-    s->vbo_id = vbo;
-
-    if (build.has_text) {
-        isogl_glyph_string *string =
-            isogl_create_glyph_string(build.text, symbol_font);
-        if (!string) {
-            if (vbo) isogl_vbo_array_remove(&symbol_parts, vbo);
-            s->alive = 0;
-            s->vbo_id = 0;
-            return 0;
-        }
-
-        if (!isogl_string_list_append(&symbol_strings, string,
-                                      (float)build.text_x,
-                                      (float)build.text_y,
-                                      (float)build.text_height_mm,
-                                      (float)build.sheet_scale,
-                                      (float)build.text_angle,
-                                      symbol_font, id)) {
-            isogl_free_glyph_string(string);
-            if (vbo) isogl_vbo_array_remove(&symbol_parts, vbo);
-            s->alive = 0;
-            s->vbo_id = 0;
-            return 0;
-        }
-    }
-
-    s->vbo_id = vbo;
-    s->alive = 1;
-    return id;
+static void sym_remove_strings(isogl_symbol_id id) {
+    while (isogl_string_list_remove_by_pick_id(&symbol_strings, id) == 0) {}
 }
 
-static int sym_update_common(isogl_symbol_id id, IsoglSymbolType type,
-                             const void *desc) {
-    IsoglSymbol *s = sym_get(id);
-    if (!s || s->type != type || !desc ||
-        !symbol_initialized || !symbol_font) {
-        return -1;
+static int sym_append_build_strings(const SymBuild *build, isogl_symbol_id id,
+                                    double scale, int selected) {
+    for (size_t i = 0; i < build->text_count; ++i) {
+        const SymTextItem *t = &build->texts[i];
+        isogl_glyph_string *string =
+            isogl_create_glyph_string(t->utf8 ? t->utf8 : "", symbol_font);
+        if (!string) return -1;
+
+        isogl_glyph_string_set_color(string, t->color);
+        if (!isogl_string_list_append(&symbol_strings, string,
+                                      (float)t->x, (float)t->y,
+                                      (float)t->height_mm, (float)scale,
+                                      (float)t->angle, symbol_font, id)) {
+            isogl_free_glyph_string(string);
+            return -1;
+        }
+        symbol_strings.glyph_strings[symbol_strings.glyph_string_count - 1]
+            .selected = selected;
     }
+    return 0;
+}
 
-    SymBuild build;
-    if (sym_build_geometry(type, desc, &build) != 0) return -1;
-
-    if (build.segments.size > 0) {
+static int sym_apply_vbo(IsoglSymbol *s, const SymBuild *build,
+                         isogl_symbol_id id) {
+    if (build->segments.size > 0) {
         if (s->vbo_id != 0) {
             if (isogl_vbo_array_update(&symbol_parts, s->vbo_id,
-                                       &build.segments) != 0) {
-                isogl_segment_list_free(&build.segments);
+                                       &build->segments) != 0) {
                 return -1;
             }
         } else {
-            GLuint vbo = isogl_vbo_array_add(&symbol_parts, &build.segments,
+            GLuint vbo = isogl_vbo_array_add(&symbol_parts, &build->segments,
                                              ISOGL_VBO_SEGMENT);
-            if (vbo == 0) {
-                isogl_segment_list_free(&build.segments);
-                return -1;
-            }
+            if (vbo == 0) return -1;
             isogl_vbo_array_set_pick_id(&symbol_parts, vbo, id);
             s->vbo_id = vbo;
         }
+        isogl_vbo_object *object =
+            isogl_vbo_array_get(&symbol_parts, s->vbo_id);
+        if (object) object->selected = s->selected;
     } else if (s->vbo_id != 0) {
         isogl_vbo_array_remove(&symbol_parts, s->vbo_id);
         s->vbo_id = 0;
     }
-    isogl_segment_list_free(&build.segments);
-
-    if (build.has_text) {
-        int same_text = 0;
-        for (uint32_t i = 0; i < symbol_strings.glyph_string_count; ++i) {
-            isogl_glyph_string *old = &symbol_strings.glyph_strings[i];
-            if (old->pick_id != id) continue;
-            same_text = old->text && strcmp(old->text, build.text) == 0;
-            break;
-        }
-
-        int rc;
-        if (same_text) {
-            rc = isogl_string_list_set_transform_by_pick_id(
-                &symbol_strings, id, symbol_font,
-                (float)build.text_x, (float)build.text_y,
-                (float)build.text_height_mm, (float)build.sheet_scale,
-                (float)build.text_angle);
-        } else {
-            rc = isogl_string_list_update_by_pick_id(
-                &symbol_strings, id, build.text, symbol_font,
-                (float)build.text_x, (float)build.text_y,
-                (float)build.text_height_mm, (float)build.sheet_scale,
-                (float)build.text_angle);
-        }
-        if (rc != 0) return -1;
-    } else {
-        isogl_string_list_remove_by_pick_id(&symbol_strings, id);
-    }
-
-    if (type == ISOGL_SYMBOL_DIMENSION) {
-        s->desc.dimension = *(const IsoglDimensionDesc *)desc;
-    } else {
-        s->desc.center_mark = *(const IsoglCenterMarkDesc *)desc;
-    }
     return 0;
 }
+
+/* ---- create/update ------------------------------------------------------ */
+
+static isogl_symbol_id sym_create(const isogl_symbol_type *type,
+                                  const isogl_symbol_params *params,
+                                  double scale) {
+    if (!symbol_initialized || !symbol_font || !type || !params) return 0;
+    if (sym_params_validate(type, params) != 0) return 0;
+
+    SymBuild build;
+    if (sym_build(type, params, scale, &build) != 0) return 0;
+
+    isogl_symbol_id id = 0;
+    IsoglSymbol *s = sym_new_record(&id);
+    if (!s) {
+        sym_build_free_contents(&build);
+        return 0;
+    }
+
+    s->type = type;
+    s->sheet_scale = scale > 0.0 ? scale : 1.0;
+    if (sym_params_copy(params, &s->params, s->sheet_scale) != 0) {
+        sym_build_free_contents(&build);
+        s->alive = 0;
+        return 0;
+    }
+
+    if (sym_apply_vbo(s, &build, id) != 0 ||
+        sym_append_build_strings(&build, id, s->sheet_scale, 0) != 0) {
+        sym_remove_strings(id);
+        if (s->vbo_id) isogl_vbo_array_remove(&symbol_parts, s->vbo_id);
+        sym_params_free_contents(&s->params);
+        s->alive = 0;
+        sym_build_free_contents(&build);
+        return 0;
+    }
+
+    s->picks = build.picks;
+    s->pick_count = build.pick_count;
+    build.picks = NULL;
+    build.pick_count = 0;
+    sym_build_free_contents(&build);
+    return id;
+}
+
+static int sym_update(IsoglSymbol *s, const isogl_symbol_params *params) {
+    if (!s || !params || params->type != s->type) return -1;
+    if (sym_params_validate(s->type, params) != 0) return -1;
+
+    SymBuild build;
+    if (sym_build(s->type, params, s->sheet_scale, &build) != 0) return -1;
+
+    /* Create the new glyph strings before touching the old resources. */
+    isogl_glyph_string **fresh = NULL;
+    size_t fresh_count = build.text_count;
+    if (fresh_count > 0) {
+        fresh = calloc(fresh_count, sizeof(*fresh));
+        if (!fresh) {
+            sym_build_free_contents(&build);
+            return -1;
+        }
+        for (size_t i = 0; i < fresh_count; ++i) {
+            const SymTextItem *t = &build.texts[i];
+            fresh[i] = isogl_create_glyph_string(
+                t->utf8 ? t->utf8 : "", symbol_font);
+            if (!fresh[i]) {
+                for (size_t j = 0; j < i; ++j) isogl_free_glyph_string(fresh[j]);
+                free(fresh);
+                sym_build_free_contents(&build);
+                return -1;
+            }
+            isogl_glyph_string_set_color(fresh[i], t->color);
+        }
+    }
+
+    if (sym_apply_vbo(s, &build, (isogl_symbol_id)(s - symbols) + 1) != 0) {
+        for (size_t i = 0; i < fresh_count; ++i) isogl_free_glyph_string(fresh[i]);
+        free(fresh);
+        sym_build_free_contents(&build);
+        return -1;
+    }
+
+    isogl_symbol_id id = (isogl_symbol_id)(s - symbols) + 1;
+    sym_remove_strings(id);
+    for (size_t i = 0; i < fresh_count; ++i) {
+        if (!isogl_string_list_append(&symbol_strings, fresh[i],
+                                      (float)build.texts[i].x,
+                                      (float)build.texts[i].y,
+                                      (float)build.texts[i].height_mm,
+                                      (float)s->sheet_scale,
+                                      (float)build.texts[i].angle,
+                                      symbol_font, id)) {
+            isogl_free_glyph_string(fresh[i]);
+            for (size_t j = i + 1; j < fresh_count; ++j) {
+                isogl_free_glyph_string(fresh[j]);
+            }
+            free(fresh);
+            sym_build_free_contents(&build);
+            return -1;
+        }
+        symbol_strings.glyph_strings[symbol_strings.glyph_string_count - 1]
+            .selected = s->selected;
+    }
+    free(fresh);
+
+    free(s->picks);
+    s->picks = build.picks;
+    s->pick_count = build.pick_count;
+    build.picks = NULL;
+    build.pick_count = 0;
+
+    isogl_symbol_params fresh_params;
+    if (sym_params_copy(params, &fresh_params, s->sheet_scale) != 0) {
+        sym_build_free_contents(&build);
+        return -1;
+    }
+    sym_params_free_contents(&s->params);
+    s->params = fresh_params;
+
+    sym_build_free_contents(&build);
+    return 0;
+}
+
+/* ---- public lifecycle --------------------------------------------------- */
 
 int isogl_symbol_init(isogl_font_data *font) {
     if (symbol_initialized) {
@@ -295,6 +1030,7 @@ int isogl_symbol_init(isogl_font_data *font) {
         return 0;
     }
     if (!font) return -1;
+    if (sym_register_builtins() != 0) return -1;
     if (isogl_vbo_array_init(&symbol_parts) != 0) return -1;
 
     memset(&symbol_strings, 0, sizeof(symbol_strings));
@@ -310,6 +1046,15 @@ int isogl_symbol_init(isogl_font_data *font) {
 void isogl_symbol_cleanup(void) {
     if (!symbol_initialized) return;
 
+    for (size_t i = 0; i < symbol_slots; ++i) {
+        IsoglSymbol *s = &symbols[i];
+        if (!s->alive) continue;
+        sym_params_free_contents(&s->params);
+        free(s->picks);
+        s->picks = NULL;
+        s->pick_count = 0;
+    }
+
     isogl_string_list_free(&symbol_strings);
     isogl_vbo_array_free(&symbol_parts);
     free(symbols);
@@ -321,22 +1066,174 @@ void isogl_symbol_cleanup(void) {
     symbol_initialized = 0;
 }
 
+isogl_symbol_id isogl_symbol_create(const char *type_name,
+                                    const isogl_symbol_params *params,
+                                    double sheet_scale) {
+    const isogl_symbol_type *type = isogl_symbol_find_type(type_name);
+    if (!type || !params) return 0;
+    double scale = sheet_scale > 0.0 ? sheet_scale : params->sheet_scale;
+    return sym_create(type, params, scale);
+}
+
+isogl_symbol_params *isogl_symbol_params_create(const char *type_name) {
+    const isogl_symbol_type *type = isogl_symbol_find_type(type_name);
+    if (!type) return NULL;
+
+    isogl_symbol_params *params = malloc(sizeof(*params));
+    if (!params) return NULL;
+    if (sym_params_alloc(type, params, 1.0) != 0) {
+        free(params);
+        return NULL;
+    }
+    return params;
+}
+
+void isogl_symbol_params_free(isogl_symbol_params *params) {
+    if (!params) return;
+    sym_params_free_contents(params);
+    free(params);
+}
+
+int isogl_symbol_params_get(isogl_symbol_id id, isogl_symbol_params **out) {
+    if (!out) return -1;
+    *out = NULL;
+    IsoglSymbol *s = sym_get(id);
+    if (!s) return -1;
+
+    isogl_symbol_params *copy = malloc(sizeof(*copy));
+    if (!copy) return -1;
+    if (sym_params_copy(&s->params, copy, s->sheet_scale) != 0) {
+        free(copy);
+        return -1;
+    }
+    *out = copy;
+    return 0;
+}
+
+int isogl_symbol_params_update(isogl_symbol_id id,
+                               const isogl_symbol_params *params) {
+    IsoglSymbol *s = sym_get(id);
+    if (!s) return -1;
+    return sym_update(s, params);
+}
+
 isogl_symbol_id isogl_symbol_create_dimension(const IsoglDimensionDesc *d) {
-    return sym_create_common(d, ISOGL_SYMBOL_DIMENSION);
+    if (!d) return 0;
+    isogl_symbol_params params;
+    if (sym_params_alloc(&dimension_type, &params,
+                         d->sheet_scale > 0.0 ? d->sheet_scale : 1.0) != 0) {
+        return 0;
+    }
+
+    isogl_symbol_point *points = params.params[DIM_POINTS].value.points;
+    points[0].x = d->x0; points[0].y = d->y0;
+    points[1].x = d->x1; points[1].y = d->y1;
+    points[2].x = d->px; points[2].y = d->py;
+    sym_params_set_text_internal(&params, DIM_TEXTS, 0, d->text_left);
+    sym_params_set_text_internal(&params, DIM_TEXTS, 1, d->text_right);
+    params.params[DIM_DISTANCE].value.number = d->distance;
+    params.params[DIM_TEXT_OFFSET].value.number = d->text_offset_mm;
+    params.params[DIM_TEXT_HEIGHT].value.number = d->text_height_mm;
+    params.params[DIM_PRECISION].value.integer = d->precision;
+    params.params[DIM_PICK_TEXT].value.boolean = d->pick_text;
+    params.params[DIM_MARK_POINTS].value.boolean = d->mark_points;
+    params.params[DIM_ARROW_LEFT].value.integer = (int)d->arrow_left;
+    params.params[DIM_ARROW_RIGHT].value.integer = (int)d->arrow_right;
+    params.params[DIM_PATTERN].value.integer = d->pattern;
+    params.params[DIM_WEIGHT].value.integer = d->weight;
+    params.params[DIM_LAYER].value.integer = d->layer;
+    memcpy(params.params[DIM_COLOR].value.color, d->color,
+           sizeof(d->color));
+
+    isogl_symbol_id id = isogl_symbol_create("dimension", &params,
+                                             d->sheet_scale);
+    sym_params_free_contents(&params);
+    return id;
 }
 
 isogl_symbol_id isogl_symbol_create_center_mark(const IsoglCenterMarkDesc *d) {
-    return sym_create_common(d, ISOGL_SYMBOL_CENTER_MARK);
+    if (!d) return 0;
+    isogl_symbol_params params;
+    if (sym_params_alloc(&center_mark_type, &params,
+                         d->sheet_scale > 0.0 ? d->sheet_scale : 1.0) != 0) {
+        return 0;
+    }
+
+    params.params[CEN_POINTS].value.points[0].x = d->cx;
+    params.params[CEN_POINTS].value.points[0].y = d->cy;
+    params.params[CEN_SIZE].value.number = d->size_mm;
+    params.params[CEN_PATTERN].value.integer = d->pattern;
+    params.params[CEN_WEIGHT].value.integer = d->weight;
+    params.params[CEN_LAYER].value.integer = d->layer;
+    memcpy(params.params[CEN_COLOR].value.color, d->color,
+           sizeof(d->color));
+
+    isogl_symbol_id id = isogl_symbol_create("center_mark", &params,
+                                             d->sheet_scale);
+    sym_params_free_contents(&params);
+    return id;
 }
 
 int isogl_symbol_update_dimension(isogl_symbol_id id,
                                   const IsoglDimensionDesc *d) {
-    return sym_update_common(id, ISOGL_SYMBOL_DIMENSION, d);
+    if (!d) return -1;
+    IsoglSymbol *s = sym_get(id);
+    if (!s || s->type != &dimension_type) return -1;
+
+    isogl_symbol_params params;
+    if (sym_params_alloc(&dimension_type, &params,
+                         s->sheet_scale) != 0) {
+        return -1;
+    }
+
+    isogl_symbol_point *points = params.params[DIM_POINTS].value.points;
+    points[0].x = d->x0; points[0].y = d->y0;
+    points[1].x = d->x1; points[1].y = d->y1;
+    points[2].x = d->px; points[2].y = d->py;
+    sym_params_set_text_internal(&params, DIM_TEXTS, 0, d->text_left);
+    sym_params_set_text_internal(&params, DIM_TEXTS, 1, d->text_right);
+    params.params[DIM_DISTANCE].value.number = d->distance;
+    params.params[DIM_TEXT_OFFSET].value.number = d->text_offset_mm;
+    params.params[DIM_TEXT_HEIGHT].value.number = d->text_height_mm;
+    params.params[DIM_PRECISION].value.integer = d->precision;
+    params.params[DIM_PICK_TEXT].value.boolean = d->pick_text;
+    params.params[DIM_MARK_POINTS].value.boolean = d->mark_points;
+    params.params[DIM_ARROW_LEFT].value.integer = (int)d->arrow_left;
+    params.params[DIM_ARROW_RIGHT].value.integer = (int)d->arrow_right;
+    params.params[DIM_PATTERN].value.integer = d->pattern;
+    params.params[DIM_WEIGHT].value.integer = d->weight;
+    params.params[DIM_LAYER].value.integer = d->layer;
+    memcpy(params.params[DIM_COLOR].value.color, d->color,
+           sizeof(d->color));
+
+    int rc = isogl_symbol_params_update(id, &params);
+    sym_params_free_contents(&params);
+    return rc;
 }
 
 int isogl_symbol_update_center_mark(isogl_symbol_id id,
                                     const IsoglCenterMarkDesc *d) {
-    return sym_update_common(id, ISOGL_SYMBOL_CENTER_MARK, d);
+    if (!d) return -1;
+    IsoglSymbol *s = sym_get(id);
+    if (!s || s->type != &center_mark_type) return -1;
+
+    isogl_symbol_params params;
+    if (sym_params_alloc(&center_mark_type, &params, s->sheet_scale) != 0) {
+        return -1;
+    }
+
+    params.params[CEN_POINTS].value.points[0].x = d->cx;
+    params.params[CEN_POINTS].value.points[0].y = d->cy;
+    params.params[CEN_SIZE].value.number = d->size_mm;
+    params.params[CEN_PATTERN].value.integer = d->pattern;
+    params.params[CEN_WEIGHT].value.integer = d->weight;
+    params.params[CEN_LAYER].value.integer = d->layer;
+    memcpy(params.params[CEN_COLOR].value.color, d->color,
+           sizeof(d->color));
+
+    int rc = isogl_symbol_params_update(id, &params);
+    sym_params_free_contents(&params);
+    return rc;
 }
 
 int isogl_symbol_destroy(isogl_symbol_id id) {
@@ -347,7 +1244,11 @@ int isogl_symbol_destroy(isogl_symbol_id id) {
         isogl_vbo_array_remove(&symbol_parts, s->vbo_id);
         s->vbo_id = 0;
     }
-    isogl_string_list_remove_by_pick_id(&symbol_strings, id);
+    sym_remove_strings(id);
+    sym_params_free_contents(&s->params);
+    free(s->picks);
+    s->picks = NULL;
+    s->pick_count = 0;
 
     s->alive = 0;
     s->visible = 0;
@@ -405,7 +1306,7 @@ int isogl_symbol_set_selected(isogl_symbol_id id, int selected) {
     return 0;
 }
 
-/* ---- Pick/bounds predicates (double, model units) ---------------------- */
+/* ---- pick/bounds predicates (double, model units) ---------------------- */
 
 static int sym_box_point(const isogl_box *b, double x, double y) {
     return x >= b->xmin && x <= b->xmax && y >= b->ymin && y <= b->ymax;
@@ -503,38 +1404,35 @@ static void sym_bounds_point(SymHitContext *c, double x, double y) {
     if (y > c->ymax) c->ymax = y;
 }
 
-static int sym_collect_pick(void *user, const IsoglSymPickItem *item) {
-    SymHitContext *c = user;
-    if (!item) return -1;
+static int sym_apply_pick(const IsoglSymbol *s, SymHitContext *c) {
+    if (!s || !c || !s->picks || s->pick_count == 0) return -1;
 
-    if (item->kind == ISOGL_SYM_PICK_SEGMENT) {
-        int contained = sym_box_point(&c->query, item->x0, item->y0) &&
-                        sym_box_point(&c->query, item->x1, item->y1);
-        int intersects = sym_segment_intersects_box(item->x0, item->y0,
-                                                    item->x1, item->y1,
-                                                    &c->query);
-        if (c->crossing) {
-            if (contained || intersects) c->intersects = 1;
-        } else if (!contained) {
-            c->contained = 0;
+    for (size_t i = 0; i < s->pick_count; ++i) {
+        const IsoglSymPickItem *item = &s->picks[i];
+        if (item->kind == ISOGL_SYM_PICK_SEGMENT) {
+            int contained = sym_box_point(&c->query, item->x0, item->y0) &&
+                            sym_box_point(&c->query, item->x1, item->y1);
+            int intersects = sym_segment_intersects_box(
+                item->x0, item->y0, item->x1, item->y1, &c->query);
+            if (c->crossing) {
+                if (contained || intersects) c->intersects = 1;
+            } else if (!contained) {
+                c->contained = 0;
+            }
+            sym_bounds_point(c, item->x0, item->y0);
+            sym_bounds_point(c, item->x1, item->y1);
+        } else if (item->kind == ISOGL_SYM_PICK_OBB) {
+            int contained = sym_obb_contained(item->corners, &c->query);
+            int intersects = sym_obb_intersects_box(item->corners, &c->query);
+            if (c->crossing) {
+                if (contained || intersects) c->intersects = 1;
+            } else if (!contained) {
+                c->contained = 0;
+            }
+            for (int j = 0; j < 4; ++j) {
+                sym_bounds_point(c, item->corners[j][0], item->corners[j][1]);
+            }
         }
-        sym_bounds_point(c, item->x0, item->y0);
-        sym_bounds_point(c, item->x1, item->y1);
-        return 0;
-    }
-
-    if (item->kind == ISOGL_SYM_PICK_OBB) {
-        int contained = sym_obb_contained(item->corners, &c->query);
-        int intersects = sym_obb_intersects_box(item->corners, &c->query);
-        if (c->crossing) {
-            if (contained || intersects) c->intersects = 1;
-        } else if (!contained) {
-            c->contained = 0;
-        }
-        for (int i = 0; i < 4; ++i) {
-            sym_bounds_point(c, item->corners[i][0], item->corners[i][1]);
-        }
-        return 0;
     }
     return 0;
 }
@@ -548,17 +1446,6 @@ static void sym_normalize_box(isogl_box *b) {
     }
 }
 
-static int sym_collect_pick_geometry(IsoglSymbol *s, SymHitContext *ctx) {
-    IsoglSymPickEmitter emitter = {ctx, sym_collect_pick};
-    IsoglSymMetrics metrics = {&s->desc.dimension, sym_text_width};
-
-    if (s->type == ISOGL_SYMBOL_DIMENSION) {
-        return isogl_dimension_pick_geometry(&s->desc.dimension,
-                                             &metrics, &emitter);
-    }
-    return isogl_center_mark_pick_geometry(&s->desc.center_mark, &emitter);
-}
-
 int isogl_symbol_hit(isogl_symbol_id id, const isogl_box *query, int crossing) {
     IsoglSymbol *s = sym_get(id);
     if (!s || !query) return -1;
@@ -570,9 +1457,7 @@ int isogl_symbol_hit(isogl_symbol_id id, const isogl_box *query, int crossing) {
     ctx.crossing = crossing ? 1 : 0;
     ctx.contained = 1;
 
-    if (sym_collect_pick_geometry(s, &ctx) != 0 || !ctx.has_bounds) {
-        return -1;
-    }
+    if (sym_apply_pick(s, &ctx) != 0 || !ctx.has_bounds) return -1;
     return ctx.crossing ? ctx.intersects : ctx.contained;
 }
 
@@ -584,9 +1469,7 @@ int isogl_symbol_bounds(isogl_symbol_id id, isogl_box *out) {
     memset(&ctx, 0, sizeof(ctx));
     ctx.contained = 1;
 
-    if (sym_collect_pick_geometry(s, &ctx) != 0 || !ctx.has_bounds) {
-        return -1;
-    }
+    if (sym_apply_pick(s, &ctx) != 0 || !ctx.has_bounds) return -1;
     out->xmin = ctx.xmin;
     out->ymin = ctx.ymin;
     out->xmax = ctx.xmax;
@@ -594,15 +1477,22 @@ int isogl_symbol_bounds(isogl_symbol_id id, isogl_box *out) {
     return 0;
 }
 
+static int sym_ignore_pick(void *user, const IsoglSymPickItem *item) {
+    (void)user;
+    (void)item;
+    return 0;
+}
+
 int isogl_symbol_explode(isogl_symbol_id id, IsoglSymEmitter *out) {
     IsoglSymbol *s = sym_get(id);
     if (!s || !out || !out->emit) return -1;
 
-    IsoglSymMetrics metrics = {&s->desc.dimension, sym_text_width};
-    int rc = (s->type == ISOGL_SYMBOL_DIMENSION)
-           ? isogl_dimension_geometry(&s->desc.dimension, &metrics, out)
-           : isogl_center_mark_geometry(&s->desc.center_mark, out);
+    isogl_symbol_gen_context ctx = {
+        .font = symbol_font,
+        .sheet_scale = s->sheet_scale
+    };
+    IsoglSymPickEmitter pick = {NULL, sym_ignore_pick};
+    int rc = s->type->generate(&s->params, &ctx, out, &pick);
     if (rc != 0) return -1;
-
     return isogl_symbol_destroy(id);
 }

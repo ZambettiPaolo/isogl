@@ -191,22 +191,25 @@ simbolo.
 
 ### Contratto reale e lacune
 
-isogl possiede record, copia del descrittore, VBO e glyph string; il CAD
-possiede solo l'`isogl_symbol_id` opaco. Il CAD non legge VBO, stringhe,
-descrittore, tipo o geometria interna: usa solo
-`isogl_symbol_hit/bounds/pick_at/get_selected`, l'ID e gli item di `explode`.
+isogl possiede record, copia dei parametri, VBO e glyph string; il CAD
+possiede solo l'`isogl_symbol_id` opaco. I simboli sono **tipi definiti in C**:
+il tipo dichiara schema dei parametri, descrizioni per l'editor, validazione e
+generatore puro. Il CAD può leggere metadati e valori con
+`isogl_symbol_type_at` / `isogl_symbol_params_get`, modificare con
+`isogl_symbol_params_update` (ID, pick e selezione preservati) e usare
+`hit/bounds/pick_at/get_selected`; non legge VBO, stringhe o geometria interna.
 `pick_at` e `draw_all` operano sul registry, non su `CadDocument.symbols`.
 `bounds` deriva dalla geometria di pick: con `pick_text = 0` il testo non è
-incluso.
+incluso. `dimension` e `center_mark` sono adapter sui generatori puri esistenti;
+un simbolo nuovo richiede un nuovo tipo C registrato con
+`isogl_symbol_register_type`.
 
-Oggi **non esistono** getter di tipo/descrittore né un'API di punti di
-controllo/handle; per modificare serve riapplicare un descrittore completo.
-`update_*` non è transazionale tra VBO e testo. `isocad` conserva solo gli ID e
-scarta i descrittori, quindi non può ancora modificare i simboli. La direzione
-futura è un record CAD `CadSymbolRef { id, type, desc }` con
-`cad_update_*_symbol`, `cad_remove_symbol`, `cad_explode_symbol`; solo in
-seguito, se serve un contratto generico, getter isogl per tipo, parametri,
-control point e item di pick.
+Restano da implementare: `isogl_symbol_set_sheet_scale()` con rigenerazione
+globale; file v2 con `type` + `[symbols.params]` (skip/preservazione dei tipi
+sconosciuti); pannello proprietà e `CadSymbolRef` in isocad (oggi conserva solo
+gli ID e non usa `params_get`); aggiornamento atomico VBO+stringhe e liste
+dinamiche. La direzione è un record CAD `CadSymbolRef { id, type, params }` con
+`cad_update_*_symbol`, `cad_remove_symbol`, `cad_explode_symbol`.
 
 ## Simboli e ambiente di test
 

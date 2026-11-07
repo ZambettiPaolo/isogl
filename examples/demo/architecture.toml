@@ -1427,7 +1427,7 @@ x = 392.000
 y = 66.800
 height_mm = 3.500
 angle_deg = 0.0
-text = "no type/control-point getter yet"
+text = "C types + params API (slice 1)"
 color = [0.62, 0.68, 0.78, 1.00]
 
 # Real isogl symbols created by the demo through the existing registry API.
