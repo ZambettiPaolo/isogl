@@ -92,10 +92,16 @@ points <i> <x> <y>
 texts <i> <testo libero fino a fine riga>
 segments <i> <x0> <y0> <x1> <y1>
 number <valore>
-integer|enum <intero>
+integer <intero>
+enum <nome>|<intero>      token stabile della tabella (es. closed) o valore
 boolean 0|1|true|false
 color <r> <g> <b> [<a>]
 ```
+
+Gli `ENUM` usano la tabella del descrittore: `sym info <id>` elenca
+`token=etichetta(valore)`, `sym set` accetta il token (case-insensitive) o un
+intero presente in tabella e rifiuta gli altri. La tabella è anche il
+validatore: un valore fuori tabella non arriva alla rigenerazione.
 
 `SCALE` e i parametri con `editable = 0` sono rifiutati. Un aggiornamento
 invalido lascia intatti simbolo, geometria e copia dei parametri: la console

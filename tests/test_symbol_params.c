@@ -228,6 +228,53 @@ int main(int argc, char **argv) {
     check(type_count >= 2, "type registry enumerates built-ins");
     check(isogl_symbol_type_at(0) != NULL, "type registry index access");
 
+    /* ---- enum metadata -------------------------------------------------- */
+    const isogl_symbol_type *dim_type = isogl_symbol_find_type("dimension");
+    check(dim_type != NULL, "dimension type descriptor found");
+    if (dim_type) {
+        const isogl_symbol_param_desc *arrow = NULL;
+        const isogl_symbol_param_desc *pattern = NULL;
+        const isogl_symbol_param_desc *weight = NULL;
+        for (size_t i = 0; i < dim_type->param_count; ++i) {
+            const isogl_symbol_param_desc *d = &dim_type->params[i];
+            if (strcmp(d->key, "arrow_left") == 0) {
+                arrow = d;
+            } else if (strcmp(d->key, "pattern") == 0) {
+                pattern = d;
+            } else if (strcmp(d->key, "weight") == 0) {
+                weight = d;
+            }
+        }
+        check(arrow && arrow->kind == ISOGL_SYM_PARAM_ENUM &&
+              arrow->enum_values && arrow->enum_count == 7,
+              "arrow descriptor carries the seven ISO styles");
+        check(pattern && pattern->enum_count == LINE_TYPE_COUNT,
+              "pattern descriptor lists every ISO line type");
+        check(weight && weight->enum_count == LINE_THICKNESS_COUNT,
+              "weight descriptor lists every ISO thickness");
+
+        const char *label =
+            arrow ? isogl_symbol_param_enum_label(arrow,
+                                                  ISOGL_DIM_ARROW_CLOSED)
+                  : NULL;
+        check(label != NULL && strcmp(label, "Chiusa") == 0,
+              "enum label lookup by value");
+        int value = -1;
+        check(arrow &&
+              isogl_symbol_param_enum_value(arrow, "closed", &value) == 0 &&
+              value == ISOGL_DIM_ARROW_CLOSED,
+              "enum token lookup by stable name");
+        check(arrow &&
+              isogl_symbol_param_enum_value(arrow, "CLOSED", &value) == 0,
+              "enum token lookup is case-insensitive");
+        check(arrow &&
+              isogl_symbol_param_enum_value(arrow, "bogus", &value) == -1,
+              "unknown enum token rejected");
+        check(pattern &&
+              isogl_symbol_param_enum_label(pattern, LINE_TYPE_COUNT) == NULL,
+              "value outside the enum table has no label");
+    }
+
     /* ---- metadata and built-in params ---------------------------------- */
     isogl_symbol_params *dim = isogl_symbol_params_create("dimension");
     check(dim != NULL, "dimension params created");
@@ -279,6 +326,21 @@ int main(int argc, char **argv) {
                   bounds.xmax >= 80.0,
                   "updated geometry follows the new point");
             isogl_symbol_params_free(copy);
+        }
+
+        /* An ENUM value outside the descriptor table is rejected by the
+           generic validator, before the type-specific validate(). */
+        isogl_symbol_params *bad = NULL;
+        if (isogl_symbol_params_get(dim_id, &bad) == 0 && bad) {
+            int arrow_index = param_index(bad, "arrow_left");
+            check(arrow_index >= 0,
+                  "arrow parameter available for validation");
+            if (arrow_index >= 0) {
+                bad->params[arrow_index].value.integer = 999;
+            }
+            check(isogl_symbol_params_update(dim_id, bad) == -1,
+                  "enum value outside the table is rejected");
+            isogl_symbol_params_free(bad);
         }
         isogl_symbol_params_free(dim);
     }

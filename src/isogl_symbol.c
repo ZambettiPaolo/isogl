@@ -306,6 +306,48 @@ static int sym_params_copy(const isogl_symbol_params *src,
     return 0;
 }
 
+static int sym_ascii_equal_ci(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        unsigned char ca = (unsigned char)*a++;
+        unsigned char cb = (unsigned char)*b++;
+        if (ca >= 'A' && ca <= 'Z') ca = (unsigned char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (unsigned char)(cb - 'A' + 'a');
+        if (ca != cb) return 0;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+const char *isogl_symbol_param_enum_label(const isogl_symbol_param_desc *desc,
+                                          int value) {
+    if (!desc || desc->kind != ISOGL_SYM_PARAM_ENUM ||
+        !desc->enum_values) {
+        return NULL;
+    }
+    for (size_t i = 0; i < desc->enum_count; ++i) {
+        if (desc->enum_values[i].value == value) {
+            return desc->enum_values[i].label;
+        }
+    }
+    return NULL;
+}
+
+int isogl_symbol_param_enum_value(const isogl_symbol_param_desc *desc,
+                                  const char *name, int *out_value) {
+    if (!desc || !name || !out_value ||
+        desc->kind != ISOGL_SYM_PARAM_ENUM || !desc->enum_values) {
+        return -1;
+    }
+    for (size_t i = 0; i < desc->enum_count; ++i) {
+        if (sym_ascii_equal_ci(desc->enum_values[i].name, name) ||
+            sym_ascii_equal_ci(desc->enum_values[i].label, name)) {
+            *out_value = desc->enum_values[i].value;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int sym_params_validate(const isogl_symbol_type *type,
                                const isogl_symbol_params *params) {
     if (!type || !params || params->type != type ||
@@ -329,6 +371,15 @@ static int sym_params_validate(const isogl_symbol_type *type,
                 !p->value.texts) return -1;
         } else if (p->count != 1) {
             return -1;
+        }
+
+        /* The descriptor's enum table is authoritative: a value outside it is
+           invalid even if the type's validate() would accept the integer. */
+        if (desc->kind == ISOGL_SYM_PARAM_ENUM) {
+            if (!desc->enum_values || desc->enum_count == 0) return -1;
+            if (!isogl_symbol_param_enum_label(desc, p->value.integer)) {
+                return -1;
+            }
         }
     }
 
@@ -368,6 +419,53 @@ int isogl_symbol_params_resize(isogl_symbol_params *params, size_t param_index,
 }
 
 /* ---- built-in types: dimension and center mark -------------------------- */
+
+#define SYM_ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
+
+static const isogl_symbol_enum_value DIM_ARROW_VALUES[] = {
+    {ISOGL_DIM_ARROW_NONE, "none", "Nessuna"},
+    {ISOGL_DIM_ARROW_OPEN, "open", "Aperta"},
+    {ISOGL_DIM_ARROW_CLOSED, "closed", "Chiusa"},
+    {ISOGL_DIM_ARROW_TICK, "tick", "Trattino"},
+    {ISOGL_DIM_ARROW_DOT, "dot", "Pallino"},
+    {ISOGL_DIM_ARROW_OPEN_OUTSIDE, "open_outside", "Aperta esterna"},
+    {ISOGL_DIM_ARROW_CLOSED_OUTSIDE, "closed_outside", "Chiusa esterna"}
+};
+
+static const isogl_symbol_enum_value LINE_TYPE_VALUES[] = {
+    {LINE_TYPE_CONTINUOUS, "continuous", "Continuous"},
+    {LINE_TYPE_DASHED, "dashed", "Dashed"},
+    {LINE_TYPE_DASHED_SPACED, "dashed_spaced", "Dashed Spaced"},
+    {LINE_TYPE_LONG_DASH_DOT, "long_dash_dot", "Long Dash Dot"},
+    {LINE_TYPE_LONG_DASH_DOUBLE_DOT, "long_dash_double_dot",
+     "Long Dash Double Dot"},
+    {LINE_TYPE_LONG_DASH_TRIPLE_DOT, "long_dash_triple_dot",
+     "Long Dash Triple Dot"},
+    {LINE_TYPE_DOTTED, "dotted", "Dotted"},
+    {LINE_TYPE_LONG_DASH_SHORT_DASH, "long_dash_short_dash",
+     "Long Dash Short Dash"},
+    {LINE_TYPE_LONG_DASH_DOUBLE_SHORT_DASH, "long_dash_double_short_dash",
+     "Long Dash Double Short Dash"},
+    {LINE_TYPE_DASH_DOT, "dash_dot", "Dash Dot"},
+    {LINE_TYPE_DASH_DOUBLE_DOT, "dash_double_dot", "Dash Double Dot"},
+    {LINE_TYPE_DOUBLE_DOT_DASH, "double_dot_dash", "Double Dot Dash"},
+    {LINE_TYPE_DOUBLE_DOT_DOUBLE_DASH, "double_dot_double_dash",
+     "Double Dot Double Dash"},
+    {LINE_TYPE_TRIPLE_DOT_DASH, "triple_dot_dash", "Triple Dot Dash"},
+    {LINE_TYPE_TRIPLE_DOT_DOUBLE_DASH, "triple_dot_double_dash",
+     "Triple Dot Double Dash"}
+};
+
+static const isogl_symbol_enum_value LINE_WEIGHT_VALUES[] = {
+    {LINE_THICKNESS_0_18, "0.18", "0.18 mm"},
+    {LINE_THICKNESS_0_25, "0.25", "0.25 mm"},
+    {LINE_THICKNESS_0_35, "0.35", "0.35 mm"},
+    {LINE_THICKNESS_0_5, "0.5", "0.5 mm"},
+    {LINE_THICKNESS_0_7, "0.7", "0.7 mm"},
+    {LINE_THICKNESS_1_0, "1.0", "1.0 mm"},
+    {LINE_THICKNESS_1_4, "1.4", "1.4 mm"},
+    {LINE_THICKNESS_2_0, "2.0", "2.0 mm"}
+};
 
 enum {
     DIM_POINTS = 0, DIM_TEXTS, DIM_SEGMENTS, DIM_SCALE,
@@ -421,19 +519,23 @@ static const isogl_symbol_param_desc DIM_PARAMS[DIM_PARAM_COUNT] = {
     },
     [DIM_ARROW_LEFT] = {
         "arrow_left", "Freccia sinistra", "Stile della punta a P1", "",
-        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1,
+        DIM_ARROW_VALUES, SYM_ARRAY_COUNT(DIM_ARROW_VALUES)
     },
     [DIM_ARROW_RIGHT] = {
         "arrow_right", "Freccia destra", "Stile della punta a P2", "",
-        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1,
+        DIM_ARROW_VALUES, SYM_ARRAY_COUNT(DIM_ARROW_VALUES)
     },
     [DIM_PATTERN] = {
         "pattern", "Tipo linea ISO", "Pattern della quota", "",
-        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1,
+        LINE_TYPE_VALUES, SYM_ARRAY_COUNT(LINE_TYPE_VALUES)
     },
     [DIM_WEIGHT] = {
         "weight", "Peso ISO", "Spessore della quota", "",
-        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1,
+        LINE_WEIGHT_VALUES, SYM_ARRAY_COUNT(LINE_WEIGHT_VALUES)
     },
     [DIM_LAYER] = {
         "layer", "Layer", "Layer di stile", "",
@@ -474,11 +576,13 @@ static const isogl_symbol_param_desc CEN_PARAMS[CEN_PARAM_COUNT] = {
     },
     [CEN_PATTERN] = {
         "pattern", "Tipo linea ISO", "Pattern del center mark", "",
-        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1,
+        LINE_TYPE_VALUES, SYM_ARRAY_COUNT(LINE_TYPE_VALUES)
     },
     [CEN_WEIGHT] = {
         "weight", "Peso ISO", "Spessore del center mark", "",
-        ISOGL_SYM_PARAM_ENUM, 1, 1, 1
+        ISOGL_SYM_PARAM_ENUM, 1, 1, 1,
+        LINE_WEIGHT_VALUES, SYM_ARRAY_COUNT(LINE_WEIGHT_VALUES)
     },
     [CEN_LAYER] = {
         "layer", "Layer", "Layer di stile", "",

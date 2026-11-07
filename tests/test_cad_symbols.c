@@ -293,6 +293,28 @@ int main(int argc, char **argv) {
     check(run_command(&doc, &console, command) == -1,
           "console rejects the read-only SCALE parameter");
 
+    /* ENUM parameters accept the stable token from the descriptor table. */
+    snprintf(command, sizeof(command), "sym set %u arrow_left closed", dim_id);
+    check(run_command(&doc, &console, command) == 0,
+          "console accepts an enum token");
+    dim_ref = cad_symbol_find(&doc, dim_id);
+    {
+        int arrow = dim_ref ? param_index(dim_ref->params, "arrow_left") : -1;
+        check(arrow >= 0 &&
+              dim_ref->params->params[arrow].value.integer ==
+                  ISOGL_DIM_ARROW_CLOSED,
+              "enum token resolves to its integer value");
+    }
+    snprintf(command, sizeof(command), "sym set %u pattern continuous", dim_id);
+    check(run_command(&doc, &console, command) == 0,
+          "console accepts an ISO line-type token");
+    snprintf(command, sizeof(command), "sym set %u arrow_left bogus", dim_id);
+    check(run_command(&doc, &console, command) == -1,
+          "console rejects an unknown enum token");
+    snprintf(command, sizeof(command), "sym set %u arrow_left 999", dim_id);
+    check(run_command(&doc, &console, command) == -1,
+          "console rejects an integer outside the enum table");
+
     snprintf(command, sizeof(command), "sym set %u points 1 175 250", dim_id);
     check(run_command(&doc, &console, command) == 0,
           "console sym set point executes");

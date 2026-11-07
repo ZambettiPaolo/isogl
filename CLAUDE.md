@@ -308,8 +308,10 @@ Implementazione:
   `cad_symbol_update_params` e `cad_remove_symbol` gestiscono il record senza
   leggere VBO interni. La console espone `sym list/info/set/points/remove` e
   `save <path>`: interpreta i valori dai metadati pubblici
-  (`isogl_symbol_param_desc`), rifiuta `SCALE`/parametri non editabili, lavora
-  su una copia temporanea e poi chiama `cad_symbol_params_update`. Il writer
+  (`isogl_symbol_param_desc`), accetta per gli `ENUM` il token stabile o un
+  intero presente nella tabella, rifiuta `SCALE`/parametri non editabili,
+  lavora su una copia temporanea e poi chiama `cad_symbol_params_update`. Il
+  writer
   schema v2 è **save-only** (stdio + metadati, `[[symbols]]` con type,
   `group = 0`, `[symbols.params]`, `SCALE` omesso); isocad non ha un parser
   TOML e non carica un disegno completo. La selezione è taggata
@@ -357,10 +359,18 @@ Il tipo C dichiara i parametri e le descrizioni per l'editor:
 
 ```c
 typedef struct {
+    int value;
+    const char *name;   /* token stabile per file/console */
+    const char *label;  /* etichetta per l'editor */
+} isogl_symbol_enum_value;
+
+typedef struct {
     const char *key, *label, *help, *unit;
     isogl_symbol_param_kind kind;
     size_t min_count, max_count;
     int editable;
+    const isogl_symbol_enum_value *enum_values;  /* solo ENUM */
+    size_t enum_count;
 } isogl_symbol_param_desc;
 
 typedef struct isogl_symbol_type {
@@ -379,6 +389,13 @@ I parametri sono liste tipizzate (`POINTS`, `TEXTS`, `SEGMENTS`), scalari
 (`NUMBER`, `INTEGER`, `BOOLEAN`, `ENUM`, `COLOR`) e la `SCALE` di contesto in
 sola lettura. Dimension e center mark sono adapter sui generatori puri
 esistenti; un tipo custom è nuovo codice C registrato dall'app.
+
+Gli `ENUM` portano la tabella `value → name/label` nel descrittore. La tabella
+è l'autorità: `sym_params_validate` rifiuta un valore fuori tabella prima
+ancora del `validate` del tipo, e `isogl_symbol_param_enum_label/value`
+risolvono etichetta e token (case-insensitive) per console ed editor. I
+built-in usano `DIM_ARROW_VALUES` (7 stili di punta), `LINE_TYPE_VALUES`
+(15 tipi ISO 128) e `LINE_WEIGHT_VALUES` (8 pesi ISO).
 
 **Scala foglio globale.** `isogl_symbol_set_sheet_scale()` è l'unica autorità:
 tutti i simboli vivi usano quel valore, anche quelli creati con un argomento

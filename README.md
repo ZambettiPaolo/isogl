@@ -220,7 +220,9 @@ bounds e appende segmenti e stringhe alle API isogl: nessun GL diretto.
 
 Il formato dei simboli è schema v2: `[[symbols]]` contiene `type` e `group`,
 mentre `[symbols.params]` contiene i valori tipizzati con le chiavi dello
-schema C (`points`, `texts`, `segments`, numeri/interi/enum/bool/`color`). La
+schema C (`points`, `texts`, `segments`, numeri/interi/enum/bool/`color`). I
+descrittori degli enum portano anche token stabili ed etichette per l'editor,
+e la tabella è il validatore dei valori. La
 scala foglio è globale in `[sheet] scale_num/scale_den` e non si salva per
 simbolo. Il loader risolve il tipo con `isogl_symbol_find_type`, valida nomi e
 conteggi contro lo schema registrato e applica le trasformazioni del gruppo ai

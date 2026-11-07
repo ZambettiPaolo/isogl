@@ -41,6 +41,18 @@ typedef enum {
     ISOGL_SYM_PARAM_COLOR        /* float[4]                        */
 } isogl_symbol_param_kind;
 
+/*
+ * Allowed value of an ISOGL_SYM_PARAM_ENUM parameter.  `name` is the stable
+ * token accepted by files and console input; `label` is the human-readable
+ * string shown by the property editor.  Both are owned by the type descriptor
+ * and must outlive every symbol using it.
+ */
+typedef struct {
+    int value;
+    const char *name;            /* stable token, e.g. "closed" */
+    const char *label;           /* UI label, e.g. "Chiusa" */
+} isogl_symbol_enum_value;
+
 typedef struct {
     const char *key;             /* stable key for files/UI */
     const char *label;           /* human-readable name */
@@ -50,6 +62,11 @@ typedef struct {
     size_t min_count;            /* lists: minimum elements */
     size_t max_count;            /* lists: maximum; 0 = unbounded. Scalars: 1 */
     int editable;                /* 0 for scale and derived values */
+
+    /* ENUM only; empty or NULL for every other kind.  The table is the single
+       source of truth for both validation and the editor's choice list. */
+    const isogl_symbol_enum_value *enum_values;
+    size_t enum_count;
 } isogl_symbol_param_desc;
 
 typedef struct {
@@ -161,6 +178,18 @@ int isogl_symbol_params_set_text(isogl_symbol_params *params,
  * count or allocation failure. */
 int isogl_symbol_params_resize(isogl_symbol_params *params, size_t param_index,
                                size_t count);
+
+/* Enum metadata helpers.  Both operate on a parameter descriptor and are safe
+ * with a NULL descriptor, a non-ENUM kind or an empty table.
+ *
+ * isogl_symbol_param_enum_label() returns the UI label for `value`, or NULL
+ * when the value is not in the table.
+ * isogl_symbol_param_enum_value() resolves a stable token (case-insensitive)
+ * or a UI label to its integer value; returns 0 on success, -1 if unknown. */
+const char *isogl_symbol_param_enum_label(const isogl_symbol_param_desc *desc,
+                                          int value);
+int isogl_symbol_param_enum_value(const isogl_symbol_param_desc *desc,
+                                  const char *name, int *out_value);
 
 /* font is used for dimension text layout; it must stay alive until cleanup. */
 int isogl_symbol_init(isogl_font_data *font);

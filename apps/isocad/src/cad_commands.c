@@ -114,9 +114,18 @@ static void print_param_value(FILE *out, const isogl_symbol_param *p,
             fprintf(out, "%.12g", p->value.number);
             break;
         case ISOGL_SYM_PARAM_INTEGER:
-        case ISOGL_SYM_PARAM_ENUM:
             fprintf(out, "%d", p->value.integer);
             break;
+        case ISOGL_SYM_PARAM_ENUM: {
+            const char *label =
+                isogl_symbol_param_enum_label(d, p->value.integer);
+            if (label) {
+                fprintf(out, "%s (%d)", label, p->value.integer);
+            } else {
+                fprintf(out, "%d", p->value.integer);
+            }
+            break;
+        }
         case ISOGL_SYM_PARAM_BOOLEAN:
             fprintf(out, "%s", p->value.boolean ? "true" : "false");
             break;
@@ -138,6 +147,16 @@ static void print_param_dump(FILE *out, const isogl_symbol_param *p) {
             d->key, d->label ? d->label : "-", cmd_kind_name(d->kind),
             d->unit ? d->unit : "", p->count, d->editable);
     if (d->help) fprintf(out, "    help: %s\n", d->help);
+    if (d->kind == ISOGL_SYM_PARAM_ENUM && d->enum_values) {
+        fprintf(out, "    values:");
+        for (size_t i = 0; i < d->enum_count; ++i) {
+            fprintf(out, " %s=%s(%d)",
+                    d->enum_values[i].name ? d->enum_values[i].name : "?",
+                    d->enum_values[i].label ? d->enum_values[i].label : "?",
+                    d->enum_values[i].value);
+        }
+        fputc('\n', out);
+    }
 
     switch (d->kind) {
         case ISOGL_SYM_PARAM_POINTS:
@@ -434,8 +453,7 @@ static int command_set(CadDocument *doc, IsocadConsole *console,
                 }
                 break;
             }
-            case ISOGL_SYM_PARAM_INTEGER:
-            case ISOGL_SYM_PARAM_ENUM: {
+            case ISOGL_SYM_PARAM_INTEGER: {
                 long value = 0;
                 if (cmd->arg_count < 1) {
                     rc = cmd_fail(console, "missing integer");
@@ -447,6 +465,35 @@ static int command_set(CadDocument *doc, IsocadConsole *console,
                     printf("S%u %s = %ld\n", (unsigned)cmd->symbol,
                            p->desc->key, value);
                 }
+                break;
+            }
+            case ISOGL_SYM_PARAM_ENUM: {
+                int value = 0;
+                if (cmd->arg_count < 1) {
+                    rc = cmd_fail(console, "missing enum value");
+                    break;
+                }
+                if (isogl_symbol_param_enum_value(p->desc, cmd->arg[0],
+                                                  &value) != 0) {
+                    /* Raw integers stay accepted for scripting, but only
+                       values present in the descriptor table. */
+                    long raw = 0;
+                    if (parse_long_token(cmd->arg[0], &raw) != 0 ||
+                        raw < INT_MIN || raw > INT_MAX) {
+                        rc = cmd_fail(console, "unknown enum value");
+                        break;
+                    }
+                    value = (int)raw;
+                }
+                const char *label =
+                    isogl_symbol_param_enum_label(p->desc, value);
+                if (!label) {
+                    rc = cmd_fail(console, "unknown enum value");
+                    break;
+                }
+                p->value.integer = value;
+                printf("S%u %s = %s (%d)\n", (unsigned)cmd->symbol,
+                       p->desc->key, label, value);
                 break;
             }
             case ISOGL_SYM_PARAM_BOOLEAN: {
