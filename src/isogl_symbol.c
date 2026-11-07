@@ -43,6 +43,9 @@ static isogl_vbo_array symbol_parts;
 static isogl_string_list symbol_strings;
 static isogl_font_data *symbol_font = NULL;
 static int symbol_initialized = 0;
+/* Module-wide sheet scale.  Authoritative over per-symbol create arguments;
+ * see isogl_symbol_set_sheet_scale(). */
+static double symbol_sheet_scale = 1.0;
 
 static const isogl_symbol_type **symbol_types = NULL;
 static size_t symbol_type_count = 0;
@@ -948,10 +951,15 @@ static int sym_update(IsoglSymbol *s, const isogl_symbol_params *params) {
     if (!s || !params || params->type != s->type) return -1;
     if (sym_params_validate(s->type, params) != 0) return -1;
 
-    SymBuild build;
-    if (sym_build(s->type, params, s->sheet_scale, &build) != 0) return -1;
+    /* The module-wide scale is authoritative; any SCALE value carried by the
+     * incoming params object is ignored. */
+    double scale = symbol_sheet_scale;
+    isogl_symbol_id id = (isogl_symbol_id)(s - symbols) + 1;
 
-    /* Create the new glyph strings before touching the old resources. */
+    SymBuild build;
+    if (sym_build(s->type, params, scale, &build) != 0) return -1;
+
+    /* Create every new glyph string before touching the old resources. */
     isogl_glyph_string **fresh = NULL;
     size_t fresh_count = build.text_count;
     if (fresh_count > 0) {
@@ -974,35 +982,77 @@ static int sym_update(IsoglSymbol *s, const isogl_symbol_params *params) {
         }
     }
 
-    if (sym_apply_vbo(s, &build, (isogl_symbol_id)(s - symbols) + 1) != 0) {
-        for (size_t i = 0; i < fresh_count; ++i) isogl_free_glyph_string(fresh[i]);
+    /* Prepare the new parameter copy before committing anything either. */
+    isogl_symbol_params fresh_params;
+    if (sym_params_copy(params, &fresh_params, scale) != 0) {
+        for (size_t i = 0; i < fresh_count; ++i) {
+            isogl_free_glyph_string(fresh[i]);
+        }
         free(fresh);
         sym_build_free_contents(&build);
         return -1;
     }
 
-    isogl_symbol_id id = (isogl_symbol_id)(s - symbols) + 1;
-    sym_remove_strings(id);
+    /* Create the replacement VBO first; the old one is removed only at commit.
+     * isogl_vbo_array_add() appends a new array entry, so a failure here
+     * leaves the old VBO untouched. */
+    GLuint new_vbo = 0;
+    if (build.segments.size > 0) {
+        new_vbo = isogl_vbo_array_add(&symbol_parts, &build.segments,
+                                      ISOGL_VBO_SEGMENT);
+        if (new_vbo == 0) {
+            for (size_t i = 0; i < fresh_count; ++i) {
+                isogl_free_glyph_string(fresh[i]);
+            }
+            free(fresh);
+            sym_params_free_contents(&fresh_params);
+            sym_build_free_contents(&build);
+            return -1;
+        }
+        isogl_vbo_array_set_pick_id(&symbol_parts, new_vbo, id);
+        isogl_vbo_object *object = isogl_vbo_array_get(&symbol_parts, new_vbo);
+        if (object) object->selected = s->selected;
+    }
+
+    /* Append the new strings with pick_id 0.  On failure only the newly
+     * appended (still unpromoted) strings are removed; the old strings, which
+     * carry the real id, are never touched. */
     for (size_t i = 0; i < fresh_count; ++i) {
+        const SymTextItem *t = &build.texts[i];
         if (!isogl_string_list_append(&symbol_strings, fresh[i],
-                                      (float)build.texts[i].x,
-                                      (float)build.texts[i].y,
-                                      (float)build.texts[i].height_mm,
-                                      (float)s->sheet_scale,
-                                      (float)build.texts[i].angle,
-                                      symbol_font, id)) {
+                                      (float)t->x, (float)t->y,
+                                      (float)t->height_mm, (float)scale,
+                                      (float)t->angle, symbol_font, 0)) {
             isogl_free_glyph_string(fresh[i]);
             for (size_t j = i + 1; j < fresh_count; ++j) {
                 isogl_free_glyph_string(fresh[j]);
             }
             free(fresh);
+            while (isogl_string_list_remove_by_pick_id(&symbol_strings, 0) == 0) {}
+            if (new_vbo != 0) isogl_vbo_array_remove(&symbol_parts, new_vbo);
+            sym_params_free_contents(&fresh_params);
             sym_build_free_contents(&build);
             return -1;
         }
-        symbol_strings.glyph_strings[symbol_strings.glyph_string_count - 1]
-            .selected = s->selected;
     }
     free(fresh);
+
+    /* Commit the string set: drop the old strings, then promote the new ones
+     * (temporary pick_id 0) to the real pick id and restore selection. */
+    sym_remove_strings(id);
+    for (uint32_t i = 0; i < symbol_strings.glyph_string_count; ++i) {
+        isogl_glyph_string *string = &symbol_strings.glyph_strings[i];
+        if (string->pick_id == 0) {
+            string->pick_id = id;
+            string->selected = s->selected;
+        }
+    }
+
+    /* Commit the VBO: remove the old buffer only now that everything worked. */
+    if (s->vbo_id != 0 && s->vbo_id != new_vbo) {
+        isogl_vbo_array_remove(&symbol_parts, s->vbo_id);
+    }
+    s->vbo_id = new_vbo;
 
     free(s->picks);
     s->picks = build.picks;
@@ -1010,13 +1060,9 @@ static int sym_update(IsoglSymbol *s, const isogl_symbol_params *params) {
     build.picks = NULL;
     build.pick_count = 0;
 
-    isogl_symbol_params fresh_params;
-    if (sym_params_copy(params, &fresh_params, s->sheet_scale) != 0) {
-        sym_build_free_contents(&build);
-        return -1;
-    }
     sym_params_free_contents(&s->params);
     s->params = fresh_params;
+    s->sheet_scale = scale;
 
     sym_build_free_contents(&build);
     return 0;
@@ -1063,16 +1109,40 @@ void isogl_symbol_cleanup(void) {
     symbol_capacity = 0;
     next_symbol_id = 1;
     symbol_font = NULL;
+    symbol_sheet_scale = 1.0;
     symbol_initialized = 0;
 }
 
 isogl_symbol_id isogl_symbol_create(const char *type_name,
                                     const isogl_symbol_params *params,
                                     double sheet_scale) {
+    /* The module-wide scale is authoritative.  Keep the argument for ABI
+     * compatibility, but do not let it override the global. */
+    (void)sheet_scale;
     const isogl_symbol_type *type = isogl_symbol_find_type(type_name);
     if (!type || !params) return 0;
-    double scale = sheet_scale > 0.0 ? sheet_scale : params->sheet_scale;
-    return sym_create(type, params, scale);
+    return sym_create(type, params, symbol_sheet_scale);
+}
+
+double isogl_symbol_get_sheet_scale(void) {
+    return symbol_sheet_scale;
+}
+
+int isogl_symbol_set_sheet_scale(double scale) {
+    if (!isfinite(scale) || !(scale > 0.0)) return -1;
+
+    symbol_sheet_scale = scale;
+    if (!symbol_initialized) return 0;
+
+    /* Regenerate every live symbol in place.  sym_update() is atomic, so a
+     * failing symbol keeps its previous geometry and applied scale. */
+    int failed = 0;
+    for (size_t i = 0; i < symbol_slots; ++i) {
+        IsoglSymbol *s = &symbols[i];
+        if (!s->alive) continue;
+        if (sym_update(s, &s->params) != 0) failed = 1;
+    }
+    return failed ? -1 : 0;
 }
 
 isogl_symbol_params *isogl_symbol_params_create(const char *type_name) {
@@ -1121,7 +1191,7 @@ isogl_symbol_id isogl_symbol_create_dimension(const IsoglDimensionDesc *d) {
     if (!d) return 0;
     isogl_symbol_params params;
     if (sym_params_alloc(&dimension_type, &params,
-                         d->sheet_scale > 0.0 ? d->sheet_scale : 1.0) != 0) {
+                         symbol_sheet_scale) != 0) {
         return 0;
     }
 
@@ -1155,7 +1225,7 @@ isogl_symbol_id isogl_symbol_create_center_mark(const IsoglCenterMarkDesc *d) {
     if (!d) return 0;
     isogl_symbol_params params;
     if (sym_params_alloc(&center_mark_type, &params,
-                         d->sheet_scale > 0.0 ? d->sheet_scale : 1.0) != 0) {
+                         symbol_sheet_scale) != 0) {
         return 0;
     }
 
@@ -1182,7 +1252,7 @@ int isogl_symbol_update_dimension(isogl_symbol_id id,
 
     isogl_symbol_params params;
     if (sym_params_alloc(&dimension_type, &params,
-                         s->sheet_scale) != 0) {
+                         symbol_sheet_scale) != 0) {
         return -1;
     }
 
@@ -1218,7 +1288,7 @@ int isogl_symbol_update_center_mark(isogl_symbol_id id,
     if (!s || s->type != &center_mark_type) return -1;
 
     isogl_symbol_params params;
-    if (sym_params_alloc(&center_mark_type, &params, s->sheet_scale) != 0) {
+    if (sym_params_alloc(&center_mark_type, &params, symbol_sheet_scale) != 0) {
         return -1;
     }
 

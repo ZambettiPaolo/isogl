@@ -35,6 +35,10 @@ static int param_index(const isogl_symbol_params *params, const char *key) {
 
 /* ---- a custom symbol type defined only in C ---------------------------- */
 
+/* When set, generate() emits a full build and then fails.  Used to prove the
+ * atomicity of params_update: the old symbol must survive untouched. */
+static int custom_fail_generate;
+
 enum {
     CUSTOM_POINTS = 0,
     CUSTOM_TEXTS,
@@ -139,6 +143,10 @@ static int custom_generate(const isogl_symbol_params *params,
     rc |= custom_emit_pick_segment(pick, p[0].x, p[0].y, p[1].x, p[1].y);
     rc |= custom_emit_pick_segment(pick, extra[0].x0, extra[0].y0,
                                    extra[0].x1, extra[0].y1);
+
+    /* Fail after a complete emission: sym_update() must discard the build and
+     * leave the previous VBO, strings, pick items and params in place. */
+    if (custom_fail_generate) return -1;
     return rc == 0 ? 0 : -1;
 }
 
@@ -197,6 +205,20 @@ int main(int argc, char **argv) {
     if (!font) return 2;
     isogl_font_init_vao();
     check(isogl_symbol_init(font) == 0, "symbol registry initialized");
+
+    /* ---- module-wide read-only sheet scale ----------------------------- */
+    check(isogl_symbol_get_sheet_scale() == 1.0,
+          "sheet scale defaults to 1.0");
+    check(isogl_symbol_set_sheet_scale(0.0) == -1,
+          "sheet scale rejects zero");
+    check(isogl_symbol_set_sheet_scale(-2.0) == -1,
+          "sheet scale rejects negatives");
+    check(isogl_symbol_set_sheet_scale(NAN) == -1,
+          "sheet scale rejects NaN");
+    check(isogl_symbol_set_sheet_scale(INFINITY) == -1,
+          "sheet scale rejects infinity");
+    check(isogl_symbol_get_sheet_scale() == 1.0,
+          "invalid sheet scale leaves the global unchanged");
 
     check(isogl_symbol_find_type("dimension") != NULL,
           "built-in dimension type registered");
@@ -350,7 +372,178 @@ int main(int argc, char **argv) {
                   "custom bounds follow the update");
             isogl_symbol_params_free(copy);
         }
+
+        /* ---- atomic failure: a later update fails after a full build ---- */
+        isogl_box before_fail;
+        check(isogl_symbol_bounds(custom_id, &before_fail) == 0,
+              "custom bounds before failed update");
+
+        isogl_symbol_params *fail_copy = NULL;
+        check(isogl_symbol_params_get(custom_id, &fail_copy) == 0,
+              "params_get before failed update");
+        if (fail_copy) {
+            int fp = param_index(fail_copy, "points");
+            int ft = param_index(fail_copy, "text");
+            fail_copy->params[fp].value.points[1].x = 200.0;
+            isogl_symbol_params_set_text(fail_copy, ft, 0, "BOOM");
+
+            custom_fail_generate = 1;
+            check(isogl_symbol_params_update(custom_id, fail_copy) == -1,
+                  "failed generation returns -1");
+            custom_fail_generate = 0;
+            isogl_symbol_params_free(fail_copy);
+        }
+
+        isogl_box after_fail;
+        check(isogl_symbol_bounds(custom_id, &after_fail) == 0 &&
+              fabs(after_fail.xmin - before_fail.xmin) < 1e-9 &&
+              fabs(after_fail.xmax - before_fail.xmax) < 1e-9 &&
+              fabs(after_fail.ymin - before_fail.ymin) < 1e-9 &&
+              fabs(after_fail.ymax - before_fail.ymax) < 1e-9,
+              "failed update keeps the old bounds");
+        check(isogl_symbol_get_selected(custom_id) == 1,
+              "failed update keeps the selection");
+
+        isogl_symbol_params *intact = NULL;
+        check(isogl_symbol_params_get(custom_id, &intact) == 0,
+              "params_get after failed update");
+        if (intact) {
+            int ip = param_index(intact, "points");
+            int it = param_index(intact, "text");
+            check(fabs(intact->params[ip].value.points[1].x - 70.0) < 1e-6,
+                  "failed update keeps the old params");
+            check(strcmp(intact->params[it].value.texts[0], "CHANGED") == 0,
+                  "failed update keeps the old text");
+            isogl_symbol_params_free(intact);
+        }
+
+        isogl_point old_screen;
+        isogl_world_to_screen(10.0f, 10.0f, &old_screen);
+        size_t fail_pick_count = 0;
+        check(isogl_symbol_pick_at(old_screen.x, old_screen.y,
+                                   ISOGL_PICK_DEFAULT_EXTENT,
+                                   picked, 64, &fail_pick_count) == 0 &&
+              fail_pick_count > 0 && picked[0] == custom_id,
+              "failed update keeps the old pick geometry");
+
+        /* ---- a symbol that fails to regenerate keeps its applied scale -- */
+        custom_fail_generate = 1;
+        check(isogl_symbol_set_sheet_scale(3.0) == -1,
+              "global scale change reports a failing symbol");
+        custom_fail_generate = 0;
+        check(isogl_symbol_get_sheet_scale() == 3.0,
+              "global scale is stored even when a symbol fails");
+        check(isogl_symbol_bounds(custom_id, &after_fail) == 0 &&
+              fabs(after_fail.xmax - before_fail.xmax) < 1e-9,
+              "failing symbol keeps its previous geometry");
+        isogl_symbol_params *stale = NULL;
+        check(isogl_symbol_params_get(custom_id, &stale) == 0,
+              "params_get after failed scale regeneration");
+        if (stale) {
+            int sp = param_index(stale, "scale");
+            check(sp >= 0 && stale->params[sp].value.number == 1.0,
+                  "failing symbol keeps its previous applied scale");
+            isogl_symbol_params_free(stale);
+        }
+        check(isogl_symbol_set_sheet_scale(1.0) == 0,
+              "scale restored after the failure");
+
         check(isogl_symbol_destroy(custom_id) == 0, "custom symbol destroyed");
+    }
+
+    /* ---- successful global scale regeneration -------------------------- */
+    IsoglCenterMarkDesc mark;
+    memset(&mark, 0, sizeof(mark));
+    mark.cx = 50.0;
+    mark.cy = 50.0;
+    mark.size_mm = 8.0;
+    mark.sheet_scale = 1.0;
+    mark.weight = 1;
+    mark.color[0] = mark.color[1] = 1.0f;
+    mark.color[2] = mark.color[3] = 1.0f;
+
+    isogl_symbol_id mark_id = isogl_symbol_create_center_mark(&mark);
+    check(mark_id != 0, "center mark created for the scale test");
+    if (mark_id) {
+        isogl_box mark_before;
+        check(isogl_symbol_bounds(mark_id, &mark_before) == 0,
+              "center mark bounds at scale 1");
+        isogl_symbol_set_selected(mark_id, 1);
+
+        isogl_point center_screen;
+        isogl_world_to_screen(50.0f, 50.0f, &center_screen);
+        uint32_t mark_pick[64];
+        size_t mark_pick_count = 0;
+        check(isogl_symbol_pick_at(center_screen.x, center_screen.y,
+                                   ISOGL_PICK_DEFAULT_EXTENT,
+                                   mark_pick, 64, &mark_pick_count) == 0 &&
+              mark_pick_count > 0 && mark_pick[0] == mark_id,
+              "center mark picked before the scale change");
+
+        check(isogl_symbol_set_sheet_scale(2.0) == 0,
+              "set_sheet_scale regenerates live symbols");
+        check(isogl_symbol_get_sheet_scale() == 2.0,
+              "get_sheet_scale reports the new scale");
+        check(isogl_symbol_get_selected(mark_id) == 1,
+              "scale regeneration preserves selection");
+
+        isogl_symbol_params *scaled = NULL;
+        check(isogl_symbol_params_get(mark_id, &scaled) == 0,
+              "params_get after scale regeneration");
+        if (scaled) {
+            int sp = param_index(scaled, "scale");
+            check(sp >= 0 && scaled->params[sp].value.number == 2.0,
+                  "params_get SCALE reflects the global scale");
+            check(sp >= 0 && scaled->params[sp].desc->editable == 0,
+                  "params_get SCALE remains read-only");
+            isogl_symbol_params_free(scaled);
+        }
+
+        isogl_box mark_after;
+        check(isogl_symbol_bounds(mark_id, &mark_after) == 0 &&
+              mark_after.xmax - mark_after.xmin <
+                  mark_before.xmax - mark_before.xmin - 1e-6,
+              "paper-sized geometry shrinks in model units at scale 2");
+
+        /* An incoming SCALE value must be ignored by params_update. */
+        isogl_symbol_params *tamper = NULL;
+        check(isogl_symbol_params_get(mark_id, &tamper) == 0,
+              "params_get before SCALE tamper");
+        if (tamper) {
+            int sp = param_index(tamper, "scale");
+            tamper->params[sp].value.number = 99.0;
+            check(isogl_symbol_params_update(mark_id, tamper) == 0,
+                  "params_update succeeds while ignoring SCALE");
+            isogl_symbol_params_free(tamper);
+        }
+        check(isogl_symbol_get_sheet_scale() == 2.0,
+              "params_update cannot change the global scale");
+        isogl_box tampered;
+        check(isogl_symbol_bounds(mark_id, &tampered) == 0 &&
+              fabs(tampered.xmax - mark_after.xmax) < 1e-9 &&
+              fabs(tampered.ymax - mark_after.ymax) < 1e-9,
+              "params_update ignores the incoming SCALE value");
+
+        isogl_symbol_params *reported = NULL;
+        check(isogl_symbol_params_get(mark_id, &reported) == 0,
+              "params_get after SCALE tamper");
+        if (reported) {
+            int sp = param_index(reported, "scale");
+            check(sp >= 0 && reported->params[sp].value.number == 2.0,
+                  "stored SCALE is still the global value");
+            isogl_symbol_params_free(reported);
+        }
+
+        size_t after_pick_count = 0;
+        check(isogl_symbol_pick_at(center_screen.x, center_screen.y,
+                                   ISOGL_PICK_DEFAULT_EXTENT,
+                                   mark_pick, 64, &after_pick_count) == 0 &&
+              after_pick_count > 0 && mark_pick[0] == mark_id,
+              "scale regeneration preserves the pick ID");
+
+        check(isogl_symbol_set_sheet_scale(1.0) == 0,
+              "scale reset to 1.0");
+        check(isogl_symbol_destroy(mark_id) == 0, "scale-test center mark destroyed");
     }
 
     isogl_symbol_cleanup();

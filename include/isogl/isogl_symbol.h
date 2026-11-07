@@ -111,8 +111,24 @@ const isogl_symbol_type *isogl_symbol_find_type(const char *name);
 size_t isogl_symbol_type_count(void);
 const isogl_symbol_type *isogl_symbol_type_at(size_t index);
 
-/* Create an instance of a registered C-defined type.  sheet_scale is copied
- * into params->sheet_scale and passed to the generator. */
+/*
+ * Module-wide sheet scale.  It is read-only from the parameter model: every
+ * live symbol uses this value, and params_get() reports it through the SCALE
+ * parameter (editable = 0).  params_update() ignores any SCALE value carried
+ * by the incoming params object.
+ *
+ * isogl_symbol_set_sheet_scale() regenerates every live symbol in place,
+ * preserving ID, pick ID and selection.  A symbol that fails to regenerate
+ * keeps its previous geometry and applied scale; the setter continues with
+ * the others and returns -1 if any failed, 0 otherwise.
+ */
+int isogl_symbol_set_sheet_scale(double scale);  /* finite and > 0 only */
+double isogl_symbol_get_sheet_scale(void);       /* defaults to 1.0 */
+
+/* Create an instance of a registered C-defined type.  sheet_scale is ignored:
+ * the module-wide scale from isogl_symbol_set_sheet_scale() is authoritative
+ * and is what the generator receives.  The argument stays for ABI
+ * compatibility. */
 isogl_symbol_id isogl_symbol_create(const char *type_name,
                                     const isogl_symbol_params *params,
                                     double sheet_scale);
@@ -126,7 +142,10 @@ void isogl_symbol_params_free(isogl_symbol_params *params);
 int isogl_symbol_params_get(isogl_symbol_id id, isogl_symbol_params **out);
 
 /* Replace all parameters of a live symbol, regenerating it in place.  ID,
- * pick ID and the selection flag are preserved. */
+ * pick ID and the selection flag are preserved.  The module-wide sheet scale
+ * is applied; a SCALE value in `params` is ignored.  Atomic per symbol: on
+ * validation/generation/allocation failure the old VBO, strings, pick items,
+ * params and geometry stay intact. */
 int isogl_symbol_params_update(isogl_symbol_id id,
                                const isogl_symbol_params *params);
 

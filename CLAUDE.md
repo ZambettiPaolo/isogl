@@ -268,6 +268,9 @@ Implementazione:
   vivo). `isogl_string_list_remove_by_pick_id` libera la stringa del simbolo;
   `isogl_symbol_update_dimension`/`isogl_symbol_update_center_mark`
   rigenerano un simbolo **in place**, preservando ID, pick e selezione.
+  La scala foglio è un globale in sola lettura; il percorso di update è
+  atomico per simbolo (nuovo VBO e nuove stringhe prima di rimuovere i
+  vecchi).
 - L'app `isocad` usa riferimenti simbolo: `CadDocument` conserva
   `isogl_symbol_id *symbols`; `cad_add_dimension_symbol` /
   `cad_add_center_mark_symbol` creano il simbolo e ne registrano l’ID. La
@@ -295,13 +298,14 @@ distrutto resta morto (tombstone).
 |---|---|
 | `isogl_symbol_init(font)` / `cleanup()` | registry GL; il font deve sopravvivere; cleanup prima di `isogl_cleanup()` |
 | `isogl_symbol_register_type(type)` / `find_type` / `type_count` / `type_at` | registry pubblico dei tipi C; nomi duplicati rifiutati; `dimension`/`center_mark` registrati all'init |
-| `isogl_symbol_create(type_name, params, scale)` | crea un'istanza di un tipo C registrato; copia i parametri; genera render+pick |
+| `isogl_symbol_set/get_sheet_scale(scale)` | scala foglio **globale** in sola lettura dai parametri; default 1.0; scarta valori non finiti o ≤ 0; `set` rigenera **tutti** i simboli vivi, conservando ID, pick e selezione |
+| `isogl_symbol_create(type_name, params, scale)` | crea un'istanza di un tipo C registrato; copia i parametri; genera render+pick. L'argomento `scale` resta solo per compatibilità ABI: vale la scala globale |
 | `isogl_symbol_params_create/free` | alloca/libera un set di parametri conforme allo schema del tipo |
-| `isogl_symbol_params_get(id, &out)` | copia profonda dei parametri correnti e della scala di contesto |
-| `isogl_symbol_params_update(id, params)` | rigenera in place da parametri tipizzati; conserva ID, pick e selezione |
+| `isogl_symbol_params_get(id, &out)` | copia profonda dei parametri correnti; il parametro `SCALE` riporta la scala applicata al simbolo (`editable = 0`) |
+| `isogl_symbol_params_update(id, params)` | rigenera in place da parametri tipizzati; conserva ID, pick e selezione; **atomico per simbolo**; ignora il valore `SCALE` in ingresso e usa quello globale |
 | `isogl_symbol_params_set_text(...)` | sostituisce un elemento testo con copia UTF-8 |
 | `isogl_symbol_create_dimension/center_mark` | wrapper compatibili che costruiscono i parametri generici |
-| `isogl_symbol_update_dimension/center_mark` | wrapper compatibili; la scala resta quella del simbolo (sola lettura) |
+| `isogl_symbol_update_dimension/center_mark` | wrapper compatibili; la scala è quella globale, non il campo del descrittore |
 | `isogl_symbol_destroy(id)` | rimuove VBO/stringhe e invalida l'ID |
 | `isogl_symbol_draw_all()` | disegna tutti i simboli vivi; non esiste un filtro di visibilità per simbolo |
 | `isogl_symbol_pick_at(px,py,extent,...)` | pick GPU sul registry; ritorna gli ID simbolo; non legge `CadDocument.symbols` |
@@ -336,19 +340,40 @@ I parametri sono liste tipizzate (`POINTS`, `TEXTS`, `SEGMENTS`), scalari
 sola lettura. Dimension e center mark sono adapter sui generatori puri
 esistenti; un tipo custom è nuovo codice C registrato dall'app.
 
+**Scala foglio globale.** `isogl_symbol_set_sheet_scale()` è l'unica autorità:
+tutti i simboli vivi usano quel valore, anche quelli creati con un argomento
+diverso (mantenuto per ABI). `params_get` riporta la scala applicata al
+simbolo nel parametro `SCALE`; `params_update` ignora il valore `SCALE`
+in ingresso. Se un simbolo non riesce a rigenerarsi durante il cambio globale,
+conserva geometria e scala precedenti e `set_sheet_scale` continua con gli
+altri, restituendo `-1` se almeno uno ha fallito (il globale resta comunque il
+nuovo valore).
+
+**Aggiornamento atomico per simbolo.** `params_update` e la rigenerazione di
+scala costruiscono prima i nuovi segmenti, tutte le glyph string e la copia dei
+parametri; poi creano un **nuovo VBO** e accodano le stringhe nuove con
+`pick_id` temporaneo 0. Solo a quel punto rimuovono le vecchie stringhe e il
+vecchio VBO, promuovono le nuove al `pick_id` reale, ripristinano la selezione
+e sostituiscono parametri e pick item. Un fallimento in validazione,
+generazione, allocazione o creazione stringhe lascia intatti VBO, stringhe,
+pick item, parametri e selezione precedenti. Limite residuo: gli array
+condivisi (`symbol_parts`, `symbol_strings`) non offrono una transazione
+globale; l'atomicità è per singolo simbolo e un cambio globale può quindi
+riuscire per alcuni simboli e fallire per altri.
+
 **Regola CAD.** Il CAD può leggere i metadati del tipo e i valori correnti con
 `params_get`/`type_at`, e modificare con `params_update`. Non può leggere VBO,
 glyph string o segmenti interni; l'ID resta l'handle per pick/selezione/explode.
-La scala è di contesto e non è modificabile dai parametri.
+La scala è globale e di sola lettura: si cambia solo con
+`isogl_symbol_set_sheet_scale`.
 
-**Lacune e passi successivi.** Restano: `isogl_symbol_set_sheet_scale()` con
-rigenerazione globale (slice 2); file v2 con `type` + `[symbols.params]` e
-skip/preservazione dei tipi sconosciuti (slice 3); pannello proprietà e
-`CadSymbolRef` in isocad; aggiornamento atomico VBO+stringhe (oggi il percorso
-generico crea prima le stringhe nuove, ma un fallimento in append può lasciare
-uno stato parziale); ridimensionamento dinamico delle liste (in v1 i tipi
-built-in hanno lunghezze fisse min=max); `isocad` conserva ancora solo gli ID e
-non usa `params_get`.
+**Lacune e passi successivi.** Restano: file v2 con `type` +
+`[symbols.params]` e skip/preservazione dei tipi sconosciuti (slice 3);
+pannello proprietà e `CadSymbolRef` in isocad; ridimensionamento dinamico delle
+liste (in v1 i tipi built-in hanno lunghezze fisse min=max); `isocad` conserva
+ancora solo gli ID, non usa `params_get` e non chiama ancora
+`isogl_symbol_set_sheet_scale` (continua a passare `doc->sheet_scale` ai
+wrapper, che ora è ignorato); transazione globale degli array condivisi.
 
 **Direzione CAD.** `CadSymbolRef` conterrà il nome del tipo e una copia di
 `isogl_symbol_params` (o li interrogherà con `params_get`) per salvataggio,

@@ -173,7 +173,9 @@ Poi chiama `cad_add_dimension_symbol()` e conserva solo l’`isogl_symbol_id` ne
   condividono l’`entity_id`;
 - **valore**: calcolato da `|p1-p2|`, mai memorizzato; le coordinate sono in
   unità documento, mentre altezza testo, frecce e sporgenze sono grandezze di
-  carta convertite con `doc->sheet_scale`;
+  carta convertite con la scala foglio del modulo (`isogl_symbol_get_sheet_scale`,
+  default 1.0). `doc->sheet_scale` viene ancora passato nel descrittore per
+  compatibilità, ma il registry ignora quell'argomento;
 - **pick**: le stesse linee/frecce più l’OBB del testo se `pick_text != 0`;
 - **selezione**: window = tutte le primitive contenute; crossing = almeno una
   contenuta o intersecante; `pick_text = 0` lascia il testo al solo click.
@@ -204,12 +206,34 @@ incluso. `dimension` e `center_mark` sono adapter sui generatori puri esistenti;
 un simbolo nuovo richiede un nuovo tipo C registrato con
 `isogl_symbol_register_type`.
 
-Restano da implementare: `isogl_symbol_set_sheet_scale()` con rigenerazione
-globale; file v2 con `type` + `[symbols.params]` (skip/preservazione dei tipi
-sconosciuti); pannello proprietà e `CadSymbolRef` in isocad (oggi conserva solo
-gli ID e non usa `params_get`); aggiornamento atomico VBO+stringhe e liste
-dinamiche. La direzione è un record CAD `CadSymbolRef { id, type, params }` con
-`cad_update_*_symbol`, `cad_remove_symbol`, `cad_explode_symbol`.
+**Scala foglio globale.** `isogl_symbol_set_sheet_scale(scale)` (valori finiti
+e > 0) è l'unica autorità: tutti i simboli vivi usano quel valore e la
+rigenerazione conserva ID, pick ID e selezione. `params_get` espone il
+parametro `SCALE` in sola lettura con la scala applicata; `params_update`
+ignora un eventuale `SCALE` in ingresso. Se un simbolo non riesce a
+rigenerarsi, conserva geometria e scala precedenti; il setter prosegue con gli
+altri e restituisce `-1` se almeno uno ha fallito. `isocad` non chiama ancora
+il setter e continua a passare `doc->sheet_scale` ai wrapper: l'argomento è
+ignorato, quindi per allineare il disegno alla scala del documento il chiamante
+deve invocare `isogl_symbol_set_sheet_scale`.
+
+**Aggiornamento atomico per simbolo.** `params_update` prepara nuova
+geometria, tutte le glyph string e la copia dei parametri prima di mutare il
+simbolo; crea un VBO nuovo e accoda le stringhe con `pick_id` temporaneo 0.
+Solo al commit rimuove vecchie stringhe/VBO, promuove le nuove al `pick_id`
+reale, ripristina la selezione e sostituisce parametri e pick item. Un
+fallimento di validazione, generazione o allocazione lascia intatto lo stato
+precedente. Limite residuo: gli array condivisi di VBO e stringhe non sono
+transazionali a livello globale, quindi un cambio di scala può riuscire per
+alcuni simboli e fallire per altri; l'atomicità è per singolo simbolo.
+
+Restano da implementare: file v2 con `type` + `[symbols.params]`
+(skip/preservazione dei tipi sconosciuti); pannello proprietà e `CadSymbolRef`
+in isocad (oggi conserva solo gli ID, non usa `params_get` e non chiama
+`isogl_symbol_set_sheet_scale`); liste dinamiche; transazione globale degli
+array condivisi. La direzione è un record CAD
+`CadSymbolRef { id, type, params }` con `cad_update_*_symbol`,
+`cad_remove_symbol`, `cad_explode_symbol`.
 
 ## Simboli e ambiente di test
 
