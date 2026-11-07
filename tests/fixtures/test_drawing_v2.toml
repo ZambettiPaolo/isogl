@@ -1,0 +1,88 @@
+# Schema v2 test drawing: symbols store a registered type name plus typed
+# parameter values.  Generation stays in C.  The old flat p1x/cx schema lives
+# in test_drawing.toml, which still exercises backward compatibility.
+
+[sheet]
+format = "A3"
+orientation = "landscape"
+scale_num = 1
+scale_den = 1
+schema_version = 2
+
+[[groups]]
+id = 0
+name = "root"
+parent = -1
+x = 0.0
+y = 0.0
+angle_deg = 0.0
+scale = 1.0
+
+[[groups]]
+id = 1
+name = "shifted"
+parent = 0
+x = 10.0
+y = 5.0
+angle_deg = 0.0
+scale = 1.0
+
+[[primitives]]
+group = 0
+type = "line"
+x0 = 10.0
+y0 = 10.0
+x1 = 100.0
+y1 = 10.0
+pattern = 0
+weight = 1
+layer = 0
+color = [1.0, 1.0, 1.0, 1.0]
+
+# Dimension control points are group-local; the loader transforms them by the
+# group chain (group 1 translates by +10/+5).
+[[symbols]]
+type = "dimension"
+group = 1
+
+[symbols.params]
+points = [[30.0, 40.0], [80.0, 40.0], [30.0, 50.0]]
+texts = ["", " mm"]
+segments = []
+distance = 0.0
+text_offset_mm = 0.0
+text_height_mm = 2.5
+arrow_left = 2
+arrow_right = 2
+precision = 1
+pick_text = true
+mark_points = true
+pattern = 0
+weight = 1
+layer = 2
+color = [1.0, 0.85, 0.2, 1.0]
+
+[[symbols]]
+type = "center_mark"
+group = 0
+
+[symbols.params]
+points = [[150.0, 60.0]]
+texts = []
+segments = []
+size_mm = 8.0
+pattern = 0
+weight = 2
+layer = 1
+color = [0.3, 0.9, 0.4, 1.0]
+
+# Not registered in C: the loader keeps the entry with params == NULL and skips
+# it with a warning.  The writer cannot preserve this block yet.
+[[symbols]]
+type = "unknown_marker"
+group = 0
+
+[symbols.params]
+points = [[1.0, 2.0]]
+texts = ["ignored"]
+segments = [[0.0, 0.0, 1.0, 1.0]]

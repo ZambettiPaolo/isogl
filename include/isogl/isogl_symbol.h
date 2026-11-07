@@ -154,6 +154,14 @@ int isogl_symbol_params_set_text(isogl_symbol_params *params,
                                  size_t param_index, size_t element,
                                  const char *utf8);
 
+/* Resize a list parameter (points, texts or segments) to `count` elements.
+ * The count must satisfy the schema's min_count/max_count.  New points and
+ * segments are zeroed; new texts are empty strings.  Existing elements are
+ * preserved.  Returns 0 on success, -1 for a non-list index, an out-of-range
+ * count or allocation failure. */
+int isogl_symbol_params_resize(isogl_symbol_params *params, size_t param_index,
+                               size_t count);
+
 /* font is used for dimension text layout; it must stay alive until cleanup. */
 int isogl_symbol_init(isogl_font_data *font);
 void isogl_symbol_cleanup(void);

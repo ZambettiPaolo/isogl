@@ -268,9 +268,32 @@ Implementazione:
   vivo). `isogl_string_list_remove_by_pick_id` libera la stringa del simbolo;
   `isogl_symbol_update_dimension`/`isogl_symbol_update_center_mark`
   rigenerano un simbolo **in place**, preservando ID, pick e selezione.
+  `isogl_symbol_params_resize` ridimensiona le liste (punti/testi/segmenti)
+  entro i limiti dello schema, per il loader e per l'editing.
   La scala foglio è un globale in sola lettura; il percorso di update è
   atomico per simbolo (nuovo VBO e nuove stringhe prima di rimuovere i
   vecchi).
+- File drawing schema v2 (`examples/demo/drawing_load.*`): `[[symbols]]` con
+  `type` + `group`, `[symbols.params]` con i valori per chiave dello schema
+  registrato; `DrawingSymbolEntry`/`DrawingSymbols` possiedono `type` e
+  `isogl_symbol_params` (`drawing_symbols_free`). Il loader applica le
+  trasformazioni di gruppo a punti e segmenti (le misure di carta non si
+  scalano), valida nomi/conteggi contro il tipo C, usa i default per le chiavi
+  assenti e traduce lo schema piatto storico (`p1x/p2x/p3x`, `cx/cy`). SCALE e
+  `sheet_scale` non si salvano per simbolo: la scala è globale in `[sheet]`.
+- Tipo sconosciuto: l'entry resta con `params == NULL`, viene saltata con un
+  warning e non contribuisce ai bounds; il loader non inventa geometria. Il
+  writer `drawing_write_symbols`/`drawing_save_symbols` riscrive
+  `[[symbols]]` + `[symbols.params]` omettendo SCALE e i blocchi sconosciuti
+  (nessuna rappresentazione grezza: non si promette preservazione).
+- Ordine della demo: `isogl_symbol_init(font)` prima di `drawing_load`, poi
+  `isogl_symbol_set_sheet_scale(scale_num/scale_den)` e
+  `isogl_symbol_create(type, params, scale)` per ogni entry nota. Il loader
+  non crea simboli.
+- Test: `tests/fixtures/test_drawing_v2.toml` (dimensione, center mark, tipo
+  sconosciuto) e `tests/test_drawing_load.c` coprono params, trasformazione,
+  skip, bounds, creazione, pick e round-trip writer→loader; la vecchia fixture
+  resta per la compatibilità p1x.
 - L'app `isocad` usa riferimenti simbolo: `CadDocument` conserva
   `isogl_symbol_id *symbols`; `cad_add_dimension_symbol` /
   `cad_add_center_mark_symbol` creano il simbolo e ne registrano l’ID. La
@@ -675,8 +698,10 @@ richiedono ancora un contesto GL.
 - `README.md` — architettura, contratto, build, install.
 - `apps/isocad/README.md` — modello del documento e stato dell'app.
 - `examples/demo/architecture.toml` — disegno gerarchico della demo
-  (`sheet` → `groups` → `primitives`), caricato da `examples/demo/drawing_load.c`
-  con trasformazioni di gruppo e promozione automatica A3 → A2.
+  (`sheet` → `groups` → `primitives` → `symbols` v2), caricato da
+  `examples/demo/drawing_load.c` con trasformazioni di gruppo e promozione
+  automatica A3 → A2. `tests/fixtures/test_drawing_v2.toml` è la fixture
+  schema v2; `tests/fixtures/test_drawing.toml` resta quella p1x legacy.
 - `include/isogl/isogl.h`, `include/isogl/isogl_font.h`,
   `include/isogl/isogl_style.h`, `include/isogl/isogl_overlay.h`,
   `include/isogl/isogl_panel.h` — API, overlay e tabelle normative.

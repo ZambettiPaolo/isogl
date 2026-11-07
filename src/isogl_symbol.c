@@ -357,6 +357,16 @@ int isogl_symbol_params_set_text(isogl_symbol_params *params,
     return sym_params_set_text_internal(params, param_index, element, utf8);
 }
 
+int isogl_symbol_params_resize(isogl_symbol_params *params, size_t param_index,
+                               size_t count) {
+    if (!params || param_index >= params->param_count) return -1;
+    isogl_symbol_param *p = &params->params[param_index];
+    if (!p->desc || !sym_kind_is_list(p->desc->kind)) return -1;
+    if (count < p->desc->min_count) return -1;
+    if (p->desc->max_count != 0 && count > p->desc->max_count) return -1;
+    return sym_param_resize(p, count);
+}
+
 /* ---- built-in types: dimension and center mark -------------------------- */
 
 enum {

@@ -3,6 +3,7 @@ format = "A3"
 orientation = "landscape"
 scale_num = 1
 scale_den = 1
+schema_version = 2
 
 [[groups]]
 id = 0
@@ -1427,42 +1428,41 @@ x = 392.000
 y = 66.800
 height_mm = 3.500
 angle_deg = 0.0
-text = "C types + params API (slice 1)"
+text = "typed symbol params (schema v2)"
 color = [0.62, 0.68, 0.78, 1.00]
 
-# Real isogl symbols created by the demo through the existing registry API.
+# Real isogl symbols created by the demo through the typed params registry.
+# Generation stays in C; the file stores the type name and parameter values.
 [[symbols]]
-group = 14
 type = "dimension"
-p1x = 402.000
-p1y = 34.800
-p2x = 502.000
-p2y = 34.800
-p3x = 402.000
-p3y = 49.800
+group = 14
+
+[symbols.params]
+points = [[402.000, 34.800], [502.000, 34.800], [402.000, 49.800]]
+texts = ["", " mm"]
+segments = []
 distance = 0.0
 text_offset_mm = 0.0
 text_height_mm = 3.5
-sheet_scale = 1.0
-text_left = ""
-text_right = " mm"
 arrow_left = 2
 arrow_right = 2
 precision = 1
-pick_text = 1
-mark_points = 1
+pick_text = true
+mark_points = true
 pattern = 0
 weight = 1
 layer = 0
 color = [0.40, 0.88, 1.00, 1.00]
 
 [[symbols]]
-group = 14
 type = "center_mark"
-cx = 517.000
-cy = 39.800
+group = 14
+
+[symbols.params]
+points = [[517.000, 39.800]]
+texts = []
+segments = []
 size_mm = 6.0
-sheet_scale = 1.0
 pattern = 0
 weight = 1
 layer = 0

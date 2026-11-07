@@ -338,23 +338,503 @@ static int draw_emit_primitive(isogl_segment_list *segments,
 
 /* ---- symbols ----------------------------------------------------------- */
 
-typedef struct {
-    const isogl_font_data *font;
-    double sheet_scale;
-} DrawTextMetrics;
-
-static double draw_symbol_text_width(void *user, const char *utf8,
-                                     double height_mm) {
-    const DrawTextMetrics *metrics = user;
-    if (!metrics || !metrics->font || !utf8 || height_mm <= 0.0) return 0.0;
-
-    double font_height = (double)metrics->font->height;
-    if (font_height <= 0.0) return 0.0;
-
-    double scale = metrics->sheet_scale > 0.0 ? metrics->sheet_scale : 1.0;
-    return isogl_font_text_advance(metrics->font, utf8) * height_mm /
-           (font_height * scale);
+static char *draw_strdup(const char *text) {
+    if (!text) text = "";
+    size_t length = strlen(text) + 1;
+    char *copy = malloc(length);
+    if (copy) memcpy(copy, text, length);
+    return copy;
 }
+
+static int draw_param_index(const isogl_symbol_params *params,
+                            const char *key) {
+    if (!params || !key) return -1;
+    for (size_t i = 0; i < params->param_count; ++i) {
+        if (params->params[i].desc &&
+            strcmp(params->params[i].desc->key, key) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* Setters by key.  A key the C schema does not declare is ignored: the schema
+ * is authoritative and legacy fields must never invent parameters. */
+static int draw_param_set_number(isogl_symbol_params *params, const char *key,
+                                 double value) {
+    int index = draw_param_index(params, key);
+    if (index < 0) return 0;
+    isogl_symbol_param *p = &params->params[index];
+    if (!p->desc || (p->desc->kind != ISOGL_SYM_PARAM_NUMBER &&
+                     p->desc->kind != ISOGL_SYM_PARAM_SCALE)) {
+        return -1;
+    }
+    p->value.number = value;
+    return 0;
+}
+
+static int draw_param_set_int(isogl_symbol_params *params, const char *key,
+                              int value) {
+    int index = draw_param_index(params, key);
+    if (index < 0) return 0;
+    isogl_symbol_param *p = &params->params[index];
+    if (!p->desc || (p->desc->kind != ISOGL_SYM_PARAM_INTEGER &&
+                     p->desc->kind != ISOGL_SYM_PARAM_ENUM &&
+                     p->desc->kind != ISOGL_SYM_PARAM_BOOLEAN)) {
+        return -1;
+    }
+    if (p->desc->kind == ISOGL_SYM_PARAM_BOOLEAN) {
+        p->value.boolean = value ? 1 : 0;
+    } else {
+        p->value.integer = value;
+    }
+    return 0;
+}
+
+static int draw_param_set_color(isogl_symbol_params *params,
+                                const float color[4]) {
+    int index = draw_param_index(params, "color");
+    if (index < 0) return 0;
+    isogl_symbol_param *p = &params->params[index];
+    if (!p->desc || p->desc->kind != ISOGL_SYM_PARAM_COLOR) return -1;
+    memcpy(p->value.color, color, sizeof(p->value.color));
+    return 0;
+}
+
+static int draw_array_number(const toml_array_t *array, int index,
+                             double *out) {
+    toml_datum_t d = toml_double_at(array, index);
+    if (d.ok) {
+        *out = d.u.d;
+        return 0;
+    }
+    toml_datum_t i = toml_int_at(array, index);
+    if (i.ok) {
+        *out = (double)i.u.i;
+        return 0;
+    }
+    return -1;
+}
+
+static int draw_table_number(toml_table_t *t, const char *key, double *out,
+                             int *present) {
+    *present = toml_key_exists(t, key) ? 1 : 0;
+    if (!*present) return 0;
+
+    toml_datum_t d = toml_double_in(t, key);
+    if (d.ok) {
+        *out = d.u.d;
+        return 0;
+    }
+    d = toml_int_in(t, key);
+    if (d.ok) {
+        *out = (double)d.u.i;
+        return 0;
+    }
+    return -1;
+}
+
+static int draw_table_int(toml_table_t *t, const char *key, int *out,
+                          int *present) {
+    *present = toml_key_exists(t, key) ? 1 : 0;
+    if (!*present) return 0;
+
+    toml_datum_t d = toml_int_in(t, key);
+    if (!d.ok) return -1;
+    *out = (int)d.u.i;
+    return 0;
+}
+
+static int draw_table_bool(toml_table_t *t, const char *key, int *out,
+                           int *present) {
+    *present = toml_key_exists(t, key) ? 1 : 0;
+    if (!*present) return 0;
+
+    toml_datum_t d = toml_bool_in(t, key);
+    if (d.ok) {
+        *out = d.u.b ? 1 : 0;
+        return 0;
+    }
+    d = toml_int_in(t, key);
+    if (d.ok) {
+        *out = d.u.i != 0;
+        return 0;
+    }
+    return -1;
+}
+
+static int draw_check_count(const isogl_symbol_param_desc *desc, int count) {
+    if (count < 0) return -1;
+    if ((size_t)count < desc->min_count) return -1;
+    if (desc->max_count != 0 && (size_t)count > desc->max_count) return -1;
+    return 0;
+}
+
+/* Parse a [symbols.params] table into a params object created from the C type
+ * schema.  Missing keys keep the create() defaults.  Points and segments are
+ * group-local and are transformed here; paper sizes (mm) are not scaled.
+ * Returns 0 on success, -1 on a malformed/mismatched value. */
+static int draw_parse_param_table(toml_table_t *table,
+                                  isogl_symbol_params *params,
+                                  const DrawXform *xf) {
+    if (!params) return -1;
+
+    for (size_t i = 0; i < params->param_count; ++i) {
+        isogl_symbol_param *p = &params->params[i];
+        const isogl_symbol_param_desc *desc = p->desc;
+        if (!desc) return -1;
+
+        /* The sheet scale is global and read-only; never load it per symbol. */
+        if (desc->kind == ISOGL_SYM_PARAM_SCALE) continue;
+        if (!table || !toml_key_exists(table, desc->key)) continue;
+
+        switch (desc->kind) {
+            case ISOGL_SYM_PARAM_POINTS: {
+                toml_array_t *array = toml_array_in(table, desc->key);
+                if (!array) return -1;
+                int count = toml_array_nelem(array);
+                if (draw_check_count(desc, count) != 0) return -1;
+                if (isogl_symbol_params_resize(params, i,
+                                               (size_t)count) != 0) {
+                    return -1;
+                }
+                for (int j = 0; j < count; ++j) {
+                    toml_array_t *pair = toml_array_at(array, j);
+                    if (!pair || toml_array_nelem(pair) < 2) return -1;
+                    double x, y;
+                    if (draw_array_number(pair, 0, &x) != 0 ||
+                        draw_array_number(pair, 1, &y) != 0) {
+                        return -1;
+                    }
+                    double tx, ty;
+                    draw_xform_point(xf, x, y, &tx, &ty);
+                    p->value.points[j].x = tx;
+                    p->value.points[j].y = ty;
+                }
+                break;
+            }
+
+            case ISOGL_SYM_PARAM_TEXTS: {
+                toml_array_t *array = toml_array_in(table, desc->key);
+                if (!array) return -1;
+                int count = toml_array_nelem(array);
+                if (draw_check_count(desc, count) != 0) return -1;
+                if (isogl_symbol_params_resize(params, i,
+                                               (size_t)count) != 0) {
+                    return -1;
+                }
+                for (int j = 0; j < count; ++j) {
+                    toml_datum_t s = toml_string_at(array, j);
+                    if (!s.ok) return -1;
+                    int rc = isogl_symbol_params_set_text(
+                        params, i, (size_t)j, s.u.s);
+                    free(s.u.s);
+                    if (rc != 0) return -1;
+                }
+                break;
+            }
+
+            case ISOGL_SYM_PARAM_SEGMENTS: {
+                toml_array_t *array = toml_array_in(table, desc->key);
+                if (!array) return -1;
+                int count = toml_array_nelem(array);
+                if (draw_check_count(desc, count) != 0) return -1;
+                if (isogl_symbol_params_resize(params, i,
+                                               (size_t)count) != 0) {
+                    return -1;
+                }
+                for (int j = 0; j < count; ++j) {
+                    toml_array_t *quad = toml_array_at(array, j);
+                    if (!quad || toml_array_nelem(quad) < 4) return -1;
+                    double v[4];
+                    for (int k = 0; k < 4; ++k) {
+                        if (draw_array_number(quad, k, &v[k]) != 0) return -1;
+                    }
+                    double x0, y0, x1, y1;
+                    draw_xform_point(xf, v[0], v[1], &x0, &y0);
+                    draw_xform_point(xf, v[2], v[3], &x1, &y1);
+                    p->value.segments[j] =
+                        (isogl_symbol_segment){x0, y0, x1, y1};
+                }
+                break;
+            }
+
+            case ISOGL_SYM_PARAM_NUMBER: {
+                double value = 0.0;
+                int present = 0;
+                if (draw_table_number(table, desc->key, &value,
+                                      &present) != 0) {
+                    return -1;
+                }
+                if (present) p->value.number = value;
+                break;
+            }
+
+            case ISOGL_SYM_PARAM_INTEGER:
+            case ISOGL_SYM_PARAM_ENUM: {
+                int value = 0;
+                int present = 0;
+                if (draw_table_int(table, desc->key, &value, &present) != 0) {
+                    return -1;
+                }
+                if (present) p->value.integer = value;
+                break;
+            }
+
+            case ISOGL_SYM_PARAM_BOOLEAN: {
+                int value = 0;
+                int present = 0;
+                if (draw_table_bool(table, desc->key, &value, &present) != 0) {
+                    return -1;
+                }
+                if (present) p->value.boolean = value;
+                break;
+            }
+
+            case ISOGL_SYM_PARAM_COLOR: {
+                toml_array_t *array = toml_array_in(table, desc->key);
+                if (!array) return -1;
+                int count = toml_array_nelem(array);
+                if (count < 3 || count > 4) return -1;
+                for (int j = 0; j < count; ++j) {
+                    double value;
+                    if (draw_array_number(array, j, &value) != 0) return -1;
+                    p->value.color[j] = (float)value;
+                }
+                break;
+            }
+
+            default:
+                return -1;
+        }
+    }
+
+    /* Unknown keys are a warning, not fatal: the C schema stays authoritative
+     * and a newer file must not break an older reader. */
+    if (table) {
+        for (int k = 0;; ++k) {
+            const char *key = toml_key_in(table, k);
+            if (!key) break;
+            if (draw_param_index(params, key) < 0) {
+                fprintf(stderr,
+                        "drawing_load: unknown symbol parameter '%s' ignored\n",
+                        key);
+            }
+        }
+    }
+    return 0;
+}
+
+/* ---- legacy flat symbol schema (translated to typed params) ------------- */
+
+static int draw_parse_legacy_symbol(toml_table_t *t, const DrawXform *xf,
+                                    const char *raw_type,
+                                    DrawingSymbolEntry *out) {
+    const char *type_name =
+        strcmp(raw_type, "center") == 0 ? "center_mark" : raw_type;
+    const isogl_symbol_type *type = isogl_symbol_find_type(type_name);
+
+    out->type = draw_strdup(type_name);
+    if (!out->type) return -1;
+
+    if (!type) {
+        fprintf(stderr,
+                "drawing_load: unknown symbol type '%s'; entry skipped\n",
+                raw_type);
+        out->params = NULL;
+        return 0;
+    }
+
+    if (strcmp(type_name, "dimension") != 0 &&
+        strcmp(type_name, "center_mark") != 0) {
+        fprintf(stderr,
+                "drawing_load: legacy flat schema not supported for type '%s'; "
+                "entry skipped\n", raw_type);
+        out->params = NULL;
+        return 0;
+    }
+
+    isogl_symbol_params *params = isogl_symbol_params_create(type_name);
+    if (!params) return -1;
+
+    int rc = 0;
+    if (strcmp(type_name, "dimension") == 0) {
+        int points = draw_param_index(params, "points");
+        int texts = draw_param_index(params, "texts");
+        if (points < 0 || params->params[points].count != 3 ||
+            texts < 0 || params->params[texts].count != 2) {
+            rc = -1;
+        } else {
+            const char *xkeys[3] = {"p1x", "p2x", "p3x"};
+            const char *ykeys[3] = {"p1y", "p2y", "p3y"};
+            for (int i = 0; i < 3; ++i) {
+                double x = draw_double(t, xkeys[i], 0.0);
+                double y = draw_double(t, ykeys[i], 0.0);
+                double tx, ty;
+                draw_xform_point(xf, x, y, &tx, &ty);
+                params->params[points].value.points[i].x = tx;
+                params->params[points].value.points[i].y = ty;
+            }
+
+            char left[32], right[32];
+            draw_string(t, "text_left", left, sizeof(left), "");
+            draw_string(t, "text_right", right, sizeof(right), "");
+            if (isogl_symbol_params_set_text(params, (size_t)texts, 0,
+                                             left) != 0 ||
+                isogl_symbol_params_set_text(params, (size_t)texts, 1,
+                                             right) != 0) {
+                rc = -1;
+            } else {
+                int arrow_left =
+                    draw_int(t, "arrow_left", ISOGL_DIM_ARROW_OPEN);
+                int arrow_right =
+                    draw_int(t, "arrow_right", ISOGL_DIM_ARROW_OPEN);
+                if (arrow_left < 0 ||
+                    arrow_left > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+                    arrow_left = ISOGL_DIM_ARROW_OPEN;
+                }
+                if (arrow_right < 0 ||
+                    arrow_right > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+                    arrow_right = ISOGL_DIM_ARROW_OPEN;
+                }
+
+                rc |= draw_param_set_number(
+                    params, "distance", draw_double(t, "distance", 0.0));
+                rc |= draw_param_set_number(
+                    params, "text_offset_mm",
+                    draw_double(t, "text_offset_mm", 0.0));
+                rc |= draw_param_set_number(
+                    params, "text_height_mm",
+                    draw_double(t, "text_height_mm", 3.5));
+                rc |= draw_param_set_int(
+                    params, "precision", draw_int(t, "precision", 1));
+                rc |= draw_param_set_int(
+                    params, "pick_text", draw_int(t, "pick_text", 1));
+                rc |= draw_param_set_int(
+                    params, "mark_points", draw_int(t, "mark_points", 0));
+                rc |= draw_param_set_int(params, "arrow_left", arrow_left);
+                rc |= draw_param_set_int(params, "arrow_right", arrow_right);
+            }
+        }
+    } else {
+        int points = draw_param_index(params, "points");
+        if (points < 0 || params->params[points].count != 1) {
+            rc = -1;
+        } else {
+            double x = draw_double(t, "cx", 0.0);
+            double y = draw_double(t, "cy", 0.0);
+            double tx, ty;
+            draw_xform_point(xf, x, y, &tx, &ty);
+            params->params[points].value.points[0].x = tx;
+            params->params[points].value.points[0].y = ty;
+            rc |= draw_param_set_number(
+                params, "size_mm", draw_double(t, "size_mm", 8.0));
+        }
+    }
+
+    uint8_t pattern = 0;
+    uint8_t weight = 1;
+    uint8_t layer = 0;
+    float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (rc == 0) {
+        draw_style_fields(t, &pattern, &weight, &layer, color);
+        rc |= draw_param_set_int(params, "pattern", pattern);
+        rc |= draw_param_set_int(params, "weight", weight);
+        rc |= draw_param_set_int(params, "layer", layer);
+        rc |= draw_param_set_color(params, color);
+    }
+
+    if (rc != 0 || (type->validate && type->validate(params) != 0)) {
+        isogl_symbol_params_free(params);
+        free(out->type);
+        out->type = NULL;
+        return -1;
+    }
+
+    out->params = params;
+    return 0;
+}
+
+/* ---- symbol entry parsing ---------------------------------------------- */
+
+static void drawing_symbol_entry_free(DrawingSymbolEntry *entry) {
+    if (!entry) return;
+    free(entry->type);
+    isogl_symbol_params_free(entry->params);
+    memset(entry, 0, sizeof(*entry));
+}
+
+static int draw_parse_symbol_entry(toml_table_t *t, const DrawGroup *groups,
+                                   int group_count,
+                                   const DrawingSheetInfo *sheet,
+                                   DrawingSymbolEntry *out) {
+    if (!t || !out) return -1;
+
+    memset(out, 0, sizeof(*out));
+    out->group = draw_int(t, "group", 0);
+
+    DrawXform xf;
+    if (draw_group_xform_rec(groups, group_count, out->group, 0, &xf) != 0) {
+        fprintf(stderr, "drawing_load: symbol uses invalid group %d\n",
+                out->group);
+        return -1;
+    }
+
+    char type[64];
+    draw_string(t, "type", type, sizeof(type), "");
+    if (type[0] == '\0') {
+        fprintf(stderr, "drawing_load: symbol entry without a type\n");
+        return -1;
+    }
+
+    toml_table_t *param_table = toml_table_in(t, "params");
+
+    /* No params table and schema v1: the flat p1x/cx layout. */
+    if (!param_table && sheet->schema_version < 2) {
+        return draw_parse_legacy_symbol(t, &xf, type, out);
+    }
+
+    const isogl_symbol_type *type_desc = isogl_symbol_find_type(type);
+    out->type = draw_strdup(type);
+    if (!out->type) return -1;
+
+    if (!type_desc) {
+        fprintf(stderr,
+                "drawing_load: unknown symbol type '%s'; entry skipped\n",
+                type);
+        out->params = NULL;
+        return 0;
+    }
+
+    isogl_symbol_params *params = isogl_symbol_params_create(type);
+    if (!params) {
+        drawing_symbol_entry_free(out);
+        return -1;
+    }
+
+    if (draw_parse_param_table(param_table, params, &xf) != 0) {
+        fprintf(stderr,
+                "drawing_load: malformed parameters for symbol type '%s'\n",
+                type);
+        isogl_symbol_params_free(params);
+        drawing_symbol_entry_free(out);
+        return -1;
+    }
+
+    if (type_desc->validate && type_desc->validate(params) != 0) {
+        fprintf(stderr,
+                "drawing_load: symbol type '%s' failed schema validation\n",
+                type);
+        isogl_symbol_params_free(params);
+        drawing_symbol_entry_free(out);
+        return -1;
+    }
+
+    out->params = params;
+    return 0;
+}
+
+/* ---- symbol bounds ------------------------------------------------------ */
 
 typedef struct {
     DrawingBounds *bounds;
@@ -376,105 +856,196 @@ static int draw_symbol_pick_emit(void *user, const IsoglSymPickItem *item) {
     return 0;
 }
 
-static int draw_symbol_bounds(const DrawingSymbolSpec *spec,
-                              const isogl_font_data *font,
-                              DrawingBounds *bounds) {
-    DrawSymbolBoundsCtx ctx = {bounds};
-    IsoglSymPickEmitter emitter = {&ctx, draw_symbol_pick_emit};
-
-    if (spec->type == DRAW_SYMBOL_DIMENSION) {
-        IsoglDimensionDesc d = spec->dimension;
-        d.pick_text = 1;   /* include the text OBB in the drawing bounds */
-        DrawTextMetrics metrics = {font, d.sheet_scale};
-        IsoglSymMetrics sym_metrics = {&metrics, draw_symbol_text_width};
-        return isogl_dimension_pick_geometry(&d, &sym_metrics, &emitter);
-    }
-
-    return isogl_center_mark_pick_geometry(&spec->center_mark, &emitter);
+static int draw_symbol_noop_emit(void *user, const IsoglSymItem *item) {
+    (void)user;
+    (void)item;
+    return 0;
 }
 
-static int draw_parse_symbol(toml_table_t *t, const DrawGroup *groups,
-                             int group_count, double default_sheet_scale,
-                             DrawingSymbolSpec *out) {
-    if (!t || !out) return -1;
+static int draw_symbol_bounds(const DrawingSymbolEntry *entry,
+                              const isogl_font_data *font,
+                              double sheet_scale,
+                              DrawingBounds *bounds) {
+    /* Unknown types have no params and no geometry; they never contribute. */
+    if (!entry || !entry->params) return 0;
 
-    memset(out, 0, sizeof(*out));
-    out->group = draw_int(t, "group", 0);
+    DrawSymbolBoundsCtx ctx = {bounds};
+    IsoglSymPickEmitter pick = {&ctx, draw_symbol_pick_emit};
+    IsoglSymEmitter render = {NULL, draw_symbol_noop_emit};
+    isogl_symbol_gen_context gen = {font, sheet_scale};
+    return entry->params->type->generate(entry->params, &gen, &render, &pick);
+}
 
-    DrawXform xf;
-    if (draw_group_xform_rec(groups, group_count, out->group, 0, &xf) != 0) {
-        return -1;
+/* ---- writer ------------------------------------------------------------- */
+
+static int draw_write_double(FILE *out, double value) {
+    if (!isfinite(value)) return -1;
+    char buffer[64];
+    int n = snprintf(buffer, sizeof(buffer), "%.17g", value);
+    if (n < 0 || (size_t)n >= sizeof(buffer)) return -1;
+    /* TOML distinguishes integers from floats.  Force a decimal point so the
+     * value reloads as a double even when %g drops the trailing ".0". */
+    if (!strpbrk(buffer, ".eE")) {
+        if ((size_t)n + 2 >= sizeof(buffer)) return -1;
+        buffer[n++] = '.';
+        buffer[n++] = '0';
+        buffer[n] = '\0';
     }
+    return fputs(buffer, out) < 0 ? -1 : 0;
+}
 
-    char type[32];
-    draw_string(t, "type", type, sizeof(type), "dimension");
-
-    uint8_t pattern = 0;
-    uint8_t weight = 1;
-    uint8_t layer = 0;
-    float color[4] = {1, 1, 1, 1};
-    draw_style_fields(t, &pattern, &weight, &layer, color);
-
-    if (strcmp(type, "dimension") == 0) {
-        out->type = DRAW_SYMBOL_DIMENSION;
-        IsoglDimensionDesc *d = &out->dimension;
-
-        double x0 = draw_double(t, "p1x", 0.0);
-        double y0 = draw_double(t, "p1y", 0.0);
-        double x1 = draw_double(t, "p2x", 0.0);
-        double y1 = draw_double(t, "p2y", 0.0);
-        double px = draw_double(t, "p3x", 0.0);
-        double py = draw_double(t, "p3y", 0.0);
-        draw_xform_point(&xf, x0, y0, &d->x0, &d->y0);
-        draw_xform_point(&xf, x1, y1, &d->x1, &d->y1);
-        draw_xform_point(&xf, px, py, &d->px, &d->py);
-
-        d->distance = draw_double(t, "distance", 0.0);
-        d->text_offset_mm = draw_double(t, "text_offset_mm", 0.0);
-        d->text_height_mm = draw_double(t, "text_height_mm", 3.5);
-        d->sheet_scale = draw_double(t, "sheet_scale", default_sheet_scale);
-        if (d->sheet_scale <= 0.0) d->sheet_scale = 1.0;
-        draw_string(t, "text_left", d->text_left, sizeof(d->text_left), "");
-        draw_string(t, "text_right", d->text_right, sizeof(d->text_right), "");
-        d->precision = draw_int(t, "precision", 1);
-        d->pick_text = draw_int(t, "pick_text", 1);
-        int arrow_left = draw_int(t, "arrow_left", ISOGL_DIM_ARROW_OPEN);
-        int arrow_right = draw_int(t, "arrow_right", ISOGL_DIM_ARROW_OPEN);
-        if (arrow_left < 0 || arrow_left > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
-            arrow_left = ISOGL_DIM_ARROW_OPEN;
+static int draw_write_string(FILE *out, const char *text) {
+    if (!text) text = "";
+    if (fputc('"', out) == EOF) return -1;
+    for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+        switch (*p) {
+            case '"': if (fputs("\\\"", out) < 0) return -1; break;
+            case '\\': if (fputs("\\\\", out) < 0) return -1; break;
+            case '\n': if (fputs("\\n", out) < 0) return -1; break;
+            case '\r': if (fputs("\\r", out) < 0) return -1; break;
+            case '\t': if (fputs("\\t", out) < 0) return -1; break;
+            default:
+                if (*p < 0x20) {
+                    if (fprintf(out, "\\u%04X", *p) < 0) return -1;
+                } else if (fputc(*p, out) == EOF) {
+                    return -1;
+                }
+                break;
         }
-        if (arrow_right < 0 || arrow_right > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
-            arrow_right = ISOGL_DIM_ARROW_OPEN;
+    }
+    return fputc('"', out) == EOF ? -1 : 0;
+}
+
+static int draw_write_param(FILE *out, const isogl_symbol_param *p) {
+    const isogl_symbol_param_desc *desc = p->desc;
+    if (!desc) return -1;
+
+    if (fprintf(out, "%s = ", desc->key) < 0) return -1;
+    int rc = 0;
+
+    switch (desc->kind) {
+        case ISOGL_SYM_PARAM_POINTS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputc(',', out) == EOF) return -1;
+                if (fputs("[", out) < 0 ||
+                    draw_write_double(out, p->value.points[i].x) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    draw_write_double(out, p->value.points[i].y) != 0 ||
+                    fputs("]", out) < 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_TEXTS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (draw_write_string(out,
+                                      p->value.texts[i]) != 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_SEGMENTS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                const isogl_symbol_segment *s = &p->value.segments[i];
+                if (i > 0 && fputc(',', out) == EOF) return -1;
+                if (fputs("[", out) < 0 ||
+                    draw_write_double(out, s->x0) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    draw_write_double(out, s->y0) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    draw_write_double(out, s->x1) != 0 ||
+                    fputs(", ", out) < 0 ||
+                    draw_write_double(out, s->y1) != 0 ||
+                    fputs("]", out) < 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_NUMBER:
+            rc = draw_write_double(out, p->value.number);
+            break;
+
+        case ISOGL_SYM_PARAM_INTEGER:
+        case ISOGL_SYM_PARAM_ENUM:
+            rc = fprintf(out, "%d", p->value.integer) < 0 ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_BOOLEAN:
+            rc = fputs(p->value.boolean ? "true" : "false", out) < 0 ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_COLOR:
+            if (fputc('[', out) == EOF) return -1;
+            for (int i = 0; i < 4; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (draw_write_double(out, p->value.color[i]) != 0) return -1;
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_SCALE:
+            /* Global sheet scale; never saved per symbol. */
+            return 0;
+
+        default:
+            return -1;
+    }
+    return rc;
+}
+
+int drawing_write_symbols(FILE *out, const DrawingSymbols *symbols) {
+    if (!out || !symbols) return -1;
+
+    for (size_t i = 0; i < symbols->count; ++i) {
+        const DrawingSymbolEntry *entry = &symbols->items[i];
+        /* Unknown types have no typed params.  There is no raw representation
+         * yet, so they cannot be preserved by the writer. */
+        if (!entry->params) continue;
+
+        if (fputs("[[symbols]]\ntype = ", out) < 0 ||
+            draw_write_string(out, entry->type) != 0 ||
+            fprintf(out, "\ngroup = %d\n\n[symbols.params]\n",
+                    entry->group) < 0) {
+            return -1;
         }
-        d->arrow_left = (IsoglDimensionArrow)arrow_left;
-        d->arrow_right = (IsoglDimensionArrow)arrow_right;
-        d->mark_points = draw_int(t, "mark_points", 0);
-        d->pattern = pattern;
-        d->weight = weight;
-        d->layer = layer;
-        memcpy(d->color, color, sizeof(d->color));
-        return 0;
+
+        for (size_t j = 0; j < entry->params->param_count; ++j) {
+            const isogl_symbol_param *p = &entry->params->params[j];
+            if (!p->desc) return -1;
+            if (p->desc->kind == ISOGL_SYM_PARAM_SCALE) continue;
+            if (draw_write_param(out, p) != 0) return -1;
+            if (fputc('\n', out) == EOF) return -1;
+        }
+        if (fputc('\n', out) == EOF) return -1;
     }
+    return ferror(out) ? -1 : 0;
+}
 
-    if (strcmp(type, "center_mark") == 0 || strcmp(type, "center") == 0) {
-        out->type = DRAW_SYMBOL_CENTER_MARK;
-        IsoglCenterMarkDesc *d = &out->center_mark;
+int drawing_save_symbols(const char *path, const DrawingSymbols *symbols) {
+    if (!path || !symbols) return -1;
+    FILE *out = fopen(path, "w");
+    if (!out) return -1;
+    int rc = drawing_write_symbols(out, symbols);
+    if (fclose(out) != 0) rc = -1;
+    return rc;
+}
 
-        double cx = draw_double(t, "cx", 0.0);
-        double cy = draw_double(t, "cy", 0.0);
-        draw_xform_point(&xf, cx, cy, &d->cx, &d->cy);
-
-        d->size_mm = draw_double(t, "size_mm", 8.0);
-        d->sheet_scale = draw_double(t, "sheet_scale", default_sheet_scale);
-        if (d->sheet_scale <= 0.0) d->sheet_scale = 1.0;
-        d->pattern = pattern;
-        d->weight = weight;
-        d->layer = layer;
-        memcpy(d->color, color, sizeof(d->color));
-        return 0;
+void drawing_symbols_free(DrawingSymbols *symbols) {
+    if (!symbols) return;
+    for (size_t i = 0; i < symbols->count; ++i) {
+        drawing_symbol_entry_free(&symbols->items[i]);
     }
-
-    return -1;
+    memset(symbols, 0, sizeof(*symbols));
 }
 
 static int draw_sheet_format(const char *name) {
@@ -521,6 +1092,7 @@ int drawing_load(const char *path, isogl_font_data *font,
                  DrawingSheetInfo *sheet,
                  DrawingSymbols *symbols) {
     if (!path || !segments || !strings || !sheet) return -1;
+    if (symbols) memset(symbols, 0, sizeof(*symbols));
 
     FILE *fp = fopen(path, "r");
     if (!fp) {
@@ -541,6 +1113,7 @@ int drawing_load(const char *path, isogl_font_data *font,
     sheet->orientation = ISOGL_ORIENTATION_LANDSCAPE;
     sheet->scale_num = 1;
     sheet->scale_den = 1;
+    sheet->schema_version = 1;
 
     toml_table_t *sheet_table = toml_table_in(doc, "sheet");
     if (sheet_table) {
@@ -556,6 +1129,8 @@ int drawing_load(const char *path, isogl_font_data *font,
             sheet->scale_num = num;
             sheet->scale_den = den;
         }
+        sheet->schema_version = draw_int(sheet_table, "schema_version", 1);
+        if (sheet->schema_version < 1) sheet->schema_version = 1;
     }
 
     DrawGroup groups[DRAW_MAX_GROUPS];
@@ -660,6 +1235,7 @@ int drawing_load(const char *path, isogl_font_data *font,
         int count = toml_array_nelem(symbol_array);
         for (int i = 0; i < count; ++i) {
             if (parsed_symbols.count >= DRAW_MAX_SYMBOLS) {
+                drawing_symbols_free(&parsed_symbols);
                 toml_free(doc);
                 fprintf(stderr, "drawing_load: too many symbols\n");
                 return -1;
@@ -667,13 +1243,13 @@ int drawing_load(const char *path, isogl_font_data *font,
             toml_table_t *t = toml_table_at(symbol_array, i);
             if (!t) continue;
 
-            DrawingSymbolSpec *spec =
+            DrawingSymbolEntry *entry =
                 &parsed_symbols.items[parsed_symbols.count];
-            if (draw_parse_symbol(t, groups, group_count, global_scale,
-                                  spec) != 0) {
-                toml_free(doc);
-                fprintf(stderr, "drawing_load: invalid symbol %d\n", i);
-                return -1;
+            if (draw_parse_symbol_entry(t, groups, group_count, sheet,
+                                        entry) != 0) {
+                drawing_symbol_entry_free(entry);
+                fprintf(stderr, "drawing_load: symbol %d skipped\n", i);
+                continue;
             }
             parsed_symbols.count++;
         }
@@ -685,6 +1261,7 @@ int drawing_load(const char *path, isogl_font_data *font,
         DrawPrimitive *p = &primitives[i];
         DrawXform xf = {0.0, 0.0, 0.0, 1.0};
         if (draw_group_xform_rec(groups, group_count, p->group, 0, &xf) != 0) {
+            drawing_symbols_free(&parsed_symbols);
             toml_free(doc);
             fprintf(stderr, "drawing_load: primitive %d has an invalid group\n",
                     i);
@@ -692,6 +1269,7 @@ int drawing_load(const char *path, isogl_font_data *font,
         }
         if (draw_emit_primitive(segments, strings, font, global_scale,
                                 p, &xf, &bounds) != 0) {
+            drawing_symbols_free(&parsed_symbols);
             toml_free(doc);
             fprintf(stderr, "drawing_load: failed to emit primitive %d\n", i);
             return -1;
@@ -699,14 +1277,20 @@ int drawing_load(const char *path, isogl_font_data *font,
     }
 
     for (size_t i = 0; i < parsed_symbols.count; ++i) {
-        if (draw_symbol_bounds(&parsed_symbols.items[i], font, &bounds) != 0) {
+        if (draw_symbol_bounds(&parsed_symbols.items[i], font,
+                               (double)global_scale, &bounds) != 0) {
+            drawing_symbols_free(&parsed_symbols);
             toml_free(doc);
             fprintf(stderr, "drawing_load: failed to bound symbol %zu\n", i);
             return -1;
         }
     }
 
-    if (symbols) *symbols = parsed_symbols;
+    if (symbols) {
+        *symbols = parsed_symbols;
+    } else {
+        drawing_symbols_free(&parsed_symbols);
+    }
 
     toml_free(doc);
 

@@ -92,9 +92,21 @@ int main(int argc, char **argv) {
     }
     isogl_font_init_vao();
 
+    /* The loader looks symbol types up in the C registry, so initialize the
+     * registry (with the current GL context and font) before drawing_load. */
+    if (isogl_symbol_init(font) != 0) {
+        printf("Failed to initialize the symbol registry\n");
+        isogl_font_free_data(font);
+        isogl_cleanup();
+        isogl_sdl_host_shutdown(&host);
+        SDL_Quit();
+        return 1;
+    }
+
     isogl_segment_list segments;
     if (isogl_segment_list_init(&segments, 512) != 0) {
         printf("Failed to allocate the segment list\n");
+        isogl_symbol_cleanup();
         isogl_font_free_data(font);
         isogl_cleanup();
         isogl_sdl_host_shutdown(&host);
@@ -125,8 +137,10 @@ int main(int argc, char **argv) {
     if (drawing_load(drawing_path, font, &segments, &strings, &sheet,
                      &symbol_specs) != 0) {
         printf("Failed to load drawing: %s\n", drawing_path);
+        drawing_symbols_free(&symbol_specs);
         isogl_segment_list_free(&segments);
         isogl_string_list_free(&strings);
+        isogl_symbol_cleanup();
         isogl_font_free_data(font);
         isogl_cleanup();
         isogl_sdl_host_shutdown(&host);
@@ -137,8 +151,10 @@ int main(int argc, char **argv) {
     isogl_scale scale = {sheet.scale_num, sheet.scale_den};
     if (isogl_set_sheet(sheet.width_mm, sheet.height_mm, scale) != 0) {
         printf("Failed to create the sheet\n");
+        drawing_symbols_free(&symbol_specs);
         isogl_segment_list_free(&segments);
         isogl_string_list_free(&strings);
+        isogl_symbol_cleanup();
         isogl_font_free_data(font);
         isogl_cleanup();
         isogl_sdl_host_shutdown(&host);
@@ -166,8 +182,10 @@ int main(int argc, char **argv) {
     isogl_segment_list_free(&segments);
     if (drawing_id == 0) {
         printf("Failed to upload the drawing\n");
+        drawing_symbols_free(&symbol_specs);
         isogl_string_list_free(&strings);
         isogl_vbo_array_free(&vbo_array);
+        isogl_symbol_cleanup();
         isogl_font_free_data(font);
         isogl_cleanup();
         isogl_sdl_host_shutdown(&host);
@@ -177,10 +195,15 @@ int main(int argc, char **argv) {
 
     isogl_zoom_all_sheet();
 
-    if (isogl_symbol_init(font) != 0) {
-        printf("Failed to initialize the symbol registry\n");
+    /* The global sheet scale is authoritative and read-only in the params
+     * model; symbols created after this call use it. */
+    if (isogl_symbol_set_sheet_scale((double)sheet.scale_num /
+                                     (double)sheet.scale_den) != 0) {
+        printf("Failed to set the symbol sheet scale\n");
+        drawing_symbols_free(&symbol_specs);
         isogl_string_list_free(&strings);
         isogl_vbo_array_free(&vbo_array);
+        isogl_symbol_cleanup();
         isogl_font_free_data(font);
         isogl_cleanup();
         isogl_sdl_host_shutdown(&host);
@@ -189,22 +212,28 @@ int main(int argc, char **argv) {
     }
 
     size_t created = 0;
+    size_t known = 0;
     for (size_t i = 0; i < symbol_specs.count; ++i) {
-        DrawingSymbolSpec *spec = &symbol_specs.items[i];
-        isogl_symbol_id id = 0;
-        if (spec->type == DRAW_SYMBOL_DIMENSION) {
-            id = isogl_symbol_create_dimension(&spec->dimension);
-        } else {
-            id = isogl_symbol_create_center_mark(&spec->center_mark);
+        DrawingSymbolEntry *entry = &symbol_specs.items[i];
+        if (!entry->params) {
+            fprintf(stderr, "symbol %zu: unknown type '%s' skipped\n",
+                    i, entry->type ? entry->type : "?");
+            continue;
         }
+        known++;
+        isogl_symbol_id id = isogl_symbol_create(
+            entry->type, entry->params, isogl_symbol_get_sheet_scale());
         if (id == 0) {
-            fprintf(stderr, "symbol %zu: creation failed\n", i);
+            fprintf(stderr, "symbol %zu (%s): creation failed\n",
+                    i, entry->type);
         } else {
             created++;
         }
     }
-    printf("symbols: %zu/%zu created\n", created, symbol_specs.count);
+    printf("symbols: %zu/%zu created (%zu known)\n",
+           created, symbol_specs.count, known);
     fflush(stdout);
+    drawing_symbols_free(&symbol_specs);
 
     float identity[16] = {
         1, 0, 0, 0,

@@ -213,10 +213,30 @@ La demo `build/isogl-demo` carica un disegno gerarchico dell'architettura di
 isogl: host/app, core `libisogl` SDL-free, overlay/pannelli,
 font/style/simboli e pipeline GPU. Il file
 `examples/demo/architecture.toml` contiene `[sheet]`, `[[groups]]` (con
-parent, origine, angolo e scala) e `[[primitives]]` (`line`, `rect`, `circle`,
-`arrow`, `text`). Il loader `examples/demo/drawing_load.c` applica le
-trasformazioni dei gruppi, calcola i bounds e appende segmenti e stringhe alle
-API isogl: nessun GL diretto.
+parent, origine, angolo e scala), `[[primitives]]` (`line`, `rect`, `circle`,
+`arrow`, `text`) e `[[symbols]]` in schema v2. Il loader
+`examples/demo/drawing_load.c` applica le trasformazioni dei gruppi, calcola i
+bounds e appende segmenti e stringhe alle API isogl: nessun GL diretto.
+
+Il formato dei simboli è schema v2: `[[symbols]]` contiene `type` e `group`,
+mentre `[symbols.params]` contiene i valori tipizzati con le chiavi dello
+schema C (`points`, `texts`, `segments`, numeri/interi/enum/bool/`color`). La
+scala foglio è globale in `[sheet] scale_num/scale_den` e non si salva per
+simbolo. Il loader risolve il tipo con `isogl_symbol_find_type`, valida nomi e
+conteggi contro lo schema registrato e applica le trasformazioni del gruppo ai
+soli punti/segmenti (le misure di carta non si scalano). I valori mancanti
+usano i default di `isogl_symbol_params_create`; un tipo sconosciuto resta
+nell'elenco con `params == NULL` e viene saltato con un warning, senza
+inventare geometria. Lo schema piatto storico (`p1x/p2x/p3x`, `cx/cy`) è
+tradotto automaticamente. `drawing_write_symbols()` /
+`drawing_save_symbols()` riscrivono la sezione `[[symbols]]` con
+`[symbols.params]` (SCALE omesso); i blocchi di tipo sconosciuto non sono
+ancora preservati in forma grezza.
+
+La demo inizializza `isogl_symbol` prima di `drawing_load()` (il loader
+interroga il registry dei tipi), poi applica la scala foglio globale con
+`isogl_symbol_set_sheet_scale()` e crea ogni istanza nota con
+`isogl_symbol_create(type, params, scale)`.
 
 Il file richiede A3; se i bounds non entrano nell'A3 (margine 10 mm), il loader
 passa all'A2 (o al formato successivo) e la demo chiama
