@@ -303,7 +303,7 @@ La verifica usa:
 ```sh
 make test-symbol-geometry   # geometria pura, headless
 make test-console-cmd       # parser console, headless
-make test-cad-symbols       # CadSymbolRef, update/remove/writer, GL
+make test-cad-symbols       # CadSymbolRef, update/remove/writer, round-trip, GL
 make test-symbols
 make test
 ```

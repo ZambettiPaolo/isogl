@@ -58,7 +58,8 @@ CAD_SYMBOLS_TEST_OBJS := $(BUILD)/tests/test_cad_symbols.o \
                          $(BUILD)/apps/isocad/src/cad.o \
                          $(BUILD)/apps/isocad/src/cad_commands.o \
                          $(BUILD)/apps/isocad/src/console.o \
-                         $(BUILD)/apps/isocad/src/console_cmd.o
+                         $(BUILD)/apps/isocad/src/console_cmd.o \
+                         $(BUILD)/examples/demo/drawing_load.o
 TEST_CONSOLE_CMD := $(BUILD)/test-console-cmd
 CONSOLE_CMD_TEST_OBJS := $(BUILD)/tests/test_console_cmd.o \
                          $(BUILD)/apps/isocad/src/console_cmd.o

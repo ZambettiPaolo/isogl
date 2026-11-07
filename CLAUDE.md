@@ -711,7 +711,8 @@ make -B SANITIZE=1 test
 `tests/test_console_cmd.c` girano senza finestra e senza linkare SDL/GL.
 `tests/test_overlay.c` usa un contesto GL (Xvfb in CI) e un FBO.
 `tests/test_cad_symbols.c` usa un contesto GL e verifica `CadSymbolRef`,
-update/remove, il writer schema v2 e l'esecuzione dei comandi console.
+update/remove, il writer schema v2, il round-trip writer→loader e
+l'esecuzione dei comandi console.
 `tests/test_symbols.c` usa un contesto GL e il disegno strutturato
 `tests/fixtures/test_drawing.toml`; il fake CAD `tests/fake_cad.*` non è il CAD
 di produzione. I test di `tests/test_core.c` richiedono ancora un contesto GL.

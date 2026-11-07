@@ -8,6 +8,7 @@
 #include "cad_commands.h"
 #include "console.h"
 #include "console_cmd.h"
+#include "drawing_load.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -328,6 +329,94 @@ int main(int argc, char **argv) {
                   "writer emits typed parameter values");
             check(strstr(section, "scale =") == NULL,
                   "writer omits the per-symbol SCALE parameter");
+
+            /* Round-trip through the schema-v2 loader: the file the app
+               writes must be readable by examples/demo/drawing_load.c.  The
+               writer emits group = 0, so one root group is enough. */
+            char full_path[] = "build/test-cad-symbols-full-XXXXXX";
+            int full_fd = mkstemp(full_path);
+            check(full_fd >= 0, "round-trip path created");
+            if (full_fd >= 0) {
+                close(full_fd);
+                FILE *full = fopen(full_path, "w");
+                int wrote = full != NULL;
+                if (full) {
+                    if (fputs(
+                            "[sheet]\n"
+                            "format = \"A3\"\n"
+                            "orientation = \"landscape\"\n"
+                            "scale_num = 1\n"
+                            "scale_den = 1\n"
+                            "schema_version = 2\n"
+                            "\n"
+                            "[[groups]]\n"
+                            "id = 0\n"
+                            "parent = -1\n"
+                            "x = 0.0\n"
+                            "y = 0.0\n"
+                            "angle_deg = 0.0\n"
+                            "scale = 1.0\n"
+                            "\n",
+                            full) < 0 ||
+                        fputs(section, full) < 0) {
+                        wrote = 0;
+                    }
+                    if (fclose(full) != 0) wrote = 0;
+                }
+                check(wrote, "round-trip drawing composed");
+
+                if (wrote) {
+                    isogl_segment_list rt_segments;
+                    memset(&rt_segments, 0, sizeof(rt_segments));
+                    isogl_string_list rt_strings = {0};
+                    DrawingSheetInfo rt_sheet;
+                    DrawingSymbols rt_symbols;
+                    memset(&rt_symbols, 0, sizeof(rt_symbols));
+                    int rt_ok = isogl_segment_list_init(&rt_segments, 64) == 0;
+                    if (rt_ok) {
+                        rt_ok = drawing_load(full_path, font, &rt_segments,
+                                             &rt_strings, &rt_sheet,
+                                             &rt_symbols) == 0;
+                    }
+                    check(rt_ok,
+                          "app writer output reloads through the v2 loader");
+                    check(rt_symbols.count == 2,
+                          "round-trip keeps both symbols");
+
+                    const DrawingSymbolEntry *rt_dim = NULL;
+                    const DrawingSymbolEntry *rt_mark = NULL;
+                    for (size_t i = 0; i < rt_symbols.count; ++i) {
+                        if (strcmp(rt_symbols.items[i].type, "dimension") == 0) {
+                            rt_dim = &rt_symbols.items[i];
+                        } else if (strcmp(rt_symbols.items[i].type,
+                                          "center_mark") == 0) {
+                            rt_mark = &rt_symbols.items[i];
+                        }
+                    }
+                    check(rt_dim && rt_dim->params && rt_mark &&
+                          rt_mark->params,
+                          "round-trip resolves both known types");
+                    if (rt_dim && rt_dim->params) {
+                        int rp = param_index(rt_dim->params, "points");
+                        int rtx = param_index(rt_dim->params, "texts");
+                        check(rp >= 0 &&
+                              rt_dim->params->params[rp].count == 3 &&
+                              fabs(rt_dim->params->params[rp]
+                                       .value.points[1].x - 175.0) < 1e-6 &&
+                              fabs(rt_dim->params->params[rp]
+                                       .value.points[1].y - 250.0) < 1e-6,
+                              "round-trip preserves edited points");
+                        check(rtx >= 0 &&
+                              strcmp(rt_dim->params->params[rtx]
+                                         .value.texts[1], "mm") == 0,
+                              "round-trip preserves edited text");
+                    }
+                    drawing_symbols_free(&rt_symbols);
+                    isogl_segment_list_free(&rt_segments);
+                    isogl_string_list_free(&rt_strings);
+                }
+                unlink(full_path);
+            }
             free(section);
         }
         unlink(save_path);
