@@ -1,15 +1,25 @@
 #include "cad.h"
+#include "cad_geometry.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define CAD_CIRCLE_SEGMENTS 96
-
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+#define CAD_TWO_PI (2.0 * M_PI)
+
+/* Paper-space chord tolerance converted to model units.  Zoom never enters:
+   the model is in paper millimetres, so tessellation is scale, not view,
+   driven. */
+static double cad_model_tolerance(const CadDocument *doc) {
+    double scale = (doc && doc->sheet_scale > 0.0f)
+                 ? (double)doc->sheet_scale : 1.0;
+    return CAD_CHORD_TOLERANCE_MM / scale;
+}
 
 static CadEntity *cad_push_entity(CadDocument *doc, CadEntityType type, int layer,
                                   isogl_line_type pattern, isogl_line_weight weight) {
@@ -73,6 +83,84 @@ static int cad_upload_entity(CadDocument *doc, CadEntity *entity,
     entity->vbo_id = id;
     isogl_vbo_array_set_pick_id(&doc->parts, id, entity->id);
     return 0;
+}
+
+/*
+ * Transient staging for a curve tessellation: the pure generator emits
+ * consecutive points, this sink turns them into GL_LINES vertex pairs with
+ * the entity style.  Nothing survives the call: cad_finish_tessellation()
+ * uploads and frees it.
+ */
+typedef struct {
+    const CadDocument *doc;
+    const CadEntity *entity;
+    isogl_vertex *vertices;
+    size_t count;
+    size_t capacity;
+    int have_previous;
+    double previous_x;
+    double previous_y;
+    double previous_distance;
+} CadTessellationSink;
+
+static int cad_sink_reserve(CadTessellationSink *sink, size_t extra) {
+    if (sink->count + extra <= sink->capacity) return 0;
+    size_t capacity = sink->capacity ? sink->capacity : 64;
+    while (capacity < sink->count + extra) capacity *= 2;
+    isogl_vertex *grown =
+        realloc(sink->vertices, capacity * sizeof(*grown));
+    if (!grown) return -1;
+    sink->vertices = grown;
+    sink->capacity = capacity;
+    return 0;
+}
+
+static int cad_tessellation_sink(void *user, double x, double y,
+                                 double distance) {
+    CadTessellationSink *sink = user;
+
+    if (!sink->have_previous) {
+        sink->have_previous = 1;
+        sink->previous_x = x;
+        sink->previous_y = y;
+        sink->previous_distance = distance;
+        return 0;
+    }
+
+    if (cad_sink_reserve(sink, 2) != 0) return -1;
+
+    sink->vertices[sink->count++] = cad_vertex(
+        sink->doc, sink->entity, (float)sink->previous_x,
+        (float)sink->previous_y, (float)sink->previous_distance);
+    sink->vertices[sink->count++] = cad_vertex(
+        sink->doc, sink->entity, (float)x, (float)y, (float)distance);
+
+    sink->previous_x = x;
+    sink->previous_y = y;
+    sink->previous_distance = distance;
+    return 0;
+}
+
+/*
+ * Upload the staged pairs (or discard them when the pure generator failed)
+ * and free the staging buffer.  Returns 0 on success.
+ */
+static int cad_finish_tessellation(CadDocument *doc, CadEntity *entity,
+                                   CadTessellationSink *sink,
+                                   int tessellation_rc) {
+    int rc = tessellation_rc;
+    if (rc == 0) {
+        rc = cad_upload_entity(doc, entity, sink->vertices, sink->count);
+    }
+    free(sink->vertices);
+    sink->vertices = NULL;
+    sink->count = 0;
+    sink->capacity = 0;
+    return rc;
+}
+
+static void cad_discard_last_entity(CadDocument *doc) {
+    if (doc && doc->count > 0) doc->count--;
 }
 
 // ===== AREA SELECTION HELPERS =====
@@ -208,6 +296,82 @@ static int cad_obb_intersects_rect(const float c[4][2],
     return 0;
 }
 
+/*
+ * Rectangle predicate for arcs and ellipses: the pure generator is replayed
+ * on demand at the print chord tolerance and each sampled segment is tested.
+ * No VBO and no persistent segment copy is read.
+ */
+typedef struct {
+    float xmin;
+    float ymin;
+    float xmax;
+    float ymax;
+    int contained;
+    int intersects;
+    int have_previous;
+    double previous_x;
+    double previous_y;
+} CadCurveRectTest;
+
+static int cad_curve_rect_sink(void *user, double x, double y,
+                               double distance) {
+    (void)distance;
+    CadCurveRectTest *test = user;
+
+    if (!cad_point_in_rect((float)x, (float)y, test->xmin, test->ymin,
+                           test->xmax, test->ymax)) {
+        test->contained = 0;
+    }
+    if (test->have_previous &&
+        cad_segment_intersects_rect((float)test->previous_x,
+                                    (float)test->previous_y,
+                                    (float)x, (float)y,
+                                    test->xmin, test->ymin,
+                                    test->xmax, test->ymax)) {
+        test->intersects = 1;
+    }
+    test->have_previous = 1;
+    test->previous_x = x;
+    test->previous_y = y;
+    return 0;
+}
+
+static void cad_curve_select_rect(const CadDocument *doc, const CadEntity *e,
+                                  float xmin, float ymin, float xmax,
+                                  float ymax, int *contained, int *intersects) {
+    CadCurveRectTest test;
+    memset(&test, 0, sizeof(test));
+    test.xmin = xmin;
+    test.ymin = ymin;
+    test.xmax = xmax;
+    test.ymax = ymax;
+    test.contained = 1;
+
+    double tolerance = cad_model_tolerance(doc);
+    int rc;
+    if (e->type == CAD_ARC) {
+        rc = cad_tessellate_arc(e->geom.arc.cx, e->geom.arc.cy,
+                                e->geom.arc.r, e->geom.arc.a0,
+                                e->geom.arc.sweep, tolerance,
+                                cad_curve_rect_sink, &test);
+    } else {
+        rc = cad_tessellate_ellipse(e->geom.ellipse.cx, e->geom.ellipse.cy,
+                                    e->geom.ellipse.rx, e->geom.ellipse.ry,
+                                    e->geom.ellipse.rotation, tolerance,
+                                    cad_curve_rect_sink, &test);
+    }
+
+    if (rc != 0) {
+        /* Invalid stored parameters (e.g. non-finite): report nothing rather
+           than a partial result.  The sink itself never allocates. */
+        *contained = 0;
+        *intersects = 0;
+        return;
+    }
+    *contained = test.contained;
+    *intersects = test.intersects;
+}
+
 static void cad_add_id(uint32_t *ids, size_t max, size_t *count, uint32_t id) {
     if (*count < max) {
         ids[*count] = id;
@@ -294,6 +458,11 @@ void cad_select_rect(const CadDocument *doc,
                               r <= farthest + 1e-6f);
                 break;
             }
+            case CAD_ARC:
+            case CAD_ELLIPSE:
+                cad_curve_select_rect(doc, e, xmin, ymin, xmax, ymax,
+                                      &is_contained, &intersects);
+                break;
             case CAD_TEXT: {
                 double scale = doc->sheet_scale > 0.0
                              ? (double)doc->sheet_scale : 1.0;
@@ -589,6 +758,10 @@ uint32_t cad_add_line(CadDocument *doc, int layer, isogl_line_type pattern,
 
 uint32_t cad_add_circle(CadDocument *doc, int layer, isogl_line_type pattern,
                         isogl_line_weight weight, float cx, float cy, float r) {
+    if (!doc || !isfinite(cx) || !isfinite(cy) || !isfinite(r) || r <= 0.0f) {
+        return 0;
+    }
+
     CadEntity *entity = cad_push_entity(doc, CAD_CIRCLE, layer, pattern, weight);
     if (!entity) return 0;
 
@@ -596,28 +769,137 @@ uint32_t cad_add_circle(CadDocument *doc, int layer, isogl_line_type pattern,
     entity->geom.circle.cy = cy;
     entity->geom.circle.r = r;
 
-    isogl_vertex vertices[CAD_CIRCLE_SEGMENTS * 2];
-    float px = cx + r;
-    float py = cy;
-    float distance = 0.0f;
+    CadTessellationSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.doc = doc;
+    sink.entity = entity;
 
-    for (int i = 0; i < CAD_CIRCLE_SEGMENTS; ++i) {
-        float angle = (float)(i + 1) * (2.0f * (float)M_PI / CAD_CIRCLE_SEGMENTS);
-        float nx = cx + r * cosf(angle);
-        float ny = cy + r * sinf(angle);
-        float dx = nx - px;
-        float dy = ny - py;
+    int rc = cad_tessellate_arc((double)cx, (double)cy, (double)r, 0.0,
+                                CAD_TWO_PI, cad_model_tolerance(doc),
+                                cad_tessellation_sink, &sink);
+    uint32_t id = entity->id;
+    if (cad_finish_tessellation(doc, entity, &sink, rc) != 0) {
+        cad_discard_last_entity(doc);
+        return 0;
+    }
+    return id;
+}
 
-        vertices[i * 2 + 0] = cad_vertex(doc, entity, px, py, distance);
-        distance += sqrtf(dx * dx + dy * dy);
-        vertices[i * 2 + 1] = cad_vertex(doc, entity, nx, ny, distance);
+uint32_t cad_add_ellipse(CadDocument *doc, int layer, isogl_line_type pattern,
+                         isogl_line_weight weight, float p1x, float p1y,
+                         float p2x, float p2y, float p3x, float p3y) {
+    if (!doc) return 0;
 
-        px = nx;
-        py = ny;
+    double cx, cy, rx, ry, rotation;
+    if (cad_ellipse_from_axis((double)p1x, (double)p1y, (double)p2x,
+                              (double)p2y, (double)p3x, (double)p3y,
+                              &cx, &cy, &rx, &ry, &rotation) != 0) {
+        return 0;
     }
 
-    cad_upload_entity(doc, entity, vertices, CAD_CIRCLE_SEGMENTS * 2);
-    return entity->id;
+    CadEntity *entity =
+        cad_push_entity(doc, CAD_ELLIPSE, layer, pattern, weight);
+    if (!entity) return 0;
+
+    entity->geom.ellipse.cx = (float)cx;
+    entity->geom.ellipse.cy = (float)cy;
+    entity->geom.ellipse.rx = (float)rx;
+    entity->geom.ellipse.ry = (float)ry;
+    entity->geom.ellipse.rotation = (float)rotation;
+
+    CadTessellationSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.doc = doc;
+    sink.entity = entity;
+
+    int rc = cad_tessellate_ellipse(cx, cy, rx, ry, rotation,
+                                    cad_model_tolerance(doc),
+                                    cad_tessellation_sink, &sink);
+    uint32_t id = entity->id;
+    if (cad_finish_tessellation(doc, entity, &sink, rc) != 0) {
+        cad_discard_last_entity(doc);
+        return 0;
+    }
+    return id;
+}
+
+uint32_t cad_add_arc_three_point(CadDocument *doc, int layer,
+                                 isogl_line_type pattern,
+                                 isogl_line_weight weight, float sx, float sy,
+                                 float ex, float ey, float cx, float cy) {
+    if (!doc) return 0;
+
+    double radius, a0, sweep;
+    if (cad_arc_three_point((double)sx, (double)sy, (double)ex, (double)ey,
+                            (double)cx, (double)cy,
+                            &radius, &a0, &sweep) != 0) {
+        return 0;
+    }
+
+    CadEntity *entity =
+        cad_push_entity(doc, CAD_ARC, layer, pattern, weight);
+    if (!entity) return 0;
+
+    entity->geom.arc.cx = cx;
+    entity->geom.arc.cy = cy;
+    entity->geom.arc.r = (float)radius;
+    entity->geom.arc.a0 = (float)a0;
+    entity->geom.arc.sweep = (float)sweep;
+
+    CadTessellationSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.doc = doc;
+    sink.entity = entity;
+
+    int rc = cad_tessellate_arc((double)cx, (double)cy, radius, a0, sweep,
+                                cad_model_tolerance(doc),
+                                cad_tessellation_sink, &sink);
+    uint32_t id = entity->id;
+    if (cad_finish_tessellation(doc, entity, &sink, rc) != 0) {
+        cad_discard_last_entity(doc);
+        return 0;
+    }
+    return id;
+}
+
+uint32_t cad_add_arc_center_angles(CadDocument *doc, int layer,
+                                   isogl_line_type pattern,
+                                   isogl_line_weight weight, float cx,
+                                   float cy, float radius, float angle1,
+                                   float angle2) {
+    if (!doc) return 0;
+
+    double a0, sweep;
+    if (cad_arc_center_angles((double)cx, (double)cy, (double)radius,
+                              (double)angle1, (double)angle2,
+                              &a0, &sweep) != 0) {
+        return 0;
+    }
+
+    CadEntity *entity =
+        cad_push_entity(doc, CAD_ARC, layer, pattern, weight);
+    if (!entity) return 0;
+
+    entity->geom.arc.cx = cx;
+    entity->geom.arc.cy = cy;
+    entity->geom.arc.r = radius;
+    entity->geom.arc.a0 = (float)a0;
+    entity->geom.arc.sweep = (float)sweep;
+
+    CadTessellationSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.doc = doc;
+    sink.entity = entity;
+
+    int rc = cad_tessellate_arc((double)cx, (double)cy, (double)radius, a0,
+                                sweep, cad_model_tolerance(doc),
+                                cad_tessellation_sink, &sink);
+    uint32_t id = entity->id;
+    if (cad_finish_tessellation(doc, entity, &sink, rc) != 0) {
+        cad_discard_last_entity(doc);
+        return 0;
+    }
+    return id;
 }
 
 uint32_t cad_add_rectangle(CadDocument *doc, int layer, isogl_line_type pattern,

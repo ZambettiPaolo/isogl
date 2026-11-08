@@ -21,10 +21,21 @@ typedef struct {
 typedef enum {
     CAD_LINE,
     CAD_CIRCLE,
+    CAD_ARC,
+    CAD_ELLIPSE,
     CAD_RECTANGLE,
     CAD_TEXT
 } CadEntityType;
 
+/*
+ * Analytic model of a CAD entity.  The GPU VBO is a derived mirror
+ * (vbo_id); selection and bounds use the parameters below, never the
+ * tessellated segments.
+ *
+ * arc: centre, radius, start angle and sweep in radians.  A live arc always
+ * has sweep in (0, 2*pi].
+ * ellipse: centre, semi-axes rx/ry and rotation in radians.
+ */
 typedef struct {
     uint32_t id;
     CadEntityType type;
@@ -36,6 +47,8 @@ typedef struct {
     union {
         struct { float x0, y0, x1, y1; } line;
         struct { float cx, cy, r; } circle;
+        struct { float cx, cy, r, a0, sweep; } arc;
+        struct { float cx, cy, rx, ry, rotation; } ellipse;
         struct { float x0, y0, x1, y1; } rect;
         struct { float x, y, height, angle; char text[128]; } label;
     } geom;
@@ -78,6 +91,42 @@ uint32_t cad_add_line(CadDocument *doc, int layer, isogl_line_type pattern,
                       float x1, float y1);
 uint32_t cad_add_circle(CadDocument *doc, int layer, isogl_line_type pattern,
                         isogl_line_weight weight, float cx, float cy, float r);
+
+/*
+ * Add an arc/ellipse entity and upload its tessellated VBO.  The chord
+ * tolerance is CAD_CHORD_TOLERANCE_MM / doc->sheet_scale, so it is a paper
+ * quantity independent of zoom.  The model is analytic; the VBO is derived
+ * and never mirrored on the CPU.
+ *
+ * Arc constructors:
+ *   cad_add_arc_three_point: radius = |start - centre|; the end must lie on
+ *     the same circle within CAD_ARC_RADIUS_ABS_TOL +
+ *     CAD_ARC_RADIUS_REL_TOL * radius.  The sweep is the counter-clockwise
+ *     delta (right-hand rule about +Z); a null or ambiguous sweep is rejected.
+ *   cad_add_arc_center_angles: radius > 0; the sweep is the counter-clockwise
+ *     delta from angle1 to angle2; a null/ambiguous sweep is rejected.
+ *   cad_add_ellipse: p1-p2 is the major axis (rx half its length, centre its
+ *     midpoint, rotation atan2(p2-p1)); ry is the perpendicular distance of
+ *     p3 from the p1-p2 line.  Degenerate axes and non-finite input are
+ *     rejected.
+ *
+ * All three return the new entity ID, or 0 on failure.  Failure leaves no
+ * partially built entity in the document (the monotonic ID is consumed but
+ * never reused).
+ */
+uint32_t cad_add_ellipse(CadDocument *doc, int layer, isogl_line_type pattern,
+                         isogl_line_weight weight, float p1x, float p1y,
+                         float p2x, float p2y, float p3x, float p3y);
+uint32_t cad_add_arc_three_point(CadDocument *doc, int layer,
+                                 isogl_line_type pattern,
+                                 isogl_line_weight weight, float sx, float sy,
+                                 float ex, float ey, float cx, float cy);
+uint32_t cad_add_arc_center_angles(CadDocument *doc, int layer,
+                                   isogl_line_type pattern,
+                                   isogl_line_weight weight, float cx,
+                                   float cy, float radius, float angle1,
+                                   float angle2);
+
 uint32_t cad_add_rectangle(CadDocument *doc, int layer, isogl_line_type pattern,
                            isogl_line_weight weight, float x0, float y0,
                            float x1, float y1);

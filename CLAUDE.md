@@ -34,12 +34,15 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
   (`examples/gtk4`), Qt6 `QOpenGLWidget` (`examples/qt6`). GTK4 e Qt6 usano i
   loro contesti EGL nativi: Wayland funziona senza `SDL_CreateWindowFrom`.
 
-Stato: Milestone A + UI screen-space. Esistono foglio, linee, cerchi,
-rettangoli, testo, pattern e pesi ISO, zoom/pan, modalità colori-spessore,
-selezione d’area persistente e i primi simboli isogl (quota, center mark) con
-registry, hit/pick/explode. L’app usa record `CadSymbolRef { id, type, params }`
-al posto della vecchia `CAD_DIMENSION`, espone metadati e modifica parametri da
-console (`sym list/info/set/points/remove`, `save`) e usa ID entità monotoni.
+Stato: Milestone A + UI screen-space. Esistono foglio, linee, cerchi, archi,
+ellissi, rettangoli, testo, pattern e pesi ISO, zoom/pan, modalità
+colori-spessore, selezione d’area persistente e i primi simboli isogl (quota,
+center mark) con registry, hit/pick/explode. L’app usa record
+`CadSymbolRef { id, type, params }` al posto della vecchia `CAD_DIMENSION`,
+espone metadati e modifica parametri da console (`sym list/info/set/points/remove`,
+`save`) e usa ID entità monotoni. Archi ed ellissi hanno un modello analitico
+(centro/raggio/angoli; centro/semiassi/rotazione) e un generatore puro in
+`apps/isocad/src/cad_geometry.*`; il VBO è solo lo specchio GPU derivato.
 
 L’interfaccia di isocad usa un **overlay screen-space a gruppi**:
 `isogl_overlay` batcha quad, linee e testo in un unico pass, con
@@ -50,8 +53,8 @@ dei pannelli (spessore per bordo, separatori, content rect). L’app compone
 pannelli, icone (un gruppo di linee locali per icona), hover, console e tooltip
 da gruppi; il costo UI è di 6–8 draw call. L’overlay è stato UI, non documento.
 
-Editing, azioni dei pulsanti, archi, polilinee, export e modello CAD gerarchico
-non sono implementati.
+Editing, azioni dei pulsanti, polilinee, export e modello CAD gerarchico non
+sono implementati.
 
 Il pick GPU è ora implementato in `isogl_pick_at` (`GL_R32UI`, box logico 8×8
 pixel, texture 16×16 per 2× di definizione, stesso VS/GS e `fs_pick.glsl` per
@@ -129,16 +132,23 @@ Regole che ne derivano:
 
 ## Invarianti e trappole
 
-- **Niente mirror della tessellazione.** Un cerchio a 96 segmenti costa
-  192 vertici × 32 B = 6 KiB. Diecimila cerchi = ~60 MiB. Il modello analitico
-  degli stessi cerchi è circa 1 MB. Duplicare i segmenti in RAM raddoppia il
-  dato più grande senza aggiungere capacità. L'**overlay UI** è l'eccezione
-  documentata: le sue liste CPU sono stato UI, non geometria del documento.
+- **Niente mirror della tessellazione.** Un vecchio cerchio a 96 segmenti
+  costava 192 vertici × 32 B = 6 KiB; diecimila cerchi ~60 MiB. Oggi il
+  conteggio è a tolleranza e il modello analitico resta in RAM, molto più
+  piccolo. Duplicare i segmenti in RAM raddoppia il dato più grande senza
+  aggiungere capacità. L'**overlay UI** è l'eccezione documentata: le sue liste
+  CPU sono stato UI, non geometria del documento.
 - **Tessellazione a tolleranza di corda, non a conteggio fisso.**
-  `N = ceil(π / acos(1 − s/r))`. La tolleranza è in mm di carta (0,02–0,05 mm,
-  sotto il peso minimo ISO di 0,18 mm) e **non** dipende dallo zoom. Con
-  `s = 0,05 mm`: r = 5 mm → N ≈ 23; r = 50 mm → N ≈ 71; r = 500 mm → N ≈ 223.
-  Il 96 fisso attuale è sbagliato sia per i raggi piccoli sia per i grandi.
+  `N = ceil(π / acos(1 − s/r))`, proporzionato allo sweep. La tolleranza è in
+  mm di carta (0,03 mm in `CAD_CHORD_TOLERANCE_MM`, sotto il peso minimo ISO di
+  0,18 mm) e **non** dipende dallo zoom; il chiamante la converte in unità
+  modello con `tolerance / sheet_scale`. Con `s = 0,05 mm`: r = 5 mm → N ≈ 23;
+  r = 50 mm → N ≈ 71; r = 500 mm → N ≈ 223. Il 96 fisso è stato rimosso:
+  cerchio, arco ed ellisse usano `cad_geometry` e hanno un cap di sicurezza
+  documentato (`CAD_TESSELLATION_MAX_SEGMENTS`). Per l'ellisse il conteggio
+  iniziale usa il semiasse maggiore e viene poi raffinato verificando
+  numericamente la sagitta: un conteggio basato solo sul raggio di curvatura
+  minimo sotto-campiona i vertici del semiasse maggiore.
 - **Stile per polilinea, non per entità.** In una quota la linea di quota e i
   riferimenti seguono il layer, ma punte e testo hanno vincoli propri. Oggi
   `cad_vertex()` prende pattern e peso dall'entità per tutti i vertici.
@@ -194,8 +204,11 @@ Regole che ne derivano:
 ## Modello del documento
 
 - `CadLayer`: nome, colore di stampa, peso e tipo di linea ISO predefiniti.
-- `CadEntity`: linea, cerchio, rettangolo o testo; layer, pattern, peso,
-  visibilità, `vbo_id`.
+- `CadEntity`: linea, cerchio, arco, ellisse, rettangolo o testo; layer,
+  pattern, peso, visibilità, `vbo_id`. Arco e ellisse conservano il modello
+  analitico (arco: centro, raggio, `a0`, `sweep` in (0, 2π]; ellisse: centro,
+  `rx`, `ry`, rotazione); il VBO è derivato e non viene mai letto dalla
+  selezione.
 - `CadDocument`: array di entità con `next_id` monotono, record dei simboli
   isogl (`CadSymbolRef *symbols`), specchio GPU (`isogl_vbo_array` per i
   segmenti, `isogl_string_list` per il testo), font, scala foglio.
@@ -550,11 +563,21 @@ Dato un rettangolo:
      centro dal bordo del rettangolo (se il centro è dentro, dal lato più
      vicino); `d_far` è la distanza massima dai quattro vertici;
    - arco: come il cerchio, più estremi e range angolare;
+   - ellisse: non esiste una forma chiusa elementare per l'intersezione con un
+     rettangolo; il predicato analitico va definito esplicitamente;
    - testo: OBB e SAT; serve l'estensione del testo;
    - quota: geometria di pick (linea di quota e riferimenti), non tutti i
      segmenti generati.
 5. Semantica: **window** = solo contenute; **crossing** = contenute oppure
    attraversanti il bordo. Sono due predicati.
+
+**Deviazione attuale documentata.** Per arco ed ellisse la narrow phase non
+usa ancora la forma chiusa descritta sopra: `cad_curve_select_rect` ricampiona
+il generatore puro alla tolleranza di stampa e testa i segmenti campionati
+(window = tutti i punti dentro, crossing = almeno un segmento interseca oppure
+curva contenuta). Non legge VBO e non conserva copie RAM permanenti. La forma
+chiusa per l'arco e una politica esplicita per l'ellisse (che non ha una forma
+chiusa semplice) restano la direzione.
 
 `isogl_font_text_advance()` calcola la larghezza dagli `advance` reali; l'OBB
 del testo (entità testo e testo della quota) la usa nella selezione a
@@ -611,7 +634,7 @@ fidarti.
 | Punto | Oggi | Direzione |
 |---|---|---|
 | `include/isogl/isogl.h:59` | `isogl_vertex` 32 B | invariato |
-| `apps/isocad/src/cad.c:8` | 96 segmenti fissi per cerchio | `tessellate_arc(r, tolleranza)` |
+| `apps/isocad/src/cad_geometry.c` | `CAD_CIRCLE_SEGMENTS=96` rimosso | `cad_tessellate_arc/ellipse` a tolleranza (fatto) |
 | `apps/isocad/src/cad.c:38` | stile per entità su tutti i vertici | stile per polilinea |
 | `apps/isocad/src/cad.c:237` | rebuild globale del testo | testo incrementale per entità (fatto) |
 | `src/isogl.c:629` | add di un VBO per entità | invariato finché non si impagina |
@@ -646,7 +669,9 @@ rimozione/undo delle entità e il modello gerarchico del CAD.
 ## Ordine di lavoro consigliato
 
 1. `symgen` puro + `tessellate_arc()` + test **senza contesto GL** (cerchio,
-   arco, punta, tolleranza).
+   arco, punta, tolleranza). Fatto per le entità CAD: `cad_geometry.c` con
+   `test-cad-geometry` headless; restano le punte dei simboli e il poligono
+   regolare CAD-side.
 2. `entity_bounds()` per tipo e indice AABB/grid; test della broad phase.
 3. `entity_hit()` per tipo, window e crossing; test sui casi limite.
 4. Pick click/hover e selezione d’area: FBO 16×16 `GL_R32UI` (box 8×8), `pick_id` per
@@ -707,6 +732,7 @@ rimozione/undo delle entità e il modello gerarchico del CAD.
 make                        # core + helper SDL + demo
 make lib                    # solo il core, senza SDL installato
 make sdl-host               # solo libisogl_sdl.a
+make test-cad-geometry      # headless: archi/ellisse CAD, niente GL/SDL
 make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
 make test-panel-layout      # headless: layout pannelli, niente GL/SDL
 make test-panel-deck        # headless: slot e parcheggio pagine, niente GL/SDL
@@ -715,17 +741,23 @@ make test-drawing-load      # GL: loader TOML gerarchico + simboli
 make test-symbol-params     # GL: registry tipi C, parametri, get/update
 make test-console-cmd       # headless: parser comandi sym/save
 make test-cad-symbols       # GL: CadSymbolRef, update/remove, writer v2
+make test-cad-entities      # GL: VBO, pick e selezione di archi/ellissi
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
-make test                   # geometry + layout + deck + overlay + drawing + params + console + cad-symbols + symbols + viewport + core
+make test                   # cad-geometry + geometry + layout + deck + overlay + drawing + params + console + cad-symbols + cad-entities + symbols + viewport + core
 make check-sdl-free         # nessun riferimento SDL nel core
 make example-qt6            # host Qt6 (opzionale)
 make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)
 make -B SANITIZE=1 test
 ```
 
-`tests/test_symbol_geometry.c`, `tests/test_panel_layout.c` e
-`tests/test_console_cmd.c` girano senza finestra e senza linkare SDL/GL.
+`tests/test_cad_geometry.c`, `tests/test_symbol_geometry.c`,
+`tests/test_panel_layout.c` e `tests/test_console_cmd.c` girano senza finestra
+e senza linkare SDL/GL. `tests/test_cad_geometry.c` copre conteggio segmenti,
+estremi, chiusura, tre punti, wrap angolare e sagitta misurata
+dell'ellisse. `tests/test_cad_entities.c` usa un contesto GL e verifica
+costruzione, VBO derivato, pick GPU e selezione window/crossing per archi ed
+ellissi, inclusi i filtri layer/visibilità.
 `tests/test_overlay.c` usa un contesto GL (Xvfb in CI) e un FBO.
 `tests/test_cad_symbols.c` usa un contesto GL e verifica `CadSymbolRef`,
 update/remove, il writer schema v2, il round-trip writer→loader e

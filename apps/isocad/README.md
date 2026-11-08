@@ -307,6 +307,8 @@ La verifica usa:
 - `tests/test_symbol_geometry.c`: geometria pura headless.
 
 ```sh
+make test-cad-geometry      # archi/ellisse, generatore puro, headless
+make test-cad-entities      # VBO, pick e selezione di archi/ellissi, GL
 make test-symbol-geometry   # geometria pura, headless
 make test-console-cmd       # parser console, headless
 make test-cad-symbols       # CadSymbolRef, update/remove/writer, round-trip, GL
@@ -314,10 +316,62 @@ make test-symbols
 make test
 ```
 
+## Archi ed ellissi
+
+Archi ed ellissi sono **entità CAD** (non simboli isogl) con modello
+analitico in RAM e VBO derivato. Il generatore puro è
+`apps/isocad/src/cad_geometry.{c,h}`: niente GL/SDL e nessun accesso a
+`CadDocument`.
+
+Costruttori pubblici (`cad.h`):
+
+```c
+uint32_t cad_add_arc_center_angles(doc, layer, pattern, weight,
+                                   cx, cy, radius, angle1, angle2);
+uint32_t cad_add_arc_three_point(doc, layer, pattern, weight,
+                                 sx, sy, ex, ey, cx, cy);
+uint32_t cad_add_ellipse(doc, layer, pattern, weight,
+                         p1x, p1y, p2x, p2y, p3x, p3y);
+```
+
+- **Arco da centro e angoli**: `radius > 0`; `a0 = angle1`; `sweep` è il delta
+  antiorario da `angle1` a `angle2`, con wrap in `(0, 2π]`. Un sweep nullo o
+  ambiguo (stessa semiretta, cioè 0 o 2π) è rifiutato. Per esempio
+  350° → 10° dà 20°.
+- **Arco da tre punti**: `radius = |start − centre|`; la fine deve stare sullo
+  stesso cerchio entro `1e-4 + 1e-3 · radius` (unità modello), altrimenti
+  l'entità è rifiutata. Il verso è antiorario (regola della mano destra attorno
+  a +Z), quindi start (10,0) → end (0,−10) attorno all'origine è un arco di
+  270°, non −90°.
+- **Ellisse**: `p1`–`p2` è l'asse maggiore (`rx = |p2−p1|/2`, centro = punto
+  medio, rotazione = `atan2(p2−p1)`); `ry` è la distanza perpendicolare di
+  `p3` dalla retta `p1`–`p2`. Assi degeneri e valori non finiti sono rifiutati.
+
+Tolleranza di corda: `CAD_CHORD_TOLERANCE_MM = 0.03` mm di carta, convertita in
+unità modello con `tolerance / doc->sheet_scale`. È indipendente dallo zoom:
+il VBO vive in mm di carta, quindi pan/zoom non rigenerano nulla. Il cap di
+sicurezza è `CAD_TESSELLATION_MAX_SEGMENTS`. Per l'ellisse il conteggio parte
+dal semiasse maggiore e viene raffinato verificando numericamente la massima
+sagitta; il conteggio basato solo sul raggio di curvatura minimo
+sottocampionerebbe i vertici del semiasse maggiore. L'ultimo punto dell'ellisse
+e del cerchio coincide esattamente col primo.
+
+Lo staging della tessellazione vive il tempo della chiamata: viene caricato nel
+VBO e liberato subito. In caso di errore il costruttore restituisce 0 e non
+lascia entità parziali nel documento (l'ID consumato non viene riusato).
+
+La **selezione rettangolare** di archi ed ellissi non legge i VBO: riesegue il
+generatore puro alla tolleranza di stampa e testa i segmenti campionati.
+Window = tutti i punti campionati dentro il rettangolo; crossing = almeno un
+segmento interseca, oppure curva contenuta. Layer e visibilità sono filtrati
+come per le altre entità.
+
 ## Modello del documento
 
 - `CadLayer`: nome, colore di stampa, peso e tipo di linea ISO predefiniti.
-- `CadEntity`: linea, cerchio, rettangolo o testo, con layer, pattern e peso.
+- `CadEntity`: linea, cerchio, arco, ellisse, rettangolo o testo, con layer,
+  pattern e peso. Arco ed ellisse conservano centro/raggio/angoli e
+  centro/semiassi/rotazione; la selezione usa questi parametri, non il VBO.
   Le quote e i center mark non sono entità CAD: sono simboli isogl.
 - `CadDocument`: array di entità con `next_id` monotono, record dei simboli
   isogl (`CadSymbolRef *symbols`, con ID, tipo e copia dei parametri) e
@@ -344,16 +398,17 @@ stringhe; a scala il limite sono i VBO e le draw call, non i byte.
 
 ## Stato attuale
 
-Milestone A + UI screen-space: foglio, linee, cerchi, rettangoli, testo
-vettoriale, pattern e pesi ISO, zoom/pan, modalità colori-spessore/stampa,
-selezione d’area persistente taggata CAD/simbolo, quota e center mark come
-simboli isogl con registry, hit/pick/explode, record CAD con tipo+copia
-parametri, modifica da console (`sym list/info/set/points/remove`, `save`),
-ambiente di test gerarchico e testo incrementale per entità. L’interfaccia usa
-un overlay a gruppi
+Milestone A + UI screen-space: foglio, linee, cerchi, archi, ellissi,
+rettangoli, testo vettoriale, pattern e pesi ISO, zoom/pan, modalità
+colori-spessore/stampa, selezione d’area persistente taggata CAD/simbolo, quota
+e center mark come simboli isogl con registry, hit/pick/explode, record CAD con
+tipo+copia parametri, modifica da console (`sym list/info/set/points/remove`,
+`save`), ambiente di test gerarchico e testo incrementale per entità. Archi ed
+ellissi usano il generatore puro a tolleranza di corda; niente più 96 segmenti
+fissi per il cerchio. L’interfaccia usa un overlay a gruppi
 (`isogl_overlay`) con pannelli parametrici (`isogl_panel`): pannelli, icone come
 gruppi di linee locali, hover con tooltip e console come gruppo testo; 6–8 draw
 call UI. I pannelli hanno **quattro workspace** (F2–F5): la pagina attiva sta
-nel dock, le altre restano retained fuori campo e nascoste; il cambio è
-istantaneo. Editing, azioni dei pulsanti, archi, polilinee, export/stampa e
-modello CAD gerarchico sono i passi successivi.
+nel dock, le altre restano retained fuori campo e nascoste. Editing, azioni dei
+pulsanti, polilinee, export/stampa e modello CAD gerarchico sono i passi
+successivi.

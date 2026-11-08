@@ -4,8 +4,9 @@ export PKG_CONFIG_PATH
 
 CC      ?= cc
 BUILD   := build
-SRCS    := src/main.c src/cad.c src/console.c src/console_cmd.c \
-           src/cad_commands.c src/panels.c src/panel_deck.c
+SRCS    := src/main.c src/cad.c src/cad_geometry.c src/console.c \
+           src/console_cmd.c src/cad_commands.c src/panels.c \
+           src/panel_deck.c
 OBJS    := $(SRCS:src/%.c=$(BUILD)/%.o)
 BIN     := $(BUILD)/isocad
 

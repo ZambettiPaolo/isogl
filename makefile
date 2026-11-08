@@ -56,6 +56,7 @@ SYMBOL_PARAMS_TEST_OBJS := $(BUILD)/tests/test_symbol_params.o
 TEST_CAD_SYMBOLS := $(BUILD)/test-cad-symbols
 CAD_SYMBOLS_TEST_OBJS := $(BUILD)/tests/test_cad_symbols.o \
                          $(BUILD)/apps/isocad/src/cad.o \
+                         $(BUILD)/apps/isocad/src/cad_geometry.o \
                          $(BUILD)/apps/isocad/src/cad_commands.o \
                          $(BUILD)/apps/isocad/src/console.o \
                          $(BUILD)/apps/isocad/src/console_cmd.o \
@@ -63,6 +64,13 @@ CAD_SYMBOLS_TEST_OBJS := $(BUILD)/tests/test_cad_symbols.o \
 TEST_CONSOLE_CMD := $(BUILD)/test-console-cmd
 CONSOLE_CMD_TEST_OBJS := $(BUILD)/tests/test_console_cmd.o \
                          $(BUILD)/apps/isocad/src/console_cmd.o
+TEST_CAD_GEOMETRY := $(BUILD)/test-cad-geometry
+CAD_GEOMETRY_TEST_OBJS := $(BUILD)/tests/test_cad_geometry.o \
+                          $(BUILD)/apps/isocad/src/cad_geometry.o
+TEST_CAD_ENTITIES := $(BUILD)/test-cad-entities
+CAD_ENTITIES_TEST_OBJS := $(BUILD)/tests/test_cad_entities.o \
+                          $(BUILD)/apps/isocad/src/cad.o \
+                          $(BUILD)/apps/isocad/src/cad_geometry.o
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
 SYMBOL_SRC := src/isogl_symbol.c
@@ -72,7 +80,8 @@ LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_style.c \
                third_party/glad/glad.c third_party/tomlc99/toml.c
 SDL_HOST_SRCS := hosts/isogl-sdl/isogl_sdl.c
 DEMO_SRCS   := examples/demo/main.c examples/demo/drawing_load.c
-TEST_SRCS   := tests/test_core.c apps/isocad/src/cad.c
+TEST_SRCS   := tests/test_core.c apps/isocad/src/cad.c \
+               apps/isocad/src/cad_geometry.c
 
 LIB_OBJS    := $(LIB_SRCS:%.c=$(BUILD)/%.o)
 SDL_HOST_OBJS := $(SDL_HOST_SRCS:%.c=$(BUILD)/%.o)
@@ -90,7 +99,8 @@ sdl-host: $(SDL_HOST_LIB)
 # build by construction.
 $(SDL_HOST_OBJS) $(DEMO_OBJS) $(TEST_OBJS) $(TEST_SYMBOLS_OBJS) \
     $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS) $(DRAWING_LOAD_TEST_OBJS) \
-    $(SYMBOL_PARAMS_TEST_OBJS) $(CAD_SYMBOLS_TEST_OBJS): \
+    $(SYMBOL_PARAMS_TEST_OBJS) $(CAD_SYMBOLS_TEST_OBJS) \
+    $(CAD_ENTITIES_TEST_OBJS): \
     TARGET_CFLAGS := $(SDL2_CFLAGS)
 
 $(BUILD)/%.o: %.c
@@ -188,6 +198,22 @@ $(TEST_CONSOLE_CMD): $(CONSOLE_CMD_TEST_OBJS)
 test-console-cmd: $(TEST_CONSOLE_CMD)
 	./$(TEST_CONSOLE_CMD)
 
+$(TEST_CAD_GEOMETRY): $(CAD_GEOMETRY_TEST_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CAD_GEOMETRY_TEST_OBJS) -lm $(LDFLAGS) -o $@
+
+# Headless: pure geometry only, no GL and no SDL.
+test-cad-geometry: $(TEST_CAD_GEOMETRY)
+	./$(TEST_CAD_GEOMETRY)
+
+$(TEST_CAD_ENTITIES): $(CAD_ENTITIES_TEST_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CAD_ENTITIES_TEST_OBJS) $(LIB) \
+	    $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-cad-entities: $(TEST_CAD_ENTITIES)
+	./$(TEST_CAD_ENTITIES) .
+
 run: $(DEMO)
 	./$(DEMO)
 
@@ -207,9 +233,9 @@ example-gtk4: lib
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
-test: test-symbol-geometry test-panel-layout test-panel-deck test-overlay \
-      test-drawing-load test-symbol-params test-console-cmd test-cad-symbols \
-      test-symbols test-viewport $(TEST)
+test: test-cad-geometry test-symbol-geometry test-panel-layout test-panel-deck \
+      test-overlay test-drawing-load test-symbol-params test-console-cmd \
+      test-cad-symbols test-cad-entities test-symbols test-viewport $(TEST)
 	./$(TEST) .
 
 install: all
@@ -260,9 +286,11 @@ clean:
          $(TEST_OBJS:.o=.d) $(BUILD)/tests/test_symbol_geometry.d \
          $(TEST_SYMBOLS_OBJS:.o=.d) $(TEST_VIEWPORT_OBJS:.o=.d) \
          $(SYMBOL_PARAMS_TEST_OBJS:.o=.d) $(CAD_SYMBOLS_TEST_OBJS:.o=.d) \
-         $(CONSOLE_CMD_TEST_OBJS:.o=.d)
+         $(CONSOLE_CMD_TEST_OBJS:.o=.d) $(CAD_GEOMETRY_TEST_OBJS:.o=.d) \
+         $(CAD_ENTITIES_TEST_OBJS:.o=.d)
 
-.PHONY: all lib sdl-host run test test-symbol-geometry test-panel-layout \
-        test-panel-deck test-overlay test-drawing-load test-symbol-params \
-        test-console-cmd test-cad-symbols test-symbols test-viewport \
-        check-sdl-free example-qt6 example-gtk4 install uninstall clean
+.PHONY: all lib sdl-host run test test-cad-geometry test-cad-entities \
+        test-symbol-geometry test-panel-layout test-panel-deck test-overlay \
+        test-drawing-load test-symbol-params test-console-cmd test-cad-symbols \
+        test-symbols test-viewport check-sdl-free example-qt6 example-gtk4 \
+        install uninstall clean
