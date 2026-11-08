@@ -135,6 +135,28 @@ testo alla linea quando l'ancoraggio non vi giace già. Anche qui un nuovo tipo
 è solo un file C registrato: schema, default, validazione e adapter, con la
 geometria pura condivisa in `isogl_symbol_geometry.c`.
 
+Le quote (allineata, diametro, raggio) seguono regole comuni:
+
+- **linea continua**: il CAD forza `LINE_TYPE_CONTINUOUS` (ISO 128 tipo 01) nei
+  wrapper `cad_add_dimension_symbol`/`cad_add_diameter_symbol`/
+  `cad_add_radius_symbol`, anche su layer tratto-punto; l'API generica dei
+  simboli continua invece a rispettare il parametro `pattern`;
+- **testo parallelo e sopra**: mai reso orizzontale per convenzione. La
+  direzione è normalizzata in (−90°, 90°], quindi il secondo quadrante ruota il
+  testo di 180° e resta dritto; il distacco tra baseline e linea è
+  `max(1,0 mm, 2 × peso)` (ISO 129);
+- **interno/esterno per spazio**: se `larghezza_testo + 2 × (freccia +
+  margine)` non entra tra le linee di riferimento, le punte `OPEN`/`CLOSED`
+  diventano `*_OUTSIDE` (`TICK`/`DOT` restano sui punti misurati), il testo va
+  oltre l'estremo destro e la linea di quota si allunga; il pick usa la linea
+  estesa. Se il testo entra, resta vicino al centro con `text_offset_mm`.
+
+Non esiste una soglia di 30° per il testo: i 30° del progetto sono l'ampiezza
+delle frecce, e ISO 129 non fissa una soglia testo orizzontale/parallelo.
+Il distacco ISO e la scelta interno/esterno valgono per la quota allineata;
+diametro e raggio usano l'ancoraggio testo fornito dal chiamante e condividono
+solo l'orientamento parallelo alla linea e mai capovolto.
+
 ## Build e install
 
 ```sh

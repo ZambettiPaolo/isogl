@@ -211,6 +211,10 @@ ogni volta un `IsoglDimensionDesc` completo:
 - `mark_points`: disegna un segmento di riferimento da 0,5 mm che parte da
   `p1`/`p2` verso la linea di quota, prima del distacco di 3 mm;
 - le linee di riferimento partono 3 mm dopo il punto misurato;
+- `pattern`: il wrapper CAD lo forza a **continuo** (ISO 128 tipo 01) a
+  prescindere dal pattern del layer. L’API generica dei simboli continua a
+  rispettare il valore passato; è il CAD a imporre la continuità alle quote.
+  Colore, peso e layer restano quelli del layer;
 - precisione, altezza testo e `pick_text`.
 
 Poi chiama `cad_add_dimension_symbol()`, che crea il simbolo e registra nel
@@ -230,6 +234,28 @@ copia dei segmenti.
 - **pick**: le stesse linee/frecce più l’OBB del testo se `pick_text != 0`;
 - **selezione**: window = tutte le primitive contenute; crossing = almeno una
   contenuta o intersecante; `pick_text = 0` lascia il testo al solo click.
+
+Regole di resa del testo:
+
+- **sempre parallelo alla linea e sopra** nel frame di lettura. La direzione è
+  normalizzata in (−90°, 90°]: una linea del secondo quadrante (90°–180°) si
+  legge dall’altro estremo e il testo ruota di 180°, restando dritto e “sopra”.
+  Non esiste una soglia di 30° che renda il testo orizzontale: i 30° del
+  progetto sono l’ampiezza delle frecce (ISO 129 non fissa una soglia testo).
+- **distacco ISO**: il gap tra baseline e linea è
+  `max(1,0 mm, 2 × peso)` (ISO 129), convertito in unità modello con la scala
+  foglio; la normale “sopra” è quella dell’angolo del testo.
+- **interno/esterno solo per spazio**: se
+  `larghezza_testo + 2 × (freccia + margine)` supera la lunghezza della linea,
+  le punte `OPEN`/`CLOSED` diventano `OPEN_OUTSIDE`/`CLOSED_OUTSIDE`, il testo
+  va oltre l’estremo destro e la linea di quota si allunga per ospitare frecce
+  e testo (il pick usa la linea estesa). `TICK` e `DOT` non hanno variante
+  esterna e restano sui punti misurati. Se il testo entra, resta centrato
+  vicino al mezzo con `text_offset_mm` lungo la linea.
+
+Distacco e interno/esterno valgono per la quota allineata; diametro e raggio
+usano l’ancoraggio testo fornito dal chiamante e condividono solo
+l’orientamento parallelo alla linea e mai capovolto.
 
 Il documento demo (A3 landscape, margine 10) contiene quattro quote allineate:
 diametro con frecce chiuse, orizzontale con frecce esterne chiuse, verticale

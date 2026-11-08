@@ -31,7 +31,8 @@ DEMO        := $(BUILD)/isogl-demo
 TEST        := $(BUILD)/test-core
 TEST_SYMBOL_GEOMETRY := $(BUILD)/test-symbol-geometry
 SYMBOL_GEOMETRY_TEST_OBJS := $(BUILD)/tests/test_symbol_geometry.o \
-                             $(BUILD)/src/isogl_symbol_geometry.o
+                             $(BUILD)/src/isogl_symbol_geometry.o \
+                             $(BUILD)/src/isogl_style.o
 TEST_PANEL_LAYOUT := $(BUILD)/test-panel-layout
 PANEL_LAYOUT_TEST_OBJS := $(BUILD)/tests/test_panel_layout.o \
                           $(BUILD)/src/isogl_panel.o

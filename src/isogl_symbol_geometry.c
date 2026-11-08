@@ -1,4 +1,5 @@
 #include "isogl_symbol_geometry.h"
+#include "isogl_style.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -18,6 +19,7 @@
 #define SYM_DIM_TEXT_MM 2.5
 #define SYM_DIA_TEXT_MM 3.5
 #define SYM_DIM_ARROW_HALF_ANGLE (M_PI / 12.0) /* 30 degrees included */
+
 #define SYM_DIM_DOT_SEGMENTS 12
 #define SYM_DIM_MAX_ARROW_SEGMENTS (2 * SYM_DIM_DOT_SEGMENTS)
 
@@ -45,6 +47,44 @@ static int sym_finite(double v) {
 
 static double sym_scale(double s) {
     return (s > 0.0 && isfinite(s)) ? s : 1.0;
+}
+
+/* ISO 129 wants at least twice the line width between the character bottom
+ * and the dimension line.  The 1.0 mm floor keeps the text readable for thin
+ * lines and matches the previous default. */
+static double sym_text_gap_mm(uint8_t weight) {
+    double gap = SYM_DIM_TEXT_GAP_MM;
+    if (weight < LINE_THICKNESS_COUNT) {
+        double iso_gap = 2.0 * (double)isogl_line_weight_mm[weight];
+        if (iso_gap > gap) gap = iso_gap;
+    }
+    return gap;
+}
+
+/* Normalise a drawing direction to (-90, 90].  A line pointing into the
+ * second quadrant (90..180 degrees) is read from the other end: the text is
+ * turned by 180 degrees, so it stays upright and sits above the line in its
+ * reading frame. */
+static double sym_upright_angle(double ux, double uy) {
+    double angle = atan2(uy, ux);
+    if (angle > M_PI / 2.0) angle -= M_PI;
+    if (angle < -M_PI / 2.0) angle += M_PI;
+    return angle;
+}
+
+/* When the span is too short for the text, inside heads become outside heads.
+ * OPEN and CLOSED have an outside variant; NONE, TICK and DOT have none and
+ * stay on the measured points (only the text moves outside).  Heads that are
+ * already outside are left alone. */
+static IsoglDimensionArrow sym_arrow_outside_variant(IsoglDimensionArrow type) {
+    switch (type) {
+    case ISOGL_DIM_ARROW_OPEN:
+        return ISOGL_DIM_ARROW_OPEN_OUTSIDE;
+    case ISOGL_DIM_ARROW_CLOSED:
+        return ISOGL_DIM_ARROW_CLOSED_OUTSIDE;
+    default:
+        return type;
+    }
 }
 
 static int sym_arrow_is_outside(IsoglDimensionArrow type) {
@@ -221,17 +261,53 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     double dot_radius = 0.5 * SYM_DIM_DOT_MM / scale;
     double max_arrow = len * 0.45;
     if (arrow > max_arrow) arrow = max_arrow;
-    double text_gap = SYM_DIM_TEXT_GAP_MM / scale;
+    /* ISO 129: at least 2x the line weight between the character bottom and
+       the dimension line, with a 1.0 mm floor. */
+    double text_gap = sym_text_gap_mm(d->weight) / scale;
     double text_height_mm = d->text_height_mm > 0.0 ? d->text_height_mm
                                                    : SYM_DIM_TEXT_MM;
     if (!sym_finite(text_height_mm) || !(dot_radius > 0.0)) return -1;
 
+    int precision = d->precision;
+    if (precision < 0) precision = 0;
+    if (precision > 6) precision = 6;
+    snprintf(g->text, sizeof(g->text), "%.31s%.*f%.31s",
+             d->text_left, precision, len, d->text_right);
+
+    g->text_height_mm = text_height_mm;
+    g->text_height = text_height_mm / scale;
+    double width = 0.0;
+    if (metrics && metrics->text_width) {
+        width = metrics->text_width(metrics->user, g->text, text_height_mm);
+    }
+    if (!sym_finite(width) || width < 0.0) width = 0.0;
+    g->text_width = width;
+
+    /* The text is always parallel to the dimension line.  The direction is
+       normalised to (-90, 90): a line pointing into the second quadrant is
+       read from the other end, so the text turns by 180 degrees and remains
+       upright and above the line in its reading frame. */
+    g->text_angle = sym_upright_angle(ux, uy);
+
+    /* Space is the only inside/outside criterion.  If the text plus both
+       heads and their margins does not fit between the extension lines, the
+       heads move outside and the text goes past the right end; the angle
+       never decides this. */
+    int text_outside = width + 2.0 * (arrow + text_gap) > len;
+
+    IsoglDimensionArrow arrow_left = d->arrow_left;
+    IsoglDimensionArrow arrow_right = d->arrow_right;
+    if (text_outside) {
+        arrow_left = sym_arrow_outside_variant(arrow_left);
+        arrow_right = sym_arrow_outside_variant(arrow_right);
+    }
+
     /* Outside heads need room beyond the extension lines; extend only the
        dimension line, not the measured points or the extension lines. */
     double outside_ext = SYM_DIM_OUTSIDE_EXT_MM / scale;
-    double ext_left = sym_arrow_is_outside(d->arrow_left) ? outside_ext : 0.0;
-    double ext_right = sym_arrow_is_outside(d->arrow_right) ? outside_ext : 0.0;
     if (!sym_finite(outside_ext) || !(outside_ext > 0.0)) return -1;
+    double ext_left = sym_arrow_is_outside(arrow_left) ? outside_ext : 0.0;
+    double ext_right = sym_arrow_is_outside(arrow_right) ? outside_ext : 0.0;
 
     /* Leave a paper-space gap between the measured point and the extension
        line.  If the dimension line is closer than the gap, shrink it so the
@@ -249,6 +325,17 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     g->ay = ay;
     g->bx = bx;
     g->by = by;
+
+    /* External text: extend the dimension line to host the outside heads and
+       the text, with one gap on each side of the text.  The pick geometry
+       uses the same extended line. */
+    if (text_outside) {
+        double line_ext = ext_right + width + 2.0 * text_gap;
+        bx = b0x + line_ext * ux;
+        by = b0y + line_ext * uy;
+        g->bx = bx;
+        g->by = by;
+    }
     g->s1x = d->x0 + sign * gap_used * nx;
     g->s1y = d->y0 + sign * gap_used * ny;
     g->s2x = d->x1 + sign * gap_used * nx;
@@ -271,48 +358,42 @@ static int sym_dimension_layout(const IsoglDimensionDesc *d,
     int left_count = 0;
     int right_count = 0;
     if (sym_arrow_segments(a0x, a0y, ux, uy, nx, ny, arrow, dot_radius,
-                           d->arrow_left, g->arrow, &left_count,
+                           arrow_left, g->arrow, &left_count,
                            SYM_DIM_DOT_SEGMENTS) != 0) {
         return -1;
     }
     if (sym_arrow_segments(b0x, b0y, -ux, -uy, nx, ny, arrow, dot_radius,
-                           d->arrow_right, g->arrow + left_count,
+                           arrow_right, g->arrow + left_count,
                            &right_count, SYM_DIM_DOT_SEGMENTS) != 0) {
         return -1;
     }
     g->arrow_count = left_count + right_count;
 
-    int precision = d->precision;
-    if (precision < 0) precision = 0;
-    if (precision > 6) precision = 6;
-    snprintf(g->text, sizeof(g->text), "%.31s%.*f%.31s",
-             d->text_left, precision, len, d->text_right);
-
-    g->text_height_mm = text_height_mm;
-    g->text_height = text_height_mm / scale;
-    double width = 0.0;
-    if (metrics && metrics->text_width) {
-        width = metrics->text_width(metrics->user, g->text, text_height_mm);
-    }
-    if (!sym_finite(width) || width < 0.0) width = 0.0;
-    g->text_width = width;
-
-    double mx = 0.5 * (a0x + b0x);
-    double my = 0.5 * (a0y + b0y);
-    double angle = atan2(uy, ux);
-    if (angle > M_PI / 2.0) angle -= M_PI;
-    if (angle < -M_PI / 2.0) angle += M_PI;
-    g->text_angle = angle;
-
-    double tx = cos(angle);
-    double ty = sin(angle);
+    /* Text direction and its "up" normal in the reading frame. */
+    double tx = cos(g->text_angle);
+    double ty = sin(g->text_angle);
     double tnx = -ty;
     double tny = tx;
-    double text_offset = d->text_offset_mm / scale;
-    g->text_x = mx + text_offset * tx - 0.5 * g->text_width * tx
-                + text_gap * tnx;
-    g->text_y = my + text_offset * ty - 0.5 * g->text_width * ty
-                + text_gap * tny;
+
+    double text_cx;
+    double text_cy;
+    if (text_outside) {
+        /* Past the right end, beyond the outside head when there is one. */
+        double advance = ext_right + text_gap + 0.5 * width;
+        text_cx = b0x + advance * ux;
+        text_cy = b0y + advance * uy;
+    } else {
+        double mx = 0.5 * (a0x + b0x);
+        double my = 0.5 * (a0y + b0y);
+        double text_offset = d->text_offset_mm / scale;
+        text_cx = mx + text_offset * ux;
+        text_cy = my + text_offset * uy;
+    }
+
+    /* Baseline-left origin: centre of the text box, minus half the width
+       along the reading direction, plus the ISO gap along the text normal. */
+    g->text_x = text_cx - 0.5 * width * tx + text_gap * tnx;
+    g->text_y = text_cy - 0.5 * width * ty + text_gap * tny;
     return 0;
 }
 
@@ -483,13 +564,6 @@ typedef struct {
     double text_height_mm;  /* paper units */
     char text[160];
 } SymCircularDimLayout;
-
-static double sym_upright_angle(double ux, double uy) {
-    double angle = atan2(uy, ux);
-    if (angle > M_PI / 2.0) angle -= M_PI;
-    if (angle < -M_PI / 2.0) angle += M_PI;
-    return angle;
-}
 
 /* Format the value, measure it and derive the baseline-left origin from the
  * text-box centre (tx, ty).  Shared by diameter and radius. */

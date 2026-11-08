@@ -625,6 +625,54 @@ int main(int argc, char **argv) {
           isogl_symbol_hit(rad_id, &dead, 0) == -1,
           "removed symbol IDs are dead in the registry");
 
+    /* ---- CAD forces a continuous pattern on a dash-dot layer ------------ */
+    IsoglDiameterDesc axis_dia = make_diameter_desc();
+    IsoglRadiusDesc axis_rad = make_radius_desc();
+    isogl_symbol_id axis_dia_id = cad_add_diameter_symbol(&doc, 1, &axis_dia);
+    isogl_symbol_id axis_rad_id = cad_add_radius_symbol(&doc, 1, &axis_rad);
+    CadSymbolRef *axis_dia_ref = cad_symbol_find(&doc, axis_dia_id);
+    CadSymbolRef *axis_rad_ref = cad_symbol_find(&doc, axis_rad_id);
+    int dia_pattern = axis_dia_ref
+                    ? param_index(axis_dia_ref->params, "pattern") : -1;
+    int rad_pattern = axis_rad_ref
+                    ? param_index(axis_rad_ref->params, "pattern") : -1;
+    check(dia_pattern >= 0 &&
+          axis_dia_ref->params->params[dia_pattern].value.integer ==
+              LINE_TYPE_CONTINUOUS,
+          "CAD forces a continuous diameter line on the axis layer");
+    check(rad_pattern >= 0 &&
+          axis_rad_ref->params->params[rad_pattern].value.integer ==
+              LINE_TYPE_CONTINUOUS,
+          "CAD forces a continuous radius line on the axis layer");
+
+    /* The aligned dimension uses the same CAD style resolution and must also
+       become continuous on the dash-dot axis layer. */
+    IsoglDimensionDesc axis_dim;
+    memset(&axis_dim, 0, sizeof(axis_dim));
+    axis_dim.x0 = 10.0;
+    axis_dim.y0 = 220.0;
+    axis_dim.x1 = 110.0;
+    axis_dim.y1 = 220.0;
+    axis_dim.px = 60.0;
+    axis_dim.py = 200.0;
+    axis_dim.distance = 20.0;
+    axis_dim.text_height_mm = 2.5;
+    axis_dim.precision = 1;
+    axis_dim.pick_text = 1;
+    axis_dim.arrow_left = ISOGL_DIM_ARROW_CLOSED;
+    axis_dim.arrow_right = ISOGL_DIM_ARROW_CLOSED;
+    isogl_symbol_id axis_dim_id = cad_add_dimension_symbol(&doc, 1, &axis_dim);
+    CadSymbolRef *axis_dim_ref = cad_symbol_find(&doc, axis_dim_id);
+    int dim_pattern = axis_dim_ref
+                    ? param_index(axis_dim_ref->params, "pattern") : -1;
+    check(dim_pattern >= 0 &&
+          axis_dim_ref->params->params[dim_pattern].value.integer ==
+              LINE_TYPE_CONTINUOUS,
+          "CAD forces a continuous aligned dimension on the axis layer");
+    if (axis_dim_id) cad_remove_symbol(&doc, axis_dim_id);
+    if (axis_dia_id) cad_remove_symbol(&doc, axis_dia_id);
+    if (axis_rad_id) cad_remove_symbol(&doc, axis_rad_id);
+
     cad_document_free(&doc);
     isogl_symbol_cleanup();
     isogl_font_free_data(font);

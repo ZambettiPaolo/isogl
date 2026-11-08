@@ -77,6 +77,16 @@ typedef enum {
  * appended by the generator (a caller that wants " mm" puts it in
  * text_right).  Extension lines start 3 mm away from p1/p2; mark_points draws
  * a 0.5 mm reference segment at those points.
+ *
+ * The text is always parallel to the dimension line and sits above it in its
+ * reading frame, with a gap of at least max(1.0 mm, 2 * line weight) between
+ * the character baseline and the line (ISO 129).  Direction is normalised to
+ * (-90, 90] degrees, so second-quadrant lines read from the other end and the
+ * text is never upside down.  If the text plus both heads and their margins
+ * does not fit between the extension lines, OPEN/CLOSED heads become their
+ * *_OUTSIDE variants, the line is extended and the text moves past the right
+ * end; TICK and DOT have no outside variant and stay on the measured points.
+ * Inside/outside depends on the available space, never on the line angle.
  */
 typedef struct {
     double x0, y0;          /* p1: first measured point */
@@ -115,7 +125,9 @@ typedef struct {
  * around it (the type default for text_left is "Ø"; no unit is appended).
  * (tx, ty) is the centre of the text box in model units; the generator
  * converts it to a baseline-left origin using the real text width.  The text
- * follows the diameter line and reads upright.
+ * is always parallel to the diameter line and reads upright: the direction is
+ * normalised to (-90, 90] degrees, so second-quadrant lines turn the text by
+ * 180 degrees instead of flipping it.
  *
  * Arrow tips sit on the two diameter ends with the legs pointing toward the
  * centre.  When the text anchor is not on the diameter segment, a leader runs

@@ -1,4 +1,5 @@
 #include "isogl_symbol_geometry.h"
+#include "isogl_style.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -564,6 +565,142 @@ int main(void) {
               "inclined text follows the dimension line");
     }
 
+    /* ---- Text above the line: ISO gap and reading-frame normal ----------- */
+    IsoglDimensionDesc heavy = make_dimension();
+    heavy.weight = LINE_THICKNESS_2_0; /* 2.0 mm -> gap = 4.0 mm */
+    heavy.arrow_left = ISOGL_DIM_ARROW_NONE;
+    heavy.arrow_right = ISOGL_DIM_ARROW_NONE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&heavy, &metrics, &emitter) == 0,
+          "heavy-line dimension succeeds");
+    if (c.count > 0) {
+        const TestItem *line = &c.items[0];
+        const TestItem *text = &c.items[c.count - 1];
+        double gap_mm = 2.0 * 2.0; /* 2 x the 2.0 mm ISO weight */
+        check(near(text->y, line->y0 + gap_mm),
+              "text baseline sits one ISO gap (2x weight) above the line");
+        check(text->y > line->y0 && text->y < line->y0 + 20.0,
+              "text is above the line, not centred on it");
+    }
+
+    /* ---- Text is always parallel, upright and above in reading frame ----- */
+    static const double directions[4] = {30.0, 80.0, 100.0, 150.0};
+    for (int qi = 0; qi < 4; ++qi) {
+        double dir = directions[qi] * M_PI / 180.0;
+        double expected = dir;
+        if (expected > M_PI / 2.0) expected -= M_PI;
+        if (expected < -M_PI / 2.0) expected += M_PI;
+
+        IsoglDimensionDesc q = make_dimension();
+        q.x1 = 100.0 * cos(dir);
+        q.y1 = 100.0 * sin(dir);
+        q.px = 50.0 * cos(dir) - 20.0 * sin(dir);
+        q.py = 50.0 * sin(dir) + 20.0 * cos(dir);
+        q.arrow_left = ISOGL_DIM_ARROW_NONE;
+        q.arrow_right = ISOGL_DIM_ARROW_NONE;
+        memset(&c, 0, sizeof(c));
+        c.fail_on_call = -1;
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%g-degree direction succeeds",
+                 directions[qi]);
+        check(isogl_dimension_geometry(&q, &metrics, &emitter) == 0, msg);
+        if (c.count > 0) {
+            const TestItem *line = &c.items[0];
+            const TestItem *text = &c.items[c.count - 1];
+            snprintf(msg, sizeof(msg),
+                     "%g-degree text stays parallel and upright",
+                     directions[qi]);
+            check(near(text->angle, expected) &&
+                  cos(text->angle) >= -1e-12, msg);
+
+            double mx = 0.5 * (line->x0 + line->x1);
+            double my = 0.5 * (line->y0 + line->y1);
+            double ntx = -sin(text->angle);
+            double nty = cos(text->angle);
+            double above = (text->x - mx) * ntx + (text->y - my) * nty;
+            snprintf(msg, sizeof(msg),
+                     "%g-degree text is above the line in its reading frame",
+                     directions[qi]);
+            check(near(above, 1.0) && above > 0.0, msg);
+        }
+    }
+
+    /* ---- Short dimension: text outside and line extended ----------------- */
+    IsoglDimensionDesc shortd = make_dimension();
+    shortd.x1 = 5.0;
+    shortd.y1 = 0.0;
+    shortd.px = 0.0;
+    shortd.py = 20.0;
+    snprintf(shortd.text_right, sizeof(shortd.text_right), " mm");
+    shortd.arrow_left = ISOGL_DIM_ARROW_NONE;
+    shortd.arrow_right = ISOGL_DIM_ARROW_NONE;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&shortd, &metrics, &emitter) == 0,
+          "short dimension succeeds");
+    /* "5.0 mm" is 6 chars -> stub width 9.0; gap 1.0. */
+    if (c.count > 0) {
+        const TestItem *line = &c.items[0];
+        const TestItem *text = &c.items[c.count - 1];
+        check(near(line->x1, 5.0 + 9.0 + 2.0 * 1.0),
+              "short dimension extends the line under the external text");
+        check(near(text->x, 5.0 + 1.0) && near(text->y, 21.0),
+              "short dimension places the text beyond the right end, above the line");
+        check(text->x >= 5.0 + 1.0 && text->x + 9.0 <= line->x1,
+              "external text lies over the extended line");
+    }
+
+    memset(&p, 0, sizeof(p));
+    check(isogl_dimension_pick_geometry(&shortd, &metrics, &pick_emitter) == 0,
+          "short dimension pick geometry succeeds");
+    if (p.count > 0) {
+        check(near(p.items[0].x1, 16.0),
+              "pick uses the extended dimension line");
+        check(near(p.items[p.count - 1].x0, 6.0) &&
+              near(p.items[p.count - 1].y0, 21.0) &&
+              near(p.items[p.count - 1].x1, 15.0) &&
+              near(p.items[p.count - 1].y1, 23.5),
+              "pick text OBB matches the external text");
+    }
+
+    /* A tight span moves heads outside too: OPEN becomes OPEN_OUTSIDE and the
+       text follows the extended line. */
+    IsoglDimensionDesc short_open = make_dimension();
+    short_open.x1 = 5.0;
+    short_open.y1 = 0.0;
+    short_open.px = 0.0;
+    short_open.py = 20.0;
+    short_open.arrow_left = ISOGL_DIM_ARROW_OPEN;
+    short_open.arrow_right = ISOGL_DIM_ARROW_OPEN;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_dimension_geometry(&short_open, &metrics, &emitter) == 0,
+          "short dimension with open heads succeeds");
+    if (c.count > 0) {
+        const TestItem *line = &c.items[0];
+        const TestItem *text = &c.items[c.count - 1];
+        check(near(line->x0, -5.0) &&
+              near(line->x1, 5.0 + 5.0 + 9.0 + 2.0 * 1.0),
+              "tight span extends the line for the outside heads and text");
+        check(near(c.items[3].x1, -2.2),
+              "OPEN head becomes OPEN_OUTSIDE on a tight span");
+        check(near(text->x, 5.0 + 5.0 + 1.0) && near(text->y, 21.0),
+              "external text starts beyond the outside head");
+        check(text->x >= 5.0 + 5.0 + 1.0,
+              "external text clears the outside head");
+    }
+
+    memset(&p, 0, sizeof(p));
+    check(isogl_dimension_pick_geometry(&short_open, &metrics,
+                                        &pick_emitter) == 0,
+          "short open-head pick geometry succeeds");
+    if (p.count > 0) {
+        check(near(p.items[0].x0, -5.0) &&
+              near(p.items[0].x1, 21.0),
+              "pick uses the line extended for outside heads and text");
+    }
+
     /* ---- Invalid new parameters ------------------------------------------ */
     IsoglDimensionDesc bad_arrow = make_dimension();
     bad_arrow.arrow_left = (IsoglDimensionArrow)99;
@@ -726,6 +863,80 @@ int main(void) {
         check(near(c.items[2].x1, 8.9) &&
               near(c.items[2].y1, 1.1 * tan(M_PI / 12.0)),
               "radius arrow is a 2.2 mm paper size at 1:2");
+    }
+
+    /* ---- Circular text stays parallel to the line and upright ------------ */
+    IsoglDiameterDesc dia20 = make_diameter();
+    dia20.px = 10.0 * cos(20.0 * M_PI / 180.0);
+    dia20.py = 10.0 * sin(20.0 * M_PI / 180.0);
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_diameter_geometry(&dia20, &metrics, &emitter) == 0,
+          "20-degree diameter succeeds");
+    if (c.count > 0) {
+        check(near(c.items[c.count - 1].angle, 20.0 * M_PI / 180.0),
+              "20-degree diameter text is parallel to the line");
+    }
+
+    IsoglDiameterDesc dia45 = make_diameter();
+    dia45.px = 10.0 * cos(M_PI / 4.0);
+    dia45.py = 10.0 * sin(M_PI / 4.0);
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_diameter_geometry(&dia45, &metrics, &emitter) == 0,
+          "45-degree diameter succeeds");
+    if (c.count > 0) {
+        check(near(c.items[c.count - 1].angle, M_PI / 4.0),
+              "45-degree diameter keeps the text parallel");
+    }
+
+    IsoglDiameterDesc dia90 = make_diameter();
+    dia90.px = 0.0;
+    dia90.py = 10.0;
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_diameter_geometry(&dia90, &metrics, &emitter) == 0,
+          "vertical diameter succeeds");
+    if (c.count > 0) {
+        check(near(c.items[c.count - 1].angle, M_PI / 2.0),
+              "vertical diameter text is never upside down");
+    }
+
+    IsoglDiameterDesc dia100 = make_diameter();
+    dia100.px = 10.0 * cos(100.0 * M_PI / 180.0);
+    dia100.py = 10.0 * sin(100.0 * M_PI / 180.0);
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_diameter_geometry(&dia100, &metrics, &emitter) == 0,
+          "100-degree diameter succeeds");
+    if (c.count > 0) {
+        check(near(c.items[c.count - 1].angle, -80.0 * M_PI / 180.0) &&
+              cos(c.items[c.count - 1].angle) >= -1e-12,
+              "100-degree diameter text turns 180 degrees and stays upright");
+    }
+
+    IsoglRadiusDesc rad20 = make_radius();
+    rad20.px = 10.0 * cos(20.0 * M_PI / 180.0);
+    rad20.py = 10.0 * sin(20.0 * M_PI / 180.0);
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_radius_geometry(&rad20, &metrics, &emitter) == 0,
+          "20-degree radius succeeds");
+    if (c.count > 0) {
+        check(near(c.items[c.count - 1].angle, 20.0 * M_PI / 180.0),
+              "20-degree radius text is parallel to the line");
+    }
+
+    IsoglRadiusDesc rad45 = make_radius();
+    rad45.px = 10.0 * cos(M_PI / 4.0);
+    rad45.py = 10.0 * sin(M_PI / 4.0);
+    memset(&c, 0, sizeof(c));
+    c.fail_on_call = -1;
+    check(isogl_radius_geometry(&rad45, &metrics, &emitter) == 0,
+          "45-degree radius succeeds");
+    if (c.count > 0) {
+        check(near(c.items[c.count - 1].angle, M_PI / 4.0),
+              "45-degree radius keeps the text parallel");
     }
 
     /* ---- Circular invalid inputs ----------------------------------------- */

@@ -252,6 +252,37 @@ documento; la scala del foglio governa le grandezze di carta (altezza testo,
 frecce, tolleranze), non il valore misurato. Il generatore produce linee di
 riferimento, linea di quota, frecce secondo il tipo scelto e un run di testo.
 
+Regole di resa della quota:
+
+- **Linea continua.** Le quote sono sempre continue (ISO 128 tipo 01), anche su
+  un layer con pattern tratto-punto: il CAD forza `LINE_TYPE_CONTINUOUS` nei
+  wrapper `cad_add_dimension_symbol`, `cad_add_diameter_symbol` e
+  `cad_add_radius_symbol`, mentre l’API generica dei simboli continua a
+  rispettare il parametro `pattern`. Colore, peso e layer restano quelli del
+  layer.
+- **Testo sempre parallelo e sopra.** Il testo non ruota mai a orizzontale per
+  convenzione: la direzione della linea è normalizzata in (−90°, 90°], quindi
+  una linea del secondo quadrante (90°–180°) si legge dall’altro estremo e il
+  testo ruota di 180° restando dritto e “sopra” nel proprio frame di lettura.
+  Il distacco tra fondo dei caratteri (baseline) e linea è
+  `max(1,0 mm, 2 × peso)` (ISO 129), convertito in unità modello con la scala
+  foglio; la normale “sopra” è quella dell’angolo del testo. **Non esiste una
+  soglia di 30° per il testo**: i 30° del progetto sono l’ampiezza delle
+  frecce, e ISO 129 non fissa una soglia testo orizzontale/parallelo.
+- **Interno/esterno solo per spazio.** Se
+  `larghezza_testo + 2 × (freccia + margine)` supera la lunghezza della linea
+  di quota, le punte `OPEN`/`CLOSED` diventano `OPEN_OUTSIDE`/
+  `CLOSED_OUTSIDE`, il testo va oltre l’estremo destro (sopra la linea nel
+  frame di lettura) e la linea di quota si allunga per ospitare frecce e
+  testo; il pick usa la linea estesa. `TICK` e `DOT` non hanno variante
+  esterna e restano sui punti misurati. Se il testo sta dentro, resta vicino
+  al centro con `text_offset_mm` lungo la linea. L’angolo non decide mai
+  interno/esterno.
+
+Distacco e interno/esterno valgono per la quota allineata; diametro e raggio
+usano l’ancoraggio testo fornito dal chiamante e condividono solo
+l’orientamento parallelo alla linea e mai capovolto.
+
 La prima entità reale è la quota allineata, ora **simbolo isogl**. Il CAD
 costruisce ogni volta un `IsoglDimensionDesc` completo (`p1`, `p2`, `p3`,
 `distance`, `text_offset_mm`, `text_left`/`text_right`, `arrow_left`/`right`,

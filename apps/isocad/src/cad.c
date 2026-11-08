@@ -769,6 +769,12 @@ isogl_symbol_id cad_add_dimension_symbol(CadDocument *doc, int layer,
                          d.color) < 0) {
         return 0;
     }
+    /* Dimensions are always continuous (ISO 128 type 01) regardless of the
+       layer's default pattern: dash-dot has no meaning for a dimension line.
+       Colour, weight and layer still come from the layer.  The generic symbol
+       API keeps honouring its `pattern` parameter; the CAD is what imposes
+       continuity for its dimension wrappers. */
+    d.pattern = (uint8_t)LINE_TYPE_CONTINUOUS;
     d.sheet_scale = doc->sheet_scale;
 
     isogl_symbol_id id = isogl_symbol_create_dimension(&d);
@@ -867,6 +873,8 @@ isogl_symbol_id cad_add_diameter_symbol(CadDocument *doc, int layer,
                          d.color) < 0) {
         return 0;
     }
+    /* Dimension lines are continuous even on a dash-dot layer. */
+    d.pattern = (uint8_t)LINE_TYPE_CONTINUOUS;
     d.sheet_scale = doc->sheet_scale;
 
     const double points[3][2] = {
@@ -889,6 +897,8 @@ isogl_symbol_id cad_add_radius_symbol(CadDocument *doc, int layer,
                          d.color) < 0) {
         return 0;
     }
+    /* Dimension lines are continuous even on a dash-dot layer. */
+    d.pattern = (uint8_t)LINE_TYPE_CONTINUOUS;
     d.sheet_scale = doc->sheet_scale;
 
     const double points[3][2] = {
