@@ -37,7 +37,7 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
 Stato: Milestone A + UI screen-space. Esistono foglio, linee, cerchi, archi,
 ellissi, rettangoli, testo, pattern e pesi ISO, zoom/pan, modalità
 colori-spessore, selezione d’area persistente e i primi simboli isogl (quota,
-center mark) con registry, hit/pick/explode. L’app usa record
+center mark, riga di tabella) con registry, hit/pick/explode. L’app usa record
 `CadSymbolRef { id, type, params }` al posto della vecchia `CAD_DIMENSION`,
 espone metadati e modifica parametri da console (`sym list/info/set/points/remove`,
 `save`) e usa ID entità monotoni. Archi ed ellissi hanno un modello analitico
@@ -288,8 +288,8 @@ Implementazione:
   vivo). `isogl_string_list_remove_by_pick_id` libera la stringa del simbolo;
   `isogl_symbol_update_dimension`/`isogl_symbol_update_center_mark`
   rigenerano un simbolo **in place**, preservando ID, pick e selezione.
-  `isogl_symbol_params_resize` ridimensiona le liste (punti/testi/segmenti)
-  entro i limiti dello schema, per il loader e per l'editing.
+  `isogl_symbol_params_resize` ridimensiona le liste (punti/testi/segmenti/
+  numeri/enum) entro i limiti dello schema, per il loader e per l'editing.
   La scala foglio è un globale in sola lettura; il percorso di update è
   atomico per simbolo (nuovo VBO e nuove stringhe prima di rimuovere i
   vecchi).
@@ -301,6 +301,9 @@ Implementazione:
   scalano), valida nomi/conteggi contro il tipo C, usa i default per le chiavi
   assenti e traduce lo schema piatto storico (`p1x/p2x/p3x`, `cx/cy`). SCALE e
   `sheet_scale` non si salvano per simbolo: la scala è globale in `[sheet]`.
+  Le liste hanno la sintassi `chiave = [elemento, ...]`: `NUMBERS` come
+  `widths = [20.0, 30.0]`, `ENUM_LIST` come `alignments = [0, 1, 2]` (un
+  token stabile della tabella, es. `"right"`, è accettato in lettura).
 - Tipo sconosciuto: l'entry resta con `params == NULL`, viene saltata con un
   warning e non contribuisce ai bounds; il loader non inventa geometria. Il
   writer `drawing_write_symbols`/`drawing_save_symbols` riscrive
@@ -321,10 +324,11 @@ Implementazione:
   `cad_symbol_update_params` e `cad_remove_symbol` gestiscono il record senza
   leggere VBO interni. La console espone `sym list/info/set/points/remove` e
   `save <path>`: interpreta i valori dai metadati pubblici
-  (`isogl_symbol_param_desc`), accetta per gli `ENUM` il token stabile o un
-  intero presente nella tabella, rifiuta `SCALE`/parametri non editabili,
-  lavora su una copia temporanea e poi chiama `cad_symbol_params_update`. Il
-  writer
+  (`isogl_symbol_param_desc`), accetta per gli `ENUM` e per ogni elemento
+  `ENUM_LIST` il token stabile o un intero presente nella tabella, per
+  `NUMBERS` `<i> <valore>` e per `TEXTS` `<i> <testo>`, rifiuta
+  `SCALE`/parametri non editabili, lavora su una copia temporanea e poi chiama
+  `cad_symbol_params_update`. Il writer
   schema v2 è **save-only** (stdio + metadati, `[[symbols]]` con type,
   `group = 0`, `[symbols.params]`, `SCALE` omesso); isocad non ha un parser
   TOML e non carica un disegno completo. La selezione è taggata
@@ -337,7 +341,10 @@ Implementazione:
   di produzione) + il disegno strutturato
   `tests/fixtures/test_drawing.toml`; `tests/test_symbols.c` verifica load,
   render, pick, hit, selezione, explode e trasferimento al CAD.
-  `tests/test_symbol_geometry.c` è headless.
+  `tests/test_symbol_geometry.c` è headless; `tests/test_table_row_geometry.c`
+  verifica la geometria pura del table row con una metrica stub (headless);
+  `tests/test_table_row.c` copre registry, parametri dinamici, bounds/hit/pick,
+  update, console, writer v2 e round-trip (GL).
 
 ### Contratto reale e lacune
 
@@ -352,13 +359,13 @@ distrutto resta morto (tombstone).
 | Funzione | Contratto |
 |---|---|
 | `isogl_symbol_init(font)` / `cleanup()` | registry GL; il font deve sopravvivere; cleanup prima di `isogl_cleanup()` |
-| `isogl_symbol_register_type(type)` / `find_type` / `type_count` / `type_at` | registry pubblico dei tipi C; nomi duplicati rifiutati; `dimension`/`center_mark` registrati all'init |
+| `isogl_symbol_register_type(type)` / `find_type` / `type_count` / `type_at` | registry pubblico dei tipi C; nomi duplicati rifiutati; `dimension`/`center_mark`/`table_row` registrati all'init |
 | `isogl_symbol_set/get_sheet_scale(scale)` | scala foglio **globale** in sola lettura dai parametri; default 1.0; scarta valori non finiti o ≤ 0; `set` rigenera **tutti** i simboli vivi, conservando ID, pick e selezione |
 | `isogl_symbol_create(type_name, params, scale)` | crea un'istanza di un tipo C registrato; copia i parametri; genera render+pick. L'argomento `scale` resta solo per compatibilità ABI: vale la scala globale |
 | `isogl_symbol_params_create/free` | alloca/libera un set di parametri conforme allo schema del tipo |
 | `isogl_symbol_params_get(id, &out)` | copia profonda dei parametri correnti; il parametro `SCALE` riporta la scala applicata al simbolo (`editable = 0`) |
 | `isogl_symbol_params_update(id, params)` | rigenera in place da parametri tipizzati; conserva ID, pick e selezione; **atomico per simbolo**; ignora il valore `SCALE` in ingresso e usa quello globale |
-| `isogl_symbol_params_set_text(...)` | sostituisce un elemento testo con copia UTF-8 |
+| `isogl_symbol_params_set_text/number/integer(...)` | sostituiscono un elemento di `TEXTS`/`NUMBERS`/`ENUM_LIST`; `number` richiede un valore finito, `integer` deve appartenere alla tabella enum |
 | `isogl_symbol_create_dimension/center_mark` | wrapper compatibili che costruiscono i parametri generici |
 | `isogl_symbol_update_dimension/center_mark` | wrapper compatibili; la scala è quella globale, non il campo del descrittore |
 | `isogl_symbol_destroy(id)` | rimuove VBO/stringhe e invalida l'ID |
@@ -398,17 +405,46 @@ typedef struct isogl_symbol_type {
 } isogl_symbol_type;
 ```
 
-I parametri sono liste tipizzate (`POINTS`, `TEXTS`, `SEGMENTS`), scalari
-(`NUMBER`, `INTEGER`, `BOOLEAN`, `ENUM`, `COLOR`) e la `SCALE` di contesto in
-sola lettura. Dimension e center mark sono adapter sui generatori puri
-esistenti; un tipo custom è nuovo codice C registrato dall'app.
+I parametri sono liste tipizzate (`POINTS`, `TEXTS`, `SEGMENTS`, `NUMBERS`,
+`ENUM_LIST`), scalari (`NUMBER`, `INTEGER`, `BOOLEAN`, `ENUM`, `COLOR`) e la
+`SCALE` di contesto in sola lettura. `NUMBERS` è una lista di `double`;
+`ENUM_LIST` è una lista di `int` validata **elemento per elemento** contro la
+tabella `enum_values` del descrittore. Dimension e center mark sono adapter sui
+generatori puri esistenti; `table_row` è il primo tipo con liste dinamiche
+(un simbolo = un file C); un tipo custom è nuovo codice C registrato dall'app.
 
-Gli `ENUM` portano la tabella `value → name/label` nel descrittore. La tabella
-è l'autorità: `sym_params_validate` rifiuta un valore fuori tabella prima
-ancora del `validate` del tipo, e `isogl_symbol_param_enum_label/value`
-risolvono etichetta e token (case-insensitive) per console ed editor. I
-built-in usano `DIM_ARROW_VALUES` (7 stili di punta), `LINE_TYPE_VALUES`
-(15 tipi ISO 128) e `LINE_WEIGHT_VALUES` (8 pesi ISO).
+Gli `ENUM` e gli `ENUM_LIST` portano la tabella `value → name/label` nel
+descrittore. La tabella è l'autorità: `sym_params_validate` rifiuta un valore
+fuori tabella prima ancora del `validate` del tipo (per `ENUM_LIST` controlla
+ogni elemento), e `isogl_symbol_param_enum_label/value` risolvono etichetta e
+token (case-insensitive) per console ed editor. I built-in usano le tabelle
+condivise di `src/isogl_symbol_enums.*`: `isogl_symbol_arrow_values` (7 stili
+di punta), `isogl_symbol_line_type_values` (15 tipi ISO 128) e
+`isogl_symbol_line_weight_values` (8 pesi ISO).
+
+**Tipo `table_row` (`src/isogl_symbol_table.c`).** Origine in basso a sinistra
+in `points` (1 punto, unità modello); `height_mm` è l'altezza riga su carta;
+N celle con `widths[i]` (mm di carta), `alignments[i]` (0 Sinistra, 1 Centro,
+2 Destra) e `texts[i]`; `text_height_mm`, `padding_mm`, `pick_text`, stile
+(`pattern`/`weight`/`layer`/`color`) e `scale` in sola lettura. Validazione:
+`widths.count == alignments.count == texts.count`, ogni larghezza > 0 e finita,
+altezze > 0, padding ≥ 0, stile nei range ISO. Il generatore converte
+`model = paper / sheet_scale` (scala dal contesto, ≤ 0 → 1) ed emette bordo
+inferiore e superiore, N+1 separatori verticali alle somme cumulative e un run
+di testo per cella, con baseline centrata verticalmente e x secondo
+l'allineamento e la larghezza reale (`metrics->text_width`, lo stesso callback
+per render e pick). L'emitter riceve solo item; il registry possiede VBO e
+stringhe. Il file salva tipo e valori, quindi un `table_row` è un nuovo file C
++ registrazione, non un caso speciale del loader.
+
+**Tabelle condivise (header interni, non installati).**
+`src/isogl_symbol_enums.h/.c` è l'unica copia delle tabelle `isogl_symbol_enum_value`
+per punte di quota, tipi linea ISO e pesi ISO, usata da `isogl_symbol.c` e
+`isogl_symbol_table.c`; `_Static_assert` le lega a `ISOGL_DIM_ARROW_CLOSED_OUTSIDE`,
+`LINE_TYPE_COUNT` e `LINE_THICKNESS_COUNT`. `src/isogl_font_data.h/.c` contiene
+la parte pura del font (UTF-8, lookup glifo, `isogl_font_text_advance`) ed è
+linkabile senza GL; la usano sia `isogl_font.c` sia il generatore `table_row`,
+così la larghezza del testo ha una sola fonte.
 
 **Scala foglio globale.** `isogl_symbol_set_sheet_scale()` è l'unica autorità:
 tutti i simboli vivi usano quel valore, anche quelli creati con un argomento
@@ -438,10 +474,11 @@ La scala è globale e di sola lettura: si cambia solo con
 `isogl_symbol_set_sheet_scale`.
 
 **Lacune e passi successivi.** Restano: pannello proprietà visuale e handle di
-editing (la modifica è solo da console); ridimensionamento dinamico delle liste
-(in v1 i tipi built-in hanno lunghezze fisse min=max); transazione globale degli
-array condivisi; preservazione dei tipi sconosciuti nel writer; caricamento di
-un disegno completo nell’app. `isocad` imposta la scala globale da
+editing (la modifica è solo da console); transazione globale degli array
+condivisi; preservazione dei tipi sconosciuti nel writer; caricamento di un
+disegno completo nell’app. Le liste sono ora dinamiche a livello generico;
+`dimension` e `center_mark` continuano a usare lunghezze fisse min=max, mentre
+`table_row` le usa davvero. `isocad` imposta la scala globale da
 `doc->sheet_scale` prima di creare i simboli.
 
 **Direzione CAD.** `CadSymbolRef` è ora il record `{ id, type, params }`;
@@ -734,6 +771,7 @@ make lib                    # solo il core, senza SDL installato
 make sdl-host               # solo libisogl_sdl.a
 make test-cad-geometry      # headless: archi/ellisse CAD, niente GL/SDL
 make test-symbol-geometry   # headless: geometria pura, niente GL/SDL
+make test-table-row-geometry # headless: geometria pura table_row, niente GL/SDL
 make test-panel-layout      # headless: layout pannelli, niente GL/SDL
 make test-panel-deck        # headless: slot e parcheggio pagine, niente GL/SDL
 make test-overlay           # GL: overlay a gruppi, batch, clip, testo
@@ -741,10 +779,11 @@ make test-drawing-load      # GL: loader TOML gerarchico + simboli
 make test-symbol-params     # GL: registry tipi C, parametri, get/update
 make test-console-cmd       # headless: parser comandi sym/save
 make test-cad-symbols       # GL: CadSymbolRef, update/remove, writer v2
+make test-table-row         # GL: table_row, liste dinamiche, console, round-trip
 make test-cad-entities      # GL: VBO, pick e selezione di archi/ellissi
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
-make test                   # cad-geometry + geometry + layout + deck + overlay + drawing + params + console + cad-symbols + cad-entities + symbols + viewport + core
+make test                   # cad-geometry + geometry + table-row-geometry + layout + deck + overlay + drawing + params + console + cad-symbols + table-row + cad-entities + symbols + viewport + core
 make check-sdl-free         # nessun riferimento SDL nel core
 make example-qt6            # host Qt6 (opzionale)
 make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)
@@ -752,8 +791,8 @@ make -B SANITIZE=1 test
 ```
 
 `tests/test_cad_geometry.c`, `tests/test_symbol_geometry.c`,
-`tests/test_panel_layout.c` e `tests/test_console_cmd.c` girano senza finestra
-e senza linkare SDL/GL. `tests/test_cad_geometry.c` copre conteggio segmenti,
+`tests/test_table_row_geometry.c`, `tests/test_panel_layout.c` e
+`tests/test_console_cmd.c` girano senza finestra e senza linkare SDL/GL. `tests/test_cad_geometry.c` copre conteggio segmenti,
 estremi, chiusura, tre punti, wrap angolare e sagitta misurata
 dell'ellisse. `tests/test_cad_entities.c` usa un contesto GL e verifica
 costruzione, VBO derivato, pick GPU e selezione window/crossing per archi ed

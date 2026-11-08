@@ -1,5 +1,6 @@
 #include "drawing_load.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -559,6 +560,66 @@ static int draw_parse_param_table(toml_table_t *table,
                 break;
             }
 
+            case ISOGL_SYM_PARAM_NUMBERS: {
+                toml_array_t *array = toml_array_in(table, desc->key);
+                if (!array) return -1;
+                int count = toml_array_nelem(array);
+                if (draw_check_count(desc, count) != 0) return -1;
+                if (isogl_symbol_params_resize(params, i,
+                                               (size_t)count) != 0) {
+                    return -1;
+                }
+                for (int j = 0; j < count; ++j) {
+                    double value = 0.0;
+                    if (draw_array_number(array, j, &value) != 0 ||
+                        !isfinite(value)) {
+                        return -1;
+                    }
+                    if (isogl_symbol_params_set_number(params, i,
+                                                       (size_t)j,
+                                                       value) != 0) {
+                        return -1;
+                    }
+                }
+                break;
+            }
+
+            case ISOGL_SYM_PARAM_ENUM_LIST: {
+                toml_array_t *array = toml_array_in(table, desc->key);
+                if (!array) return -1;
+                int count = toml_array_nelem(array);
+                if (draw_check_count(desc, count) != 0) return -1;
+                if (isogl_symbol_params_resize(params, i,
+                                               (size_t)count) != 0) {
+                    return -1;
+                }
+                for (int j = 0; j < count; ++j) {
+                    int value = 0;
+                    toml_datum_t d = toml_int_at(array, j);
+                    if (d.ok) {
+                        if (d.u.i < INT_MIN || d.u.i > INT_MAX) return -1;
+                        value = (int)d.u.i;
+                    } else {
+                        /* A stable token is accepted too: alignments =
+                           ["left", "center"]. */
+                        toml_datum_t s = toml_string_at(array, j);
+                        if (!s.ok) return -1;
+                        int rc = isogl_symbol_param_enum_value(desc, s.u.s,
+                                                               &value);
+                        free(s.u.s);
+                        if (rc != 0) return -1;
+                    }
+                    /* set_integer validates the value against the enum
+                       table; an integer outside it is rejected. */
+                    if (isogl_symbol_params_set_integer(params, i,
+                                                        (size_t)j,
+                                                        value) != 0) {
+                        return -1;
+                    }
+                }
+                break;
+            }
+
             case ISOGL_SYM_PARAM_NUMBER: {
                 double value = 0.0;
                 int present = 0;
@@ -965,6 +1026,28 @@ static int draw_write_param(FILE *out, const isogl_symbol_param *p) {
                     fputs(", ", out) < 0 ||
                     draw_write_double(out, s->y1) != 0 ||
                     fputs("]", out) < 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_NUMBERS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (draw_write_double(out, p->value.numbers[i]) != 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_ENUM_LIST:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (fprintf(out, "%d", p->value.integers[i]) < 0) {
                     return -1;
                 }
             }

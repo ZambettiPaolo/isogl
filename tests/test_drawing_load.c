@@ -106,6 +106,23 @@ static int params_equal(const isogl_symbol_params *a,
                     }
                 }
                 break;
+            case ISOGL_SYM_PARAM_NUMBERS:
+                if (pa->count != pb->count) return 0;
+                for (size_t j = 0; j < pa->count; ++j) {
+                    if (!near(pa->value.numbers[j],
+                              pb->value.numbers[j])) {
+                        return 0;
+                    }
+                }
+                break;
+            case ISOGL_SYM_PARAM_ENUM_LIST:
+                if (pa->count != pb->count) return 0;
+                for (size_t j = 0; j < pa->count; ++j) {
+                    if (pa->value.integers[j] != pb->value.integers[j]) {
+                        return 0;
+                    }
+                }
+                break;
             case ISOGL_SYM_PARAM_NUMBER:
             case ISOGL_SYM_PARAM_SCALE:
                 if (!near(pa->value.number, pb->value.number)) return 0;

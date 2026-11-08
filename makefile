@@ -15,7 +15,7 @@ SDL2_LIBS   := $(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null)
 CFLAGS      ?= -O2 -g
 CFLAGS      += -std=c11 -Wall -Wextra -MMD -MP -fPIC
 CPPFLAGS    += -Iinclude -Iinclude/isogl -Ithird_party/tomlc99 \
-               -Iapps/isocad/src -Iexamples/demo -Ihosts \
+               -Isrc -Iapps/isocad/src -Iexamples/demo -Ihosts \
                -DISOGL_DEFAULT_ASSET_DIR=\"$(DATADIR)\"
 LDLIBS      := -ldl -lm
 
@@ -61,6 +61,19 @@ CAD_SYMBOLS_TEST_OBJS := $(BUILD)/tests/test_cad_symbols.o \
                          $(BUILD)/apps/isocad/src/console.o \
                          $(BUILD)/apps/isocad/src/console_cmd.o \
                          $(BUILD)/examples/demo/drawing_load.o
+TEST_TABLE_ROW_GEOMETRY := $(BUILD)/test-table-row-geometry
+TABLE_ROW_GEOMETRY_TEST_OBJS := $(BUILD)/tests/test_table_row_geometry.o \
+                                $(BUILD)/src/isogl_symbol_table.o \
+                                $(BUILD)/src/isogl_symbol_enums.o \
+                                $(BUILD)/src/isogl_font_data.o
+TEST_TABLE_ROW := $(BUILD)/test-table-row
+TABLE_ROW_TEST_OBJS := $(BUILD)/tests/test_table_row.o \
+                       $(BUILD)/apps/isocad/src/cad.o \
+                       $(BUILD)/apps/isocad/src/cad_geometry.o \
+                       $(BUILD)/apps/isocad/src/cad_commands.o \
+                       $(BUILD)/apps/isocad/src/console.o \
+                       $(BUILD)/apps/isocad/src/console_cmd.o \
+                       $(BUILD)/examples/demo/drawing_load.o
 TEST_CONSOLE_CMD := $(BUILD)/test-console-cmd
 CONSOLE_CMD_TEST_OBJS := $(BUILD)/tests/test_console_cmd.o \
                          $(BUILD)/apps/isocad/src/console_cmd.o
@@ -73,10 +86,12 @@ CAD_ENTITIES_TEST_OBJS := $(BUILD)/tests/test_cad_entities.o \
                           $(BUILD)/apps/isocad/src/cad_geometry.o
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
+SYMBOL_TABLE_SRC := src/isogl_symbol_table.c
 SYMBOL_SRC := src/isogl_symbol.c
-LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_style.c \
-               src/isogl_overlay.c src/isogl_panel.c src/isogl_panel_emit.c \
-               $(SYMBOL_GEOMETRY_SRC) $(SYMBOL_SRC) \
+LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_font_data.c \
+               src/isogl_style.c src/isogl_overlay.c src/isogl_panel.c \
+               src/isogl_panel_emit.c src/isogl_symbol_enums.c \
+               $(SYMBOL_GEOMETRY_SRC) $(SYMBOL_TABLE_SRC) $(SYMBOL_SRC) \
                third_party/glad/glad.c third_party/tomlc99/toml.c
 SDL_HOST_SRCS := hosts/isogl-sdl/isogl_sdl.c
 DEMO_SRCS   := examples/demo/main.c examples/demo/drawing_load.c
@@ -100,7 +115,7 @@ sdl-host: $(SDL_HOST_LIB)
 $(SDL_HOST_OBJS) $(DEMO_OBJS) $(TEST_OBJS) $(TEST_SYMBOLS_OBJS) \
     $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS) $(DRAWING_LOAD_TEST_OBJS) \
     $(SYMBOL_PARAMS_TEST_OBJS) $(CAD_SYMBOLS_TEST_OBJS) \
-    $(CAD_ENTITIES_TEST_OBJS): \
+    $(CAD_ENTITIES_TEST_OBJS) $(TABLE_ROW_TEST_OBJS): \
     TARGET_CFLAGS := $(SDL2_CFLAGS)
 
 $(BUILD)/%.o: %.c
@@ -129,6 +144,14 @@ $(TEST_SYMBOL_GEOMETRY): $(SYMBOL_GEOMETRY_TEST_OBJS)
 
 test-symbol-geometry: $(TEST_SYMBOL_GEOMETRY)
 	./$(TEST_SYMBOL_GEOMETRY)
+
+$(TEST_TABLE_ROW_GEOMETRY): $(TABLE_ROW_GEOMETRY_TEST_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(TABLE_ROW_GEOMETRY_TEST_OBJS) -lm $(LDFLAGS) -o $@
+
+# Headless: pure table-row geometry only, no GL and no SDL.
+test-table-row-geometry: $(TEST_TABLE_ROW_GEOMETRY)
+	./$(TEST_TABLE_ROW_GEOMETRY)
 
 $(TEST_PANEL_LAYOUT): $(PANEL_LAYOUT_TEST_OBJS)
 	@mkdir -p $(dir $@)
@@ -191,6 +214,14 @@ $(TEST_CAD_SYMBOLS): $(CAD_SYMBOLS_TEST_OBJS) $(LIB)
 test-cad-symbols: $(TEST_CAD_SYMBOLS)
 	./$(TEST_CAD_SYMBOLS) .
 
+$(TEST_TABLE_ROW): $(TABLE_ROW_TEST_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(TABLE_ROW_TEST_OBJS) $(LIB) \
+	    $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-table-row: $(TEST_TABLE_ROW)
+	./$(TEST_TABLE_ROW) .
+
 $(TEST_CONSOLE_CMD): $(CONSOLE_CMD_TEST_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(CONSOLE_CMD_TEST_OBJS) -lm $(LDFLAGS) -o $@
@@ -233,9 +264,11 @@ example-gtk4: lib
 	    ISOGL_CFLAGS="-I$(CURDIR)/include -I$(CURDIR)/include/isogl" \
 	    ISOGL_LIBS="$(CURDIR)/build/libisogl.a -ldl -lm"
 
-test: test-cad-geometry test-symbol-geometry test-panel-layout test-panel-deck \
+test: test-cad-geometry test-symbol-geometry test-table-row-geometry \
+      test-panel-layout test-panel-deck \
       test-overlay test-drawing-load test-symbol-params test-console-cmd \
-      test-cad-symbols test-cad-entities test-symbols test-viewport $(TEST)
+      test-cad-symbols test-table-row test-cad-entities test-symbols \
+      test-viewport $(TEST)
 	./$(TEST) .
 
 install: all
@@ -286,11 +319,14 @@ clean:
          $(TEST_OBJS:.o=.d) $(BUILD)/tests/test_symbol_geometry.d \
          $(TEST_SYMBOLS_OBJS:.o=.d) $(TEST_VIEWPORT_OBJS:.o=.d) \
          $(SYMBOL_PARAMS_TEST_OBJS:.o=.d) $(CAD_SYMBOLS_TEST_OBJS:.o=.d) \
+         $(TABLE_ROW_GEOMETRY_TEST_OBJS:.o=.d) \
+         $(TABLE_ROW_TEST_OBJS:.o=.d) \
          $(CONSOLE_CMD_TEST_OBJS:.o=.d) $(CAD_GEOMETRY_TEST_OBJS:.o=.d) \
          $(CAD_ENTITIES_TEST_OBJS:.o=.d)
 
 .PHONY: all lib sdl-host run test test-cad-geometry test-cad-entities \
-        test-symbol-geometry test-panel-layout test-panel-deck test-overlay \
+        test-symbol-geometry test-table-row-geometry test-table-row \
+        test-panel-layout test-panel-deck test-overlay \
         test-drawing-load test-symbol-params test-console-cmd test-cad-symbols \
         test-symbols test-viewport check-sdl-free example-qt6 example-gtk4 \
         install uninstall clean

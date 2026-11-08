@@ -1141,6 +1141,28 @@ static int cad_write_param(FILE *out, const isogl_symbol_param *p) {
             rc = fputc(']', out) == EOF ? -1 : 0;
             break;
 
+        case ISOGL_SYM_PARAM_NUMBERS:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (cad_write_double(out, p->value.numbers[i]) != 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
+        case ISOGL_SYM_PARAM_ENUM_LIST:
+            if (fputc('[', out) == EOF) return -1;
+            for (size_t i = 0; i < p->count; ++i) {
+                if (i > 0 && fputs(", ", out) < 0) return -1;
+                if (fprintf(out, "%d", p->value.integers[i]) < 0) {
+                    return -1;
+                }
+            }
+            rc = fputc(']', out) == EOF ? -1 : 0;
+            break;
+
         case ISOGL_SYM_PARAM_NUMBER:
             rc = cad_write_double(out, p->value.number);
             break;

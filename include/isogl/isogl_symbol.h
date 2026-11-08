@@ -38,7 +38,10 @@ typedef enum {
     ISOGL_SYM_PARAM_INTEGER,
     ISOGL_SYM_PARAM_BOOLEAN,
     ISOGL_SYM_PARAM_ENUM,
-    ISOGL_SYM_PARAM_COLOR        /* float[4]                        */
+    ISOGL_SYM_PARAM_COLOR,       /* float[4]                        */
+    ISOGL_SYM_PARAM_NUMBERS,     /* list of double                  */
+    ISOGL_SYM_PARAM_ENUM_LIST    /* list of int, validated per element
+                                    against the descriptor's enum_values */
 } isogl_symbol_param_kind;
 
 /*
@@ -84,6 +87,8 @@ typedef struct {
         isogl_symbol_point *points;
         char **texts;                     /* owned UTF-8 strings */
         isogl_symbol_segment *segments;
+        double *numbers;                  /* NUMBERS */
+        int *integers;                    /* ENUM_LIST */
         double number;                    /* NUMBER and SCALE */
         int integer;
         int boolean;
@@ -171,16 +176,31 @@ int isogl_symbol_params_set_text(isogl_symbol_params *params,
                                  size_t param_index, size_t element,
                                  const char *utf8);
 
-/* Resize a list parameter (points, texts or segments) to `count` elements.
- * The count must satisfy the schema's min_count/max_count.  New points and
- * segments are zeroed; new texts are empty strings.  Existing elements are
- * preserved.  Returns 0 on success, -1 for a non-list index, an out-of-range
- * count or allocation failure. */
+/* Replace one element of an ISOGL_SYM_PARAM_NUMBERS list.  The value must be
+ * finite.  Returns 0 on success, -1 for an out-of-range index/kind or a
+ * non-finite value. */
+int isogl_symbol_params_set_number(isogl_symbol_params *params,
+                                   size_t param_index, size_t element,
+                                   double value);
+
+/* Replace one element of an ISOGL_SYM_PARAM_ENUM_LIST list.  The value must
+ * be present in the descriptor's enum_values table.  Returns 0 on success,
+ * -1 for an out-of-range index/kind or an unknown enum value. */
+int isogl_symbol_params_set_integer(isogl_symbol_params *params,
+                                    size_t param_index, size_t element,
+                                    int value);
+
+/* Resize a list parameter (points, texts, segments, numbers or enum list) to
+ * `count` elements.  The count must satisfy the schema's min_count/max_count.
+ * New points, segments, numbers and integers are zeroed; new texts are empty
+ * strings.  Existing elements are preserved.  Returns 0 on success, -1 for a
+ * non-list index, an out-of-range count or allocation failure. */
 int isogl_symbol_params_resize(isogl_symbol_params *params, size_t param_index,
                                size_t count);
 
-/* Enum metadata helpers.  Both operate on a parameter descriptor and are safe
- * with a NULL descriptor, a non-ENUM kind or an empty table.
+/* Enum metadata helpers.  Both operate on a parameter descriptor (ENUM or
+ * ENUM_LIST) and are safe with a NULL descriptor, any other kind or an empty
+ * table.
  *
  * isogl_symbol_param_enum_label() returns the UI label for `value`, or NULL
  * when the value is not in the table.

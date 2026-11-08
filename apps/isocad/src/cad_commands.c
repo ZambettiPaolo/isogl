@@ -18,6 +18,8 @@ static const char *cmd_kind_name(isogl_symbol_param_kind kind) {
         case ISOGL_SYM_PARAM_BOOLEAN:  return "BOOLEAN";
         case ISOGL_SYM_PARAM_ENUM:     return "ENUM";
         case ISOGL_SYM_PARAM_COLOR:    return "COLOR";
+        case ISOGL_SYM_PARAM_NUMBERS:  return "NUMBERS";
+        case ISOGL_SYM_PARAM_ENUM_LIST: return "ENUM_LIST";
         default:                       return "?";
     }
 }
@@ -109,6 +111,22 @@ static void print_param_value(FILE *out, const isogl_symbol_param *p,
                         s->x0, s->y0, s->x1, s->y1);
             }
             break;
+        case ISOGL_SYM_PARAM_NUMBERS:
+            if (index < p->count) {
+                fprintf(out, "%.12g", p->value.numbers[index]);
+            }
+            break;
+        case ISOGL_SYM_PARAM_ENUM_LIST:
+            if (index < p->count) {
+                const char *label = isogl_symbol_param_enum_label(
+                    d, p->value.integers[index]);
+                if (label) {
+                    fprintf(out, "%s (%d)", label, p->value.integers[index]);
+                } else {
+                    fprintf(out, "%d", p->value.integers[index]);
+                }
+            }
+            break;
         case ISOGL_SYM_PARAM_NUMBER:
         case ISOGL_SYM_PARAM_SCALE:
             fprintf(out, "%.12g", p->value.number);
@@ -147,7 +165,8 @@ static void print_param_dump(FILE *out, const isogl_symbol_param *p) {
             d->key, d->label ? d->label : "-", cmd_kind_name(d->kind),
             d->unit ? d->unit : "", p->count, d->editable);
     if (d->help) fprintf(out, "    help: %s\n", d->help);
-    if (d->kind == ISOGL_SYM_PARAM_ENUM && d->enum_values) {
+    if ((d->kind == ISOGL_SYM_PARAM_ENUM ||
+         d->kind == ISOGL_SYM_PARAM_ENUM_LIST) && d->enum_values) {
         fprintf(out, "    values:");
         for (size_t i = 0; i < d->enum_count; ++i) {
             fprintf(out, " %s=%s(%d)",
@@ -162,6 +181,8 @@ static void print_param_dump(FILE *out, const isogl_symbol_param *p) {
         case ISOGL_SYM_PARAM_POINTS:
         case ISOGL_SYM_PARAM_TEXTS:
         case ISOGL_SYM_PARAM_SEGMENTS:
+        case ISOGL_SYM_PARAM_NUMBERS:
+        case ISOGL_SYM_PARAM_ENUM_LIST:
             for (size_t i = 0; i < p->count; ++i) {
                 fprintf(out, "    [%zu] ", i);
                 print_param_value(out, p, i);
@@ -370,6 +391,61 @@ static int set_list_value(IsocadConsole *console,
                    s.x0, s.y0, s.x1, s.y1);
             break;
         }
+        case ISOGL_SYM_PARAM_NUMBERS: {
+            if (cmd->arg_count < 2) {
+                return cmd_fail(console, "usage: numbers <i> <value>");
+            }
+            size_t element = 0;
+            double value = 0.0;
+            if (parse_size_token(cmd->arg[0], &element) != 0 ||
+                parse_double_token(cmd->arg[1], &value) != 0) {
+                return cmd_fail(console, "invalid number value");
+            }
+            if (element >= p->count) {
+                return cmd_fail(console, "index out of range");
+            }
+            if (isogl_symbol_params_set_number(work, (size_t)index, element,
+                                               value) != 0) {
+                return cmd_fail(console, "number update failed");
+            }
+            printf("S%u %s[%zu] = %.12g\n",
+                   (unsigned)cmd->symbol, key, element, value);
+            break;
+        }
+        case ISOGL_SYM_PARAM_ENUM_LIST: {
+            if (cmd->arg_count < 2) {
+                return cmd_fail(console,
+                                "usage: enum list <i> <token|integer>");
+            }
+            size_t element = 0;
+            int value = 0;
+            if (parse_size_token(cmd->arg[0], &element) != 0) {
+                return cmd_fail(console, "invalid index");
+            }
+            if (element >= p->count) {
+                return cmd_fail(console, "index out of range");
+            }
+            if (isogl_symbol_param_enum_value(p->desc, cmd->arg[1],
+                                              &value) != 0) {
+                long raw = 0;
+                if (parse_long_token(cmd->arg[1], &raw) != 0 ||
+                    raw < INT_MIN || raw > INT_MAX) {
+                    return cmd_fail(console, "unknown enum value");
+                }
+                value = (int)raw;
+            }
+            const char *label = isogl_symbol_param_enum_label(p->desc, value);
+            if (!label) {
+                return cmd_fail(console, "unknown enum value");
+            }
+            if (isogl_symbol_params_set_integer(work, (size_t)index, element,
+                                                value) != 0) {
+                return cmd_fail(console, "enum update failed");
+            }
+            printf("S%u %s[%zu] = %s (%d)\n",
+                   (unsigned)cmd->symbol, key, element, label, value);
+            break;
+        }
         default:
             return cmd_fail(console, "unsupported list kind");
     }
@@ -436,7 +512,9 @@ static int command_set(CadDocument *doc, IsocadConsole *console,
         rc = cmd_fail(console, "read-only parameter");
     } else if (p->desc->kind == ISOGL_SYM_PARAM_POINTS ||
                p->desc->kind == ISOGL_SYM_PARAM_TEXTS ||
-               p->desc->kind == ISOGL_SYM_PARAM_SEGMENTS) {
+               p->desc->kind == ISOGL_SYM_PARAM_SEGMENTS ||
+               p->desc->kind == ISOGL_SYM_PARAM_NUMBERS ||
+               p->desc->kind == ISOGL_SYM_PARAM_ENUM_LIST) {
         rc = set_list_value(console, work, index, cmd);
     } else {
         switch (p->desc->kind) {

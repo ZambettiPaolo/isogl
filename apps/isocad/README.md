@@ -91,6 +91,8 @@ Forme di `sym set` per tipo di parametro:
 points <i> <x> <y>
 texts <i> <testo libero fino a fine riga>
 segments <i> <x0> <y0> <x1> <y1>
+NUMBERS <i> <valore>          es. widths[i]
+ENUM_LIST <i> <nome>|<intero> es. alignments[i]
 number <valore>
 integer <intero>
 enum <nome>|<intero>      token stabile della tabella (es. closed) o valore
@@ -98,10 +100,12 @@ boolean 0|1|true|false
 color <r> <g> <b> [<a>]
 ```
 
-Gli `ENUM` usano la tabella del descrittore: `sym info <id>` elenca
-`token=etichetta(valore)`, `sym set` accetta il token (case-insensitive) o un
-intero presente in tabella e rifiuta gli altri. La tabella è anche il
-validatore: un valore fuori tabella non arriva alla rigenerazione.
+Gli `ENUM` e ogni elemento degli `ENUM_LIST` usano la tabella del descrittore:
+`sym info <id>` elenca `token=etichetta(valore)` e i singoli elementi,
+`sym set` accetta il token (case-insensitive) o un intero presente in tabella e
+rifiuta gli altri. I `NUMBERS` si modificano con `<i> <valore>`, gli
+`ENUM_LIST` con `<i> <token|intero>`. La tabella è anche il validatore: un
+valore fuori tabella non arriva alla rigenerazione.
 
 `SCALE` e i parametri con `editable = 0` sono rifiutati. Un aggiornamento
 invalido lascia intatti simbolo, geometria e copia dei parametri: la console
@@ -250,8 +254,23 @@ generatore puro. Il CAD può leggere metadati e valori con
 `pick_at` e `draw_all` operano sul registry, non su `CadDocument.symbols`.
 `bounds` deriva dalla geometria di pick: con `pick_text = 0` il testo non è
 incluso. `dimension` e `center_mark` sono adapter sui generatori puri esistenti;
-un simbolo nuovo richiede un nuovo tipo C registrato con
-`isogl_symbol_register_type`.
+`table_row` è il primo tipo con liste dinamiche (`NUMBERS`, `ENUM_LIST`) e vive
+in `src/isogl_symbol_table.c`. Un simbolo nuovo richiede un nuovo tipo C
+registrato con `isogl_symbol_register_type`, con la sua geometria pura e i
+metadati nel file del tipo.
+
+**Riga di tabella (`table_row`).** Origine in basso a sinistra in `points`
+(unità modello), `height_mm` di carta, N celle con `widths` (mm di carta),
+`alignments` (0 Sinistra, 1 Centro, 2 Destra) e `texts`, più
+`text_height_mm`, `padding_mm`, `pick_text` e stile
+`pattern`/`weight`/`layer`/`color`; `scale` è in sola lettura. Il generatore
+puro converte le misure di carta in unità modello con la scala foglio, emette
+bordo inferiore/superiore, N+1 separatori verticali e un run di testo per
+cella con baseline centrata e allineamento orizzontale basato sulla larghezza
+reale. `widths.count == alignments.count == texts.count` è obbligatorio; ogni
+larghezza è > 0. Le tabelle enum ISO condivise sono in
+`src/isogl_symbol_enums.*` e la metrica pura del font in
+`src/isogl_font_data.*`; entrambi sono header/sorgenti interni, non installati.
 
 **Scala foglio globale.** `isogl_symbol_set_sheet_scale(scale)` (valori finiti
 e > 0) è l'unica autorità: tutti i simboli vivi usano quel valore e la
@@ -284,9 +303,11 @@ disegno completo; il round-trip del file resta compito di
 `examples/demo/drawing_load`.
 
 Restano da implementare: pannello proprietà visuale e handle di editing
-(la modifica oggi è solo da console); liste dinamiche; transazione globale
-degli array condivisi; preservazione dei tipi sconosciuti nel writer;
-caricamento di un disegno completo nell’app.
+(la modifica oggi è solo da console); transazione globale degli array
+condivisi; preservazione dei tipi sconosciuti nel writer; caricamento di un
+disegno completo nell’app. Le liste sono dinamiche (`NUMBERS`, `ENUM_LIST`);
+`table_row` le usa, mentre `dimension` e `center_mark` restano a lunghezza
+fissa min=max.
 
 ## Simboli e ambiente di test
 
@@ -304,14 +325,19 @@ La verifica usa:
 - `tests/fixtures/test_drawing.toml`: disegno strutturato;
 - `tests/test_symbols.c`: render, pick, hit, selezione, explode e
   trasferimento;
-- `tests/test_symbol_geometry.c`: geometria pura headless.
+- `tests/test_symbol_geometry.c`: geometria pura headless;
+- `tests/test_table_row_geometry.c`: table_row puro headless con metrica stub;
+- `tests/test_table_row.c`: registry, liste dinamiche, console, writer v2 e
+  round-trip del table_row.
 
 ```sh
 make test-cad-geometry      # archi/ellisse, generatore puro, headless
 make test-cad-entities      # VBO, pick e selezione di archi/ellissi, GL
 make test-symbol-geometry   # geometria pura, headless
+make test-table-row-geometry # geometria pura table_row, headless
 make test-console-cmd       # parser console, headless
 make test-cad-symbols       # CadSymbolRef, update/remove/writer, round-trip, GL
+make test-table-row         # table_row, liste dinamiche, console, round-trip, GL
 make test-symbols
 make test
 ```
@@ -400,10 +426,12 @@ stringhe; a scala il limite sono i VBO e le draw call, non i byte.
 
 Milestone A + UI screen-space: foglio, linee, cerchi, archi, ellissi,
 rettangoli, testo vettoriale, pattern e pesi ISO, zoom/pan, modalità
-colori-spessore/stampa, selezione d’area persistente taggata CAD/simbolo, quota
-e center mark come simboli isogl con registry, hit/pick/explode, record CAD con
-tipo+copia parametri, modifica da console (`sym list/info/set/points/remove`,
-`save`), ambiente di test gerarchico e testo incrementale per entità. Archi ed
+colori-spessore/stampa, selezione d’area persistente taggata CAD/simbolo, quota,
+center mark e riga di tabella come simboli isogl con registry,
+hit/pick/explode, record CAD con tipo+copia parametri, liste dinamiche
+(`NUMBERS`, `ENUM_LIST`), modifica da console
+(`sym list/info/set/points/remove`, `save`), ambiente di test gerarchico e
+testo incrementale per entità. Archi ed
 ellissi usano il generatore puro a tolleranza di corda; niente più 96 segmenti
 fissi per il cerchio. L’interfaccia usa un overlay a gruppi
 (`isogl_overlay`) con pannelli parametrici (`isogl_panel`): pannelli, icone come

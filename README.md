@@ -14,7 +14,7 @@ modulo (`isogl_style`), usato sia dal C sia dagli shader.
 | `isogl_style` | tabelle normative: 15 tipi di linea, 8 pesi, 8 altezze testo, formati A4-A0, colori-spessore |
 | `isogl` | init/cleanup, shader, viewport, foglio, matrici view/model, zoom/pan, oggetti segmento |
 | `isogl_font` | font vettoriale TOML, stringhe, VBO per stringa |
-| `isogl_symbol*` | geometria pura e registry GL dei simboli (quota, center mark) |
+| `isogl_symbol*` | geometria pura e registry GL dei simboli (quota, center mark, riga di tabella); un simbolo = un file C |
 | `isogl_overlay` | overlay screen-space a gruppi: quad, linee e testo batchati, dirty per gruppo, clip e layer |
 | `isogl_panel*` | layout puro dei pannelli (bordi, separatori, content rect) ed emissione dei quad |
 | `shaders/vs|gs|fs_segment` | unpack attributi, filtro maschere, clip, tratteggio |
@@ -100,12 +100,25 @@ colori-spessore e colori-stampa, come in AutoCAD).
 
 ## Simboli isogl
 
-`libisogl` possiede i simboli (quota, center mark): geometria pura in
-`isogl_symbol_geometry.*`, registry/render/pick in `isogl_symbol.*`. Il CAD
+`libisogl` possiede i simboli (quota, center mark, riga di tabella): geometria
+pura in `isogl_symbol_geometry.*`, tipi con un file dedicato
+(`isogl_symbol_table.c`) e registry/render/pick in `isogl_symbol.*`. Il CAD
 conserva solo l’ID opaco del simbolo, usa `isogl_symbol_hit/bounds/pick` e, per
 manipolare, `isogl_symbol_explode`, che emette segmenti e run di testo e
 distrugge il simbolo. La geometria CAD resta del CAD: isogl riceve solo VBO e
 stringhe.
+
+Il tipo C `table_row` è una riga di tabella: origine in basso a sinistra in
+`points`, `height_mm` di carta, N celle definite da `widths` (NUMBERS),
+`alignments` (ENUM_LIST: left/center/right) e `texts`, più `text_height_mm`,
+`padding_mm`, `pick_text` e lo stile linea. Il generatore puro converte le
+misure di carta in unità modello con `sheet_scale`, emette i due bordi, N+1
+separatori e un run di testo per cella. Le liste `NUMBERS` ed `ENUM_LIST` sono
+dinamiche e validate elemento per elemento; il file le salva come
+`widths = [20.0, 30.0]` e `alignments = [0, 1, 2]`. Le tabelle enum ISO
+condivise vivono in `src/isogl_symbol_enums.*` e la parte pura del font
+(UTF-8, lookup, advance) in `src/isogl_font_data.*`: sono header/sorgenti
+interni, non installati, linkabili senza GL.
 
 ## Build e install
 
@@ -113,14 +126,16 @@ stringhe.
 make                     # build/libisogl.a + libisogl_sdl.a + build/isogl-demo
 make lib                 # solo il core, compila senza SDL installato
 make test-symbol-geometry # headless: geometria pura, niente GL/SDL
+make test-table-row-geometry # headless: geometria pura table_row, niente GL/SDL
 make test-panel-layout    # headless: matematica dei pannelli, niente GL/SDL
 make test-panel-deck      # headless: slot e parcheggio pagine, niente GL/SDL
 make test-overlay         # GL: overlay a gruppi, batch, clip, testo
 make test-drawing-load    # GL: loader TOML gerarchico + simboli
 make test-symbol-params   # GL: registry tipi C, parametri, get/update
+make test-table-row       # GL: table_row, liste dinamiche, console, round-trip
 make test-symbols         # GL: fake CAD gerarchico + fixture TOML
 make test-viewport        # GL: viewport, coordinate, pick HiDPI, selezione
-make test                 # geometria + layout + deck + overlay + drawing + symbols + viewport + test FBO
+make test                 # geometria + table-row-geometry + layout + deck + overlay + drawing + symbols + table-row + viewport + test FBO
 make check-sdl-free       # il core non deve contenere riferimenti SDL
 make example-qt6          # host Qt6 (opzionale, richiede Qt6)
 make example-gtk4         # host GTK4 (opzionale, richiede libgtk-4-dev)
@@ -220,9 +235,11 @@ bounds e appende segmenti e stringhe alle API isogl: nessun GL diretto.
 
 Il formato dei simboli è schema v2: `[[symbols]]` contiene `type` e `group`,
 mentre `[symbols.params]` contiene i valori tipizzati con le chiavi dello
-schema C (`points`, `texts`, `segments`, numeri/interi/enum/bool/`color`). I
-descrittori degli enum portano anche token stabili ed etichette per l'editor,
-e la tabella è il validatore dei valori. La
+schema C (`points`, `texts`, `segments`, `widths`, `alignments`,
+numeri/interi/enum/bool/`color`). Le liste `NUMBERS` ed `ENUM_LIST` sono
+array TOML (`widths = [20.0, 30.0]`, `alignments = [0, 1, 2]`); i descrittori
+degli enum portano anche token stabili ed etichette per l'editor, e la tabella
+è il validatore dei valori (per `ENUM_LIST` elemento per elemento). La
 scala foglio è globale in `[sheet] scale_num/scale_den` e non si salva per
 simbolo. Il loader risolve il tipo con `isogl_symbol_find_type`, valida nomi e
 conteggi contro lo schema registrato e applica le trasformazioni del gruppo ai
