@@ -127,6 +127,92 @@ static void shutdown_all(isogl_sdl_host *host, CadDocument *doc,
     SDL_Quit();
 }
 
+/* Resolve a symbol parameter index by its stable key.  Only the generic
+ * table_row sample below needs this: its POINTS/scalar/COLOR values have no
+ * public setter, so the demo assigns the fields directly. */
+static int demo_symbol_param_index(const isogl_symbol_params *params,
+                                   const char *key) {
+    if (!params || !params->params || !key) return -1;
+    for (size_t i = 0; i < params->param_count; ++i) {
+        const isogl_symbol_param *p = &params->params[i];
+        if (p->desc && p->desc->key && strcmp(p->desc->key, key) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* Build the table_row sample through the generic symbol API.  There is no CAD
+ * wrapper for generic symbols, so the document only receives the opaque ID. */
+static void build_demo_table_row(CadDocument *doc) {
+    isogl_symbol_params *params = isogl_symbol_params_create("table_row");
+    if (!params) {
+        fprintf(stderr, "demo: cannot create table_row parameters\n");
+        return;
+    }
+
+    const char *cell_text[3] = {"Materiale", "\xC3\x98 20", "2 pz"};
+    const double widths[3] = {38.0, 34.0, 28.0};
+    const int alignments[3] = {0, 1, 2}; /* left, center, right */
+    const float layer_color[4] = {1.0f, 0.85f, 0.2f, 1.0f};
+
+    int ipoints = demo_symbol_param_index(params, "points");
+    int iheight = demo_symbol_param_index(params, "height_mm");
+    int itext_h = demo_symbol_param_index(params, "text_height_mm");
+    int ipadding = demo_symbol_param_index(params, "padding_mm");
+    int iwidths = demo_symbol_param_index(params, "widths");
+    int ialign = demo_symbol_param_index(params, "alignments");
+    int itexts = demo_symbol_param_index(params, "texts");
+    int ipattern = demo_symbol_param_index(params, "pattern");
+    int iweight = demo_symbol_param_index(params, "weight");
+    int ilayer = demo_symbol_param_index(params, "layer");
+    int icolor = demo_symbol_param_index(params, "color");
+
+    int ok = ipoints >= 0 && iheight >= 0 && itext_h >= 0 && ipadding >= 0 &&
+             iwidths >= 0 && ialign >= 0 && itexts >= 0 && ipattern >= 0 &&
+             iweight >= 0 && ilayer >= 0 && icolor >= 0;
+    if (ok && (isogl_symbol_params_resize(params, (size_t)iwidths, 3) != 0 ||
+               isogl_symbol_params_resize(params, (size_t)ialign, 3) != 0 ||
+               isogl_symbol_params_resize(params, (size_t)itexts, 3) != 0)) {
+        ok = 0;
+    }
+    if (ok) {
+        /* Origin is the bottom-left corner; 100 mm wide, 10 mm high. */
+        params->params[ipoints].value.points[0].x = 30.0;
+        params->params[ipoints].value.points[0].y = 135.0;
+        params->params[iheight].value.number = 10.0;
+        params->params[itext_h].value.number = 3.0;
+        params->params[ipadding].value.number = 1.5;
+        params->params[ipattern].value.integer = LINE_TYPE_CONTINUOUS;
+        params->params[iweight].value.integer = LINE_THICKNESS_0_35;
+        params->params[ilayer].value.integer = 2;
+        memcpy(params->params[icolor].value.color, layer_color,
+               sizeof(layer_color));
+        for (size_t i = 0; i < 3; ++i) {
+            if (isogl_symbol_params_set_number(params, (size_t)iwidths, i,
+                                               widths[i]) != 0 ||
+                isogl_symbol_params_set_integer(params, (size_t)ialign, i,
+                                                alignments[i]) != 0 ||
+                isogl_symbol_params_set_text(params, (size_t)itexts, i,
+                                             cell_text[i]) != 0) {
+                ok = 0;
+            }
+        }
+    }
+
+    isogl_symbol_id id = 0;
+    if (ok) id = isogl_symbol_create("table_row", params, doc->sheet_scale);
+    isogl_symbol_params_free(params);
+
+    if (id == 0) {
+        fprintf(stderr, "demo: cannot create the table_row symbol\n");
+        return;
+    }
+    if (cad_document_add_symbol(doc, id) != 0) {
+        fprintf(stderr, "demo: cannot add the table_row symbol\n");
+    }
+}
+
 static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) {
     float margin = 10.0f;
 
@@ -240,6 +326,63 @@ static void build_demo_document(CadDocument *doc, float sheet_w, float sheet_h) 
     mark.cy = sheet_h * 0.5f;
     mark.size_mm = 8.0;
     cad_add_center_mark_symbol(doc, 0, &mark);
+
+    /* Ellipse sample: p1-p2 is the major axis, p3 sets the minor semi-axis. */
+    cad_add_ellipse(doc, 1, LINE_TYPE_CONTINUOUS, LINE_THICKNESS_0_35,
+                    45.0f, 195.0f, 105.0f, 195.0f, 75.0f, 170.0f);
+    cad_add_text(doc, 3, 45.0f, 162.0f, 3.5f, 0.0f, "ellisse");
+
+    /* Three-point arc: start (332,225), end (310,247), 90 degrees CCW. */
+    cad_add_arc_three_point(doc, 2, LINE_TYPE_CONTINUOUS, LINE_THICKNESS_0_5,
+                            332.0f, 225.0f, 310.0f, 247.0f,
+                            310.0f, 225.0f);
+    cad_add_text(doc, 3, 288.0f, 258.0f, 3.5f, 0.0f, "arco 3 punti");
+
+    /* Centre + angles arc: 200 to 300 degrees, 100 degrees CCW, dashed. */
+    cad_add_arc_center_angles(doc, 1, LINE_TYPE_DASHED, LINE_THICKNESS_0_25,
+                              365.0f, 205.0f, 25.0f,
+                              (float)(200.0 * M_PI / 180.0),
+                              (float)(300.0 * M_PI / 180.0));
+    cad_add_text(doc, 3, 378.0f, 192.0f, 3.5f, 0.0f, "arco angoli");
+
+    /* Generic table_row symbol: 3 cells, left/center/right. */
+    build_demo_table_row(doc);
+    cad_add_text(doc, 3, 30.0f, 127.0f, 3.5f, 0.0f, "riga di tabella");
+
+    /* Diameter dimension on the existing circle (centre 210,148.5, r 60). */
+    IsoglDiameterDesc diam;
+    memset(&diam, 0, sizeof(diam));
+    diam.cx = sheet_w * 0.5f;
+    diam.cy = sheet_h * 0.5f;
+    diam.px = diam.cx + 60.0;
+    diam.py = diam.cy;
+    /* The agreed (265,185) puts the leading glyph about 1 mm inside the
+       circle; +2/+3 mm keeps the text clear of the outline. */
+    diam.tx = 267.0;
+    diam.ty = 188.0;
+    diam.text_height_mm = 3.0;
+    diam.precision = 1;
+    diam.pick_text = 1;
+    diam.arrow_left = ISOGL_DIM_ARROW_CLOSED;
+    diam.arrow_right = ISOGL_DIM_ARROW_CLOSED;
+    snprintf(diam.text_left, sizeof(diam.text_left), "\xC3\x98 ");
+    cad_add_diameter_symbol(doc, 2, &diam);
+
+    /* Radius dimension: point at 135 degrees, text beyond it on the same ray. */
+    IsoglRadiusDesc radius;
+    memset(&radius, 0, sizeof(radius));
+    radius.cx = sheet_w * 0.5f;
+    radius.cy = sheet_h * 0.5f;
+    radius.px = radius.cx + 60.0 * (float)cos(135.0 * M_PI / 180.0);
+    radius.py = radius.cy + 60.0 * (float)sin(135.0 * M_PI / 180.0);
+    radius.tx = 140.0;
+    radius.ty = 219.0;
+    radius.text_height_mm = 3.0;
+    radius.precision = 1;
+    radius.pick_text = 1;
+    radius.arrow = ISOGL_DIM_ARROW_CLOSED;
+    snprintf(radius.text_left, sizeof(radius.text_left), "R ");
+    cad_add_radius_symbol(doc, 1, &radius);
 }
 
 static int isocad_pick_extent(const isogl_sdl_host *host) {

@@ -231,16 +231,47 @@ copia dei segmenti.
 - **selezione**: window = tutte le primitive contenute; crossing = almeno una
   contenuta o intersecante; `pick_text = 0` lascia il testo al solo click.
 
-Il documento demo contiene quattro quote: diametro con frecce chiuse,
-orizzontale con frecce esterne chiuse, verticale con pallini e testo spostato
-lungo la linea, inclinata con frecce miste e testo a destra. Il center mark è
-un secondo simbolo al centro del cerchio. La geometria arriva dal modulo puro condiviso
+Il documento demo (A3 landscape, margine 10) contiene quattro quote allineate:
+diametro con frecce chiuse, orizzontale con frecce esterne chiuse, verticale
+con pallini e testo spostato lungo la linea, inclinata con frecce miste e testo
+a destra. Il center mark è un secondo simbolo al centro del cerchio. La
+geometria arriva dal modulo puro condiviso
 `isogl_symbol_geometry`; il registry `isogl_symbol` possiede VBO, stringa,
 hit/pick ed explode. Per modificare un simbolo il CAD richiama
 `isogl_symbol_update_dimension`/`update_center_mark` con un descrittore
 completo: ID, pick e selezione restano invariati. Per trasferire la geometria
 al CAD usa `isogl_symbol_explode`, che emette segmenti e testo e distrugge il
 simbolo.
+
+La scena demo include anche i campioni delle forme e dei tipi nuovi, tutti
+selezionabili:
+
+- **ellisse CAD**: assi (45,195)-(105,195) e punto (75,170), cioè centro
+  (75,195), rx 30, ry 25; layer 1, continuo, 0.35. Etichetta "ellisse" a
+  (45,162), layer 3, altezza 3.5.
+- **arco a tre punti**: centro (310,225), inizio (332,225), fine (310,247),
+  quadrante di 90° CCW, r 22; layer 2, continuo, 0.5. Etichetta
+  "arco 3 punti" a (288,258).
+- **arco centro+angoli**: centro (365,205), raggio 25, da 200° a 300°
+  (100° CCW); layer 1, tratteggiato, 0.25. Etichetta "arco angoli" a
+  (378,192), spostata a sinistra del valore concordato per restare dentro il
+  bordo del foglio.
+- **riga di tabella** (`table_row`, costruita con l'API generica e parametri
+  liberati subito): origine in basso a sinistra (30,135), altezza 10 mm,
+  testo 3 mm, padding 1.5 mm, larghezze 38/34/28 mm, allineamenti
+  left/center/right, testi "Materiale", "Ø 20", "2 pz"; layer 2, continuo,
+  0.35. Etichetta "riga di tabella" a (30,127). L'origine è 5 mm più in basso
+  del valore concordato (140) per non attraversare la linea d'asse orizzontale
+  a y = 148.5.
+- **quota diametro** (`dimension_diameter`) sul cerchio esistente (centro
+  210,148.5, r 60): punto sul cerchio (270,148.5), ancoraggio testo (267,188)
+  (2 mm a destra e 3 mm sopra il valore concordato, perché a (265,185) il
+  glifo "Ø" entrava di circa 1 mm nel cerchio), prefisso "Ø", precisione 1,
+  altezza testo 3 mm, frecce chiuse, `pick_text 1`; layer 2.
+- **quota raggio** (`dimension_radius`) sullo stesso cerchio: punto a 135°
+  ≈ (167.57,190.93), ancoraggio testo (140,219) oltre il punto sulla stessa
+  semiretta, prefisso "R", precisione 1, altezza testo 3 mm, freccia chiusa,
+  `pick_text 1`; layer 1.
 
 ### Contratto reale e lacune
 

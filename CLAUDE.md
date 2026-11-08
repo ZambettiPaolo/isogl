@@ -337,7 +337,9 @@ Implementazione:
   `cad_selection_apply`, i simboli `isogl_symbol_set_selected`, e il
   rettangolo interroga i simboli con `isogl_symbol_hit`. Un click sinistro
   singolo seleziona il primo simbolo del pick e mostra il riepilogo in console.
-  La demo mostra quota e center mark come simboli.
+  La demo mostra come simboli quote allineate, quota diametro/raggio, center
+  mark e una riga `table_row` costruita con l'API generica; la stessa scena
+  include un'ellisse CAD e due archi (tre punti e centro+angoli) con etichette.
 - L'ambiente di verifica è `tests/fake_cad.*` (fake CAD gerarchico, non il CAD
   di produzione) + il disegno strutturato
   `tests/fixtures/test_drawing.toml`; `tests/test_symbols.c` verifica load,

@@ -810,6 +810,9 @@ static isogl_symbol_id cad_add_circular_symbol(CadDocument *doc, int layer,
                                                uint8_t layer_value,
                                                const float color[4]) {
     if (!doc || !type_name || !points) return 0;
+    /* The style (including the layer tag) is already carried by the desc
+       fields; the caller's layer argument is redundant. */
+    (void)layer;
 
     isogl_symbol_params *params = isogl_symbol_params_create(type_name);
     if (!params) return 0;
