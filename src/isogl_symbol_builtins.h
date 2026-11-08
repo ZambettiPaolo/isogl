@@ -19,6 +19,16 @@ extern "C" {
  */
 
 const isogl_symbol_type *isogl_symbol_table_row_type(void);
+const isogl_symbol_type *isogl_symbol_diameter_type(void);
+const isogl_symbol_type *isogl_symbol_radius_type(void);
+
+/*
+ * Shared font metric callback for symbol generators: returns the text width in
+ * model units from ctx->font at the requested paper height.  Dedicated type
+ * files build an IsoglSymMetrics around it instead of duplicating the formula.
+ */
+double isogl_symbol_gen_text_width(void *user, const char *utf8,
+                                   double height_mm);
 
 int isogl_table_row_geometry(const isogl_symbol_params *params,
                              const isogl_symbol_gen_context *ctx,

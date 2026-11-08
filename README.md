@@ -100,9 +100,10 @@ colori-spessore e colori-stampa, come in AutoCAD).
 
 ## Simboli isogl
 
-`libisogl` possiede i simboli (quota, center mark, riga di tabella): geometria
-pura in `isogl_symbol_geometry.*`, tipi con un file dedicato
-(`isogl_symbol_table.c`) e registry/render/pick in `isogl_symbol.*`. Il CAD
+`libisogl` possiede i simboli (quota, diametro, raggio, center mark, riga di
+tabella): geometria pura in `isogl_symbol_geometry.*`, tipi con un file dedicato
+(`isogl_symbol_table.c`, `isogl_symbol_diameter.c`, `isogl_symbol_radius.c`) e
+registry/render/pick in `isogl_symbol.*`. Il CAD
 conserva solo l’ID opaco del simbolo, usa `isogl_symbol_hit/bounds/pick` e, per
 manipolare, `isogl_symbol_explode`, che emette segmenti e run di testo e
 distrugge il simbolo. La geometria CAD resta del CAD: isogl riceve solo VBO e
@@ -120,6 +121,20 @@ condivise vivono in `src/isogl_symbol_enums.*` e la parte pura del font
 (UTF-8, lookup, advance) in `src/isogl_font_data.*`: sono header/sorgenti
 interni, non installati, linkabili senza GL.
 
+I tipi `dimension_diameter` e `dimension_radius` condividono tre `points`:
+centro del cerchio, punto sul cerchio e centro del box di testo (unità
+modello). Il raggio `r = |P-C|` deve essere positivo. Il diametro disegna
+`C - r*u .. C + r*u` e vale `2r`, con `arrow_left`/`arrow_right` (default
+`CLOSED`) sugli estremi e gambe verso il centro; il raggio disegna `C .. P`,
+vale `r` e ha una sola `arrow` (default `CLOSED`) con punta su `P`. I prefissi
+di default sono `Ø` e `R` in `texts[0]`, il suffisso è vuoto; precisione
+0..12, testo 3,5 mm, frecce 2,2 mm (30°), pallino 1,5 mm. Il generatore
+converte le misure di carta con `sheet_scale` e ricava l'origine baseline-left
+dal centro del box usando la larghezza reale del font. Un leader collega il
+testo alla linea quando l'ancoraggio non vi giace già. Anche qui un nuovo tipo
+è solo un file C registrato: schema, default, validazione e adapter, con la
+geometria pura condivisa in `isogl_symbol_geometry.c`.
+
 ## Build e install
 
 ```sh
@@ -133,9 +148,10 @@ make test-overlay         # GL: overlay a gruppi, batch, clip, testo
 make test-drawing-load    # GL: loader TOML gerarchico + simboli
 make test-symbol-params   # GL: registry tipi C, parametri, get/update
 make test-table-row       # GL: table_row, liste dinamiche, console, round-trip
+make test-diameter-radius # GL: diametro/raggio, console, writer v2, round-trip
 make test-symbols         # GL: fake CAD gerarchico + fixture TOML
 make test-viewport        # GL: viewport, coordinate, pick HiDPI, selezione
-make test                 # geometria + table-row-geometry + layout + deck + overlay + drawing + symbols + table-row + viewport + test FBO
+make test                 # geometria + table-row-geometry + layout + deck + overlay + drawing + symbols + table-row + diameter-radius + viewport + test FBO
 make check-sdl-free       # il core non deve contenere riferimenti SDL
 make example-qt6          # host Qt6 (opzionale, richiede Qt6)
 make example-gtk4         # host GTK4 (opzionale, richiede libgtk-4-dev)

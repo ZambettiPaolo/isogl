@@ -16,6 +16,7 @@
 #define SYM_DIM_REF_GAP_MM 3.0
 #define SYM_DIM_TEXT_GAP_MM 1.0
 #define SYM_DIM_TEXT_MM 2.5
+#define SYM_DIA_TEXT_MM 3.5
 #define SYM_DIM_ARROW_HALF_ANGLE (M_PI / 12.0) /* 30 degrees included */
 #define SYM_DIM_DOT_SEGMENTS 12
 #define SYM_DIM_MAX_ARROW_SEGMENTS (2 * SYM_DIM_DOT_SEGMENTS)
@@ -341,20 +342,30 @@ static int sym_emit_segment(IsoglSymEmitter *out,
     return out->emit(out->user, &item);
 }
 
-static int sym_emit_text(IsoglSymEmitter *out,
-                         uint8_t pattern, uint8_t weight, uint8_t layer,
-                         const float color[4], const SymDimLayout *g) {
+static int sym_emit_text_run(IsoglSymEmitter *out,
+                             uint8_t pattern, uint8_t weight, uint8_t layer,
+                             const float color[4], const char *utf8,
+                             double x, double y, double height_mm,
+                             double angle) {
     IsoglSymItem item;
     memset(&item, 0, sizeof(item));
     item.kind = ISOGL_SYM_TEXT;
-    item.utf8 = g->text;
-    item.x = g->text_x;
-    item.y = g->text_y;
-    item.height_mm = g->text_height_mm;
-    item.angle = g->text_angle;
+    item.utf8 = utf8 ? utf8 : "";
+    item.x = x;
+    item.y = y;
+    item.height_mm = height_mm;
+    item.angle = angle;
     item.align = 0;
     sym_fill_style(&item, pattern, weight, layer, color);
     return out->emit(out->user, &item);
+}
+
+static int sym_emit_text(IsoglSymEmitter *out,
+                         uint8_t pattern, uint8_t weight, uint8_t layer,
+                         const float color[4], const SymDimLayout *g) {
+    return sym_emit_text_run(out, pattern, weight, layer, color,
+                             g->text, g->text_x, g->text_y,
+                             g->text_height_mm, g->text_angle);
 }
 
 static int sym_emit_pick_segment(IsoglSymPickEmitter *out,
@@ -450,6 +461,345 @@ int isogl_dimension_pick_geometry(const IsoglDimensionDesc *d,
         }
     }
     return 0;
+}
+
+/* ---- diameter and radius ------------------------------------------------ */
+
+typedef struct {
+    double ux, uy;          /* unit direction centre -> circle point */
+    double nx, ny;          /* left normal */
+    double r;               /* model units */
+    double ax, ay;          /* measured line start (diameter -r*u, radius C) */
+    double bx, by;          /* measured line end (diameter +r*u, radius P) */
+    double leader_ax, leader_ay;
+    double leader_bx, leader_by;
+    int has_leader;
+    double arrow[SYM_DIM_MAX_ARROW_SEGMENTS][4];
+    int arrow_count;
+    double text_x, text_y;  /* baseline-left origin */
+    double text_angle;
+    double text_width;      /* model units */
+    double text_height;     /* model units */
+    double text_height_mm;  /* paper units */
+    char text[160];
+} SymCircularDimLayout;
+
+static double sym_upright_angle(double ux, double uy) {
+    double angle = atan2(uy, ux);
+    if (angle > M_PI / 2.0) angle -= M_PI;
+    if (angle < -M_PI / 2.0) angle += M_PI;
+    return angle;
+}
+
+/* Format the value, measure it and derive the baseline-left origin from the
+ * text-box centre (tx, ty).  Shared by diameter and radius. */
+static int sym_circular_text_layout(const char *left, const char *right,
+                                    double value, int precision,
+                                    double text_height_mm, double scale,
+                                    const IsoglSymMetrics *metrics,
+                                    double ux, double uy,
+                                    double tx, double ty,
+                                    SymCircularDimLayout *g) {
+    if (!g) return -1;
+    if (precision < 0 || precision > 12) return -1;
+    if (!sym_finite(value) || !sym_finite(tx) || !sym_finite(ty)) return -1;
+
+    double height_mm = text_height_mm > 0.0 ? text_height_mm
+                                           : SYM_DIA_TEXT_MM;
+    if (!sym_finite(height_mm) || !(height_mm > 0.0)) return -1;
+
+    snprintf(g->text, sizeof(g->text), "%.31s%.*f%.31s",
+             left ? left : "", precision, value, right ? right : "");
+
+    g->text_height_mm = height_mm;
+    g->text_height = height_mm / scale;
+    if (!sym_finite(g->text_height) || !(g->text_height > 0.0)) return -1;
+
+    double width = 0.0;
+    if (metrics && metrics->text_width) {
+        width = metrics->text_width(metrics->user, g->text, height_mm);
+    }
+    if (!sym_finite(width) || width < 0.0) width = 0.0;
+    g->text_width = width;
+
+    double angle = sym_upright_angle(ux, uy);
+    g->text_angle = angle;
+    double c = cos(angle);
+    double s = sin(angle);
+    /* The anchor is the box centre; the emitted origin is baseline-left. */
+    g->text_x = tx - 0.5 * (g->text_width * c - g->text_height * s);
+    g->text_y = ty - 0.5 * (g->text_width * s + g->text_height * c);
+    return 0;
+}
+
+static int sym_arrow_pair_count(int left_count, int right_count,
+                                SymCircularDimLayout *g) {
+    if (left_count < 0 || right_count < 0 ||
+        left_count + right_count > SYM_DIM_MAX_ARROW_SEGMENTS) {
+        return -1;
+    }
+    g->arrow_count = left_count + right_count;
+    return 0;
+}
+
+static int sym_diameter_layout(const IsoglDiameterDesc *d,
+                               const IsoglSymMetrics *metrics,
+                               SymCircularDimLayout *g) {
+    if (!d || !g) return -1;
+    if (!sym_finite(d->cx) || !sym_finite(d->cy) ||
+        !sym_finite(d->px) || !sym_finite(d->py) ||
+        !sym_finite(d->tx) || !sym_finite(d->ty) ||
+        !sym_finite(d->text_height_mm) || !sym_finite(d->sheet_scale)) {
+        return -1;
+    }
+    if (d->arrow_left < ISOGL_DIM_ARROW_NONE ||
+        d->arrow_left > ISOGL_DIM_ARROW_CLOSED_OUTSIDE ||
+        d->arrow_right < ISOGL_DIM_ARROW_NONE ||
+        d->arrow_right > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+        return -1;
+    }
+
+    double dx = d->px - d->cx;
+    double dy = d->py - d->cy;
+    double r = hypot(dx, dy);
+    if (!(r > 0.0) || !sym_finite(r)) return -1;
+
+    g->r = r;
+    g->ux = dx / r;
+    g->uy = dy / r;
+    g->nx = -g->uy;
+    g->ny = g->ux;
+
+    double scale = sym_scale(d->sheet_scale);
+    double span = 2.0 * r;
+    double arrow = SYM_DIM_ARROW_MM / scale;
+    double max_arrow = span * 0.45;
+    if (arrow > max_arrow) arrow = max_arrow;
+    double dot_radius = 0.5 * SYM_DIM_DOT_MM / scale;
+    if (!sym_finite(arrow) || !(arrow > 0.0) ||
+        !sym_finite(dot_radius) || !(dot_radius > 0.0)) {
+        return -1;
+    }
+
+    double d1x = d->cx - r * g->ux;
+    double d1y = d->cy - r * g->uy;
+    double d2x = d->cx + r * g->ux;
+    double d2y = d->cy + r * g->uy;
+    g->ax = d1x;
+    g->ay = d1y;
+    g->bx = d2x;
+    g->by = d2y;
+
+    int left_count = 0;
+    int right_count = 0;
+    if (sym_arrow_segments(d1x, d1y, g->ux, g->uy, g->nx, g->ny,
+                           arrow, dot_radius, d->arrow_left,
+                           g->arrow, &left_count,
+                           SYM_DIM_DOT_SEGMENTS) != 0) {
+        return -1;
+    }
+    if (sym_arrow_segments(d2x, d2y, -g->ux, -g->uy, g->nx, g->ny,
+                           arrow, dot_radius, d->arrow_right,
+                           g->arrow + left_count, &right_count,
+                           SYM_DIM_DOT_SEGMENTS) != 0) {
+        return -1;
+    }
+    if (sym_arrow_pair_count(left_count, right_count, g) != 0) return -1;
+
+    if (sym_circular_text_layout(d->text_left, d->text_right, span,
+                                 d->precision, d->text_height_mm, scale,
+                                 metrics, g->ux, g->uy, d->tx, d->ty,
+                                 g) != 0) {
+        return -1;
+    }
+
+    /* Project the text centre onto the diameter segment and clamp to the two
+       ends.  A text centre already on the segment adds no leader. */
+    double t = (d->tx - d->cx) * g->ux + (d->ty - d->cy) * g->uy;
+    if (t < -r) t = -r;
+    if (t > r) t = r;
+    double qx = d->cx + t * g->ux;
+    double qy = d->cy + t * g->uy;
+    double dist = hypot(d->tx - qx, d->ty - qy);
+    double tol = 1e-9 * (fabs(d->cx) + fabs(d->cy) + r + 1.0);
+    g->has_leader = dist > tol;
+    if (g->has_leader) {
+        g->leader_ax = d->tx;
+        g->leader_ay = d->ty;
+        g->leader_bx = qx;
+        g->leader_by = qy;
+    }
+    return 0;
+}
+
+static int sym_radius_layout(const IsoglRadiusDesc *d,
+                             const IsoglSymMetrics *metrics,
+                             SymCircularDimLayout *g) {
+    if (!d || !g) return -1;
+    if (!sym_finite(d->cx) || !sym_finite(d->cy) ||
+        !sym_finite(d->px) || !sym_finite(d->py) ||
+        !sym_finite(d->tx) || !sym_finite(d->ty) ||
+        !sym_finite(d->text_height_mm) || !sym_finite(d->sheet_scale)) {
+        return -1;
+    }
+    if (d->arrow < ISOGL_DIM_ARROW_NONE ||
+        d->arrow > ISOGL_DIM_ARROW_CLOSED_OUTSIDE) {
+        return -1;
+    }
+
+    double dx = d->px - d->cx;
+    double dy = d->py - d->cy;
+    double r = hypot(dx, dy);
+    if (!(r > 0.0) || !sym_finite(r)) return -1;
+
+    g->r = r;
+    g->ux = dx / r;
+    g->uy = dy / r;
+    g->nx = -g->uy;
+    g->ny = g->ux;
+    g->ax = d->cx;
+    g->ay = d->cy;
+    g->bx = d->px;
+    g->by = d->py;
+
+    double scale = sym_scale(d->sheet_scale);
+    double arrow = SYM_DIM_ARROW_MM / scale;
+    double max_arrow = r * 0.45;
+    if (arrow > max_arrow) arrow = max_arrow;
+    double dot_radius = 0.5 * SYM_DIM_DOT_MM / scale;
+    if (!sym_finite(arrow) || !(arrow > 0.0) ||
+        !sym_finite(dot_radius) || !(dot_radius > 0.0)) {
+        return -1;
+    }
+
+    /* The tip is on the circle, the legs point toward the centre. */
+    int arrow_count = 0;
+    if (sym_arrow_segments(d->px, d->py, -g->ux, -g->uy,
+                           g->nx, g->ny, arrow, dot_radius, d->arrow,
+                           g->arrow, &arrow_count,
+                           SYM_DIM_DOT_SEGMENTS) != 0) {
+        return -1;
+    }
+    if (sym_arrow_pair_count(0, arrow_count, g) != 0) return -1;
+
+    if (sym_circular_text_layout(d->text_left, d->text_right, r,
+                                 d->precision, d->text_height_mm, scale,
+                                 metrics, g->ux, g->uy, d->tx, d->ty,
+                                 g) != 0) {
+        return -1;
+    }
+
+    /* A text anchor on the radius segment needs no leader; anything else
+       (off the line, behind the centre or beyond the circle point) gets one
+       from the circle point to the anchor. */
+    double t = (d->tx - d->cx) * g->ux + (d->ty - d->cy) * g->uy;
+    double perp = (d->tx - d->cx) * g->nx + (d->ty - d->cy) * g->ny;
+    double tol = 1e-9 * (fabs(d->cx) + fabs(d->cy) + r + 1.0);
+    int on_segment = fabs(perp) <= tol && t >= -tol && t <= r + tol;
+    g->has_leader = !on_segment;
+    if (g->has_leader) {
+        g->leader_ax = d->px;
+        g->leader_ay = d->py;
+        g->leader_bx = d->tx;
+        g->leader_by = d->ty;
+    }
+    return 0;
+}
+
+/* Emit the shared circular-dimension layout.  The two entry points differ
+ * only in their layout function. */
+static int sym_circular_emit(IsoglSymEmitter *out,
+                             uint8_t pattern, uint8_t weight, uint8_t layer,
+                             const float color[4],
+                             const SymCircularDimLayout *g) {
+    if (sym_emit_segment(out, pattern, weight, layer, color,
+                         g->ax, g->ay, g->bx, g->by) != 0) {
+        return -1;
+    }
+    if (g->has_leader &&
+        sym_emit_segment(out, pattern, weight, layer, color,
+                         g->leader_ax, g->leader_ay,
+                         g->leader_bx, g->leader_by) != 0) {
+        return -1;
+    }
+    for (int i = 0; i < g->arrow_count; ++i) {
+        if (sym_emit_segment(out, pattern, weight, layer, color,
+                             g->arrow[i][0], g->arrow[i][1],
+                             g->arrow[i][2], g->arrow[i][3]) != 0) {
+            return -1;
+        }
+    }
+    return sym_emit_text_run(out, pattern, weight, layer, color, g->text,
+                             g->text_x, g->text_y, g->text_height_mm,
+                             g->text_angle);
+}
+
+static int sym_circular_pick_emit(IsoglSymPickEmitter *out,
+                                  const SymCircularDimLayout *g,
+                                  int pick_text) {
+    if (sym_emit_pick_segment(out, g->ax, g->ay, g->bx, g->by) != 0) {
+        return -1;
+    }
+    if (g->has_leader &&
+        sym_emit_pick_segment(out, g->leader_ax, g->leader_ay,
+                              g->leader_bx, g->leader_by) != 0) {
+        return -1;
+    }
+    for (int i = 0; i < g->arrow_count; ++i) {
+        if (sym_emit_pick_segment(out, g->arrow[i][0], g->arrow[i][1],
+                                  g->arrow[i][2], g->arrow[i][3]) != 0) {
+            return -1;
+        }
+    }
+    if (pick_text) {
+        if (sym_emit_pick_obb(out, g->text_x, g->text_y, g->text_width,
+                              g->text_height, g->text_angle) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int isogl_diameter_geometry(const IsoglDiameterDesc *d,
+                            const IsoglSymMetrics *metrics,
+                            IsoglSymEmitter *out) {
+    if (!d || !out || !out->emit) return -1;
+
+    SymCircularDimLayout g;
+    if (sym_diameter_layout(d, metrics, &g) != 0) return -1;
+    return sym_circular_emit(out, d->pattern, d->weight, d->layer, d->color,
+                             &g);
+}
+
+int isogl_diameter_pick_geometry(const IsoglDiameterDesc *d,
+                                 const IsoglSymMetrics *metrics,
+                                 IsoglSymPickEmitter *out) {
+    if (!d || !out || !out->emit) return -1;
+
+    SymCircularDimLayout g;
+    if (sym_diameter_layout(d, metrics, &g) != 0) return -1;
+    return sym_circular_pick_emit(out, &g, d->pick_text);
+}
+
+int isogl_radius_geometry(const IsoglRadiusDesc *d,
+                          const IsoglSymMetrics *metrics,
+                          IsoglSymEmitter *out) {
+    if (!d || !out || !out->emit) return -1;
+
+    SymCircularDimLayout g;
+    if (sym_radius_layout(d, metrics, &g) != 0) return -1;
+    return sym_circular_emit(out, d->pattern, d->weight, d->layer, d->color,
+                             &g);
+}
+
+int isogl_radius_pick_geometry(const IsoglRadiusDesc *d,
+                               const IsoglSymMetrics *metrics,
+                               IsoglSymPickEmitter *out) {
+    if (!d || !out || !out->emit) return -1;
+
+    SymCircularDimLayout g;
+    if (sym_radius_layout(d, metrics, &g) != 0) return -1;
+    return sym_circular_pick_emit(out, &g, d->pick_text);
 }
 
 static int sym_center_mark_layout(const IsoglCenterMarkDesc *d,

@@ -37,7 +37,8 @@ in un browser. Questo Markdown ne conserva le decisioni e le parti operative.
 Stato: Milestone A + UI screen-space. Esistono foglio, linee, cerchi, archi,
 ellissi, rettangoli, testo, pattern e pesi ISO, zoom/pan, modalità
 colori-spessore, selezione d’area persistente e i primi simboli isogl (quota,
-center mark, riga di tabella) con registry, hit/pick/explode. L’app usa record
+diametro, raggio, center mark, riga di tabella) con registry, hit/pick/explode.
+L’app usa record
 `CadSymbolRef { id, type, params }` al posto della vecchia `CAD_DIMENSION`,
 espone metadati e modifica parametri da console (`sym list/info/set/points/remove`,
 `save`) e usa ID entità monotoni. Archi ed ellissi hanno un modello analitico
@@ -344,7 +345,10 @@ Implementazione:
   `tests/test_symbol_geometry.c` è headless; `tests/test_table_row_geometry.c`
   verifica la geometria pura del table row con una metrica stub (headless);
   `tests/test_table_row.c` copre registry, parametri dinamici, bounds/hit/pick,
-  update, console, writer v2 e round-trip (GL).
+  update, console, writer v2 e round-trip (GL). `tests/test_symbol_geometry.c`
+  copre anche diametro e raggio (frecce, leader, prefissi, OBB, scala 2, r=0);
+  `tests/test_diameter_radius.c` è il test GL dei due tipi (registry, wrapper
+  CAD, bounds/hit/pick, params_update, console, writer v2 e round-trip).
 
 ### Contratto reale e lacune
 
@@ -359,7 +363,7 @@ distrutto resta morto (tombstone).
 | Funzione | Contratto |
 |---|---|
 | `isogl_symbol_init(font)` / `cleanup()` | registry GL; il font deve sopravvivere; cleanup prima di `isogl_cleanup()` |
-| `isogl_symbol_register_type(type)` / `find_type` / `type_count` / `type_at` | registry pubblico dei tipi C; nomi duplicati rifiutati; `dimension`/`center_mark`/`table_row` registrati all'init |
+| `isogl_symbol_register_type(type)` / `find_type` / `type_count` / `type_at` | registry pubblico dei tipi C; nomi duplicati rifiutati; `dimension`/`center_mark`/`table_row`/`dimension_diameter`/`dimension_radius` registrati all'init |
 | `isogl_symbol_set/get_sheet_scale(scale)` | scala foglio **globale** in sola lettura dai parametri; default 1.0; scarta valori non finiti o ≤ 0; `set` rigenera **tutti** i simboli vivi, conservando ID, pick e selezione |
 | `isogl_symbol_create(type_name, params, scale)` | crea un'istanza di un tipo C registrato; copia i parametri; genera render+pick. L'argomento `scale` resta solo per compatibilità ABI: vale la scala globale |
 | `isogl_symbol_params_create/free` | alloca/libera un set di parametri conforme allo schema del tipo |
@@ -437,14 +441,40 @@ per render e pick). L'emitter riceve solo item; il registry possiede VBO e
 stringhe. Il file salva tipo e valori, quindi un `table_row` è un nuovo file C
 + registrazione, non un caso speciale del loader.
 
+**Tipi `dimension_diameter` / `dimension_radius` (`src/isogl_symbol_diameter.c`,
+`src/isogl_symbol_radius.c`).** Stessa interpretazione dei tre `points`:
+`[0]` centro del cerchio, `[1]` punto sul cerchio, `[2]` centro del box di
+testo, tutti in unità modello. `r = |points[1] - points[0]|` deve essere > 0;
+rifiutati anche input non finiti. Direzione `u = (P-C)/r`, normale
+`n = (-u.y, u.x)`. Il diametro misura `2r` e va da `C - r*u` a `C + r*u` con
+`arrow_left`/`arrow_right` (default `CLOSED`) sugli estremi e gambe verso il
+centro; il raggio misura `r`, va da `C` a `P` e ha una sola `arrow` (default
+`CLOSED`) con punta su `P` e gambe verso il centro. `texts` = prefisso/suffisso:
+default `"Ø"`/`""` per il diametro e `"R"`/`""` per il raggio. `precision`
+0..12, `text_height_mm` default 3,5 mm, `pick_text`, stile
+`pattern`/`weight`/`layer`/`color`, `scale` in sola lettura. Il testo segue la
+linea e resta dritto; `points[2]` è il centro del box e il generatore ricava
+l'origine baseline-left da `metrics->text_width` e dall'altezza di carta. Il
+diametro emette un leader dal centro del testo alla proiezione clampata sulla
+linea quando l'ancoraggio non è già sulla linea; il raggio emette un leader da
+`P` all'ancoraggio quando il testo non è sul segmento `C-P`. Frecce, pallino,
+tolleranze e stile riusano gli helper e le costanti della quota allineata in
+`isogl_symbol_geometry.c`; i due file tipo sono solo schema, default,
+validazione e adapter. Il pick è linea + leader + segmenti delle frecce + OBB
+del testo se `pick_text`.
+
 **Tabelle condivise (header interni, non installati).**
 `src/isogl_symbol_enums.h/.c` è l'unica copia delle tabelle `isogl_symbol_enum_value`
-per punte di quota, tipi linea ISO e pesi ISO, usata da `isogl_symbol.c` e
-`isogl_symbol_table.c`; `_Static_assert` le lega a `ISOGL_DIM_ARROW_CLOSED_OUTSIDE`,
+per punte di quota, tipi linea ISO e pesi ISO, usata da `isogl_symbol.c`,
+`isogl_symbol_table.c` e dai tipi diametro/raggio; `_Static_assert` le lega a
+`ISOGL_DIM_ARROW_CLOSED_OUTSIDE`,
 `LINE_TYPE_COUNT` e `LINE_THICKNESS_COUNT`. `src/isogl_font_data.h/.c` contiene
 la parte pura del font (UTF-8, lookup glifo, `isogl_font_text_advance`) ed è
-linkabile senza GL; la usano sia `isogl_font.c` sia il generatore `table_row`,
-così la larghezza del testo ha una sola fonte.
+linkabile senza GL; la usano sia `isogl_font.c` sia i generatori `table_row`,
+`dimension_diameter` e `dimension_radius`, così la larghezza del testo ha una
+sola fonte. Il callback condiviso `isogl_symbol_gen_text_width()` (dichiarato in
+`src/isogl_symbol_builtins.h`) evita di ricopiare la formula modello/mm nei
+file tipo.
 
 **Scala foglio globale.** `isogl_symbol_set_sheet_scale()` è l'unica autorità:
 tutti i simboli vivi usano quel valore, anche quelli creati con un argomento
@@ -780,10 +810,11 @@ make test-symbol-params     # GL: registry tipi C, parametri, get/update
 make test-console-cmd       # headless: parser comandi sym/save
 make test-cad-symbols       # GL: CadSymbolRef, update/remove, writer v2
 make test-table-row         # GL: table_row, liste dinamiche, console, round-trip
+make test-diameter-radius   # GL: diametro/raggio, console, writer v2, round-trip
 make test-cad-entities      # GL: VBO, pick e selezione di archi/ellissi
 make test-symbols           # GL: fake CAD gerarchico + fixture TOML
 make test-viewport          # GL: viewport, coordinate, pick HiDPI, selezione
-make test                   # cad-geometry + geometry + table-row-geometry + layout + deck + overlay + drawing + params + console + cad-symbols + table-row + cad-entities + symbols + viewport + core
+make test                   # cad-geometry + geometry + table-row-geometry + layout + deck + overlay + drawing + params + console + cad-symbols + table-row + diameter-radius + cad-entities + symbols + viewport + core
 make check-sdl-free         # nessun riferimento SDL nel core
 make example-qt6            # host Qt6 (opzionale)
 make example-gtk4           # host GTK4 (opzionale, richiede libgtk-4-dev)

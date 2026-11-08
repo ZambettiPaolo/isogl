@@ -647,8 +647,8 @@ static const isogl_symbol_param_desc CEN_PARAMS[CEN_PARAM_COUNT] = {
     }
 };
 
-static double sym_gen_text_width(void *user, const char *utf8,
-                                 double height_mm) {
+double isogl_symbol_gen_text_width(void *user, const char *utf8,
+                                   double height_mm) {
     const isogl_symbol_gen_context *ctx = user;
     if (!ctx || !ctx->font || !utf8 || height_mm <= 0.0) return 0.0;
 
@@ -759,7 +759,7 @@ static int sym_dimension_generate(const isogl_symbol_params *params,
     d.layer = (uint8_t)params->params[DIM_LAYER].value.integer;
     memcpy(d.color, params->params[DIM_COLOR].value.color, sizeof(d.color));
 
-    IsoglSymMetrics metrics = {(void *)ctx, sym_gen_text_width};
+    IsoglSymMetrics metrics = {(void *)ctx, isogl_symbol_gen_text_width};
     int rc = 0;
     if (render && render->emit) {
         rc = isogl_dimension_geometry(&d, &metrics, render);
@@ -865,6 +865,14 @@ int isogl_symbol_register_type(const isogl_symbol_type *type) {
         type != isogl_symbol_table_row_type()) {
         return -1;
     }
+    if (strcmp(type->name, "dimension_diameter") == 0 &&
+        type != isogl_symbol_diameter_type()) {
+        return -1;
+    }
+    if (strcmp(type->name, "dimension_radius") == 0 &&
+        type != isogl_symbol_radius_type()) {
+        return -1;
+    }
 
     for (size_t i = 0; i < symbol_type_count; ++i) {
         if (strcmp(symbol_types[i]->name, type->name) == 0) return -1;
@@ -915,6 +923,16 @@ static int sym_register_builtins(void) {
     found = isogl_symbol_find_type("table_row");
     if (found && found != table_row) return -1;
     if (!found && isogl_symbol_register_type(table_row) != 0) return -1;
+
+    const isogl_symbol_type *diameter = isogl_symbol_diameter_type();
+    found = isogl_symbol_find_type("dimension_diameter");
+    if (found && found != diameter) return -1;
+    if (!found && isogl_symbol_register_type(diameter) != 0) return -1;
+
+    const isogl_symbol_type *radius = isogl_symbol_radius_type();
+    found = isogl_symbol_find_type("dimension_radius");
+    if (found && found != radius) return -1;
+    if (!found && isogl_symbol_register_type(radius) != 0) return -1;
 
     builtins_registered = 1;
     return 0;

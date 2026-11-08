@@ -253,11 +253,32 @@ generatore puro. Il CAD può leggere metadati e valori con
 `hit/bounds/pick_at/get_selected`; non legge VBO, stringhe o geometria interna.
 `pick_at` e `draw_all` operano sul registry, non su `CadDocument.symbols`.
 `bounds` deriva dalla geometria di pick: con `pick_text = 0` il testo non è
-incluso. `dimension` e `center_mark` sono adapter sui generatori puri esistenti;
+incluso. `dimension`, `center_mark`, `dimension_diameter` e
+`dimension_radius` sono adapter sui generatori puri esistenti;
 `table_row` è il primo tipo con liste dinamiche (`NUMBERS`, `ENUM_LIST`) e vive
 in `src/isogl_symbol_table.c`. Un simbolo nuovo richiede un nuovo tipo C
 registrato con `isogl_symbol_register_type`, con la sua geometria pura e i
 metadati nel file del tipo.
+
+**Diametro (`dimension_diameter`) e raggio (`dimension_radius`).**
+`src/isogl_symbol_diameter.c` e `src/isogl_symbol_radius.c` condividono tre
+`points`: centro del cerchio, punto sul cerchio e centro del box di testo
+(unità modello). `r = |P-C|` deve essere > 0; input non finiti sono rifiutati.
+Il diametro misura `2r`, disegna il segmento `C - r*u .. C + r*u` e usa
+`arrow_left`/`arrow_right` (default `CLOSED`) sugli estremi con le gambe verso
+il centro. Il raggio misura `r`, disegna `C .. P` e usa una sola `arrow`
+(default `CLOSED`) con punta su `P` e gambe verso il centro. `texts` contiene
+prefisso e suffisso: default `Ø`/`""` e `R`/`""`; `text_height_mm` default
+3,5 mm, `precision` 0..12, `pick_text` e stile
+`pattern`/`weight`/`layer`/`color`; `scale` è in sola lettura. Il testo segue
+la linea, resta dritto e viene centrato sul punto `[2]`; il generatore ricava
+l'origine baseline-left dalla larghezza reale. Il diametro aggiunge un leader
+dal centro del testo alla proiezione clampata sulla linea quando il testo non
+è già sulla linea; il raggio aggiunge un leader da `P` all'ancoraggio quando
+il testo non è sul segmento `C-P`. Il pick è linea + leader + frecce + OBB del
+testo se `pick_text`. I wrapper CAD sono `cad_add_diameter_symbol()` e
+`cad_add_radius_symbol()`: applicano il layer e la scala del documento e
+creano il simbolo con l'API generica, registrando il solo `isogl_symbol_id`.
 
 **Riga di tabella (`table_row`).** Origine in basso a sinistra in `points`
 (unità modello), `height_mm` di carta, N celle con `widths` (mm di carta),
@@ -325,10 +346,13 @@ La verifica usa:
 - `tests/fixtures/test_drawing.toml`: disegno strutturato;
 - `tests/test_symbols.c`: render, pick, hit, selezione, explode e
   trasferimento;
-- `tests/test_symbol_geometry.c`: geometria pura headless;
+- `tests/test_symbol_geometry.c`: geometria pura headless (quota, center mark,
+  diametro e raggio);
 - `tests/test_table_row_geometry.c`: table_row puro headless con metrica stub;
 - `tests/test_table_row.c`: registry, liste dinamiche, console, writer v2 e
-  round-trip del table_row.
+  round-trip del table_row;
+- `tests/test_diameter_radius.c`: diametro/raggio, wrapper CAD, bounds/hit/pick,
+  params_update, console, writer v2 e round-trip (GL).
 
 ```sh
 make test-cad-geometry      # archi/ellisse, generatore puro, headless
@@ -338,6 +362,7 @@ make test-table-row-geometry # geometria pura table_row, headless
 make test-console-cmd       # parser console, headless
 make test-cad-symbols       # CadSymbolRef, update/remove/writer, round-trip, GL
 make test-table-row         # table_row, liste dinamiche, console, round-trip, GL
+make test-diameter-radius   # diametro/raggio, console, writer v2, round-trip, GL
 make test-symbols
 make test
 ```

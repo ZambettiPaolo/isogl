@@ -696,6 +696,70 @@ static int cad_symbol_style(CadDocument *doc, int layer,
     return index;
 }
 
+static int cad_symbol_param_index(const isogl_symbol_params *params,
+                                  const char *key) {
+    if (!params || !params->params || !key) return -1;
+    for (size_t i = 0; i < params->param_count; ++i) {
+        const isogl_symbol_param *p = &params->params[i];
+        if (p->desc && p->desc->key && strcmp(p->desc->key, key) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int cad_symbol_set_number(isogl_symbol_params *params,
+                                 const char *key, double value) {
+    int index = cad_symbol_param_index(params, key);
+    if (index < 0) return -1;
+    params->params[index].value.number = value;
+    return 0;
+}
+
+static int cad_symbol_set_integer(isogl_symbol_params *params,
+                                  const char *key, int value) {
+    int index = cad_symbol_param_index(params, key);
+    if (index < 0) return -1;
+    params->params[index].value.integer = value;
+    return 0;
+}
+
+static int cad_symbol_set_boolean(isogl_symbol_params *params,
+                                  const char *key, int value) {
+    int index = cad_symbol_param_index(params, key);
+    if (index < 0) return -1;
+    params->params[index].value.boolean = value ? 1 : 0;
+    return 0;
+}
+
+static int cad_symbol_set_point(isogl_symbol_params *params,
+                                const char *key, size_t element,
+                                double x, double y) {
+    int index = cad_symbol_param_index(params, key);
+    if (index < 0) return -1;
+    isogl_symbol_param *p = &params->params[index];
+    if (element >= p->count || !p->value.points) return -1;
+    p->value.points[element].x = x;
+    p->value.points[element].y = y;
+    return 0;
+}
+
+static int cad_symbol_set_text(isogl_symbol_params *params,
+                               const char *key, size_t element,
+                               const char *text) {
+    int index = cad_symbol_param_index(params, key);
+    if (index < 0) return -1;
+    return isogl_symbol_params_set_text(params, (size_t)index, element, text);
+}
+
+static int cad_symbol_set_color(isogl_symbol_params *params,
+                                const char *key, const float color[4]) {
+    int index = cad_symbol_param_index(params, key);
+    if (index < 0) return -1;
+    memcpy(params->params[index].value.color, color, sizeof(float) * 4);
+    return 0;
+}
+
 isogl_symbol_id cad_add_dimension_symbol(CadDocument *doc, int layer,
                                          const IsoglDimensionDesc *desc) {
     if (!doc || !desc) return 0;
@@ -730,6 +794,109 @@ isogl_symbol_id cad_add_center_mark_symbol(CadDocument *doc, int layer,
     /* On failure cad_document_add_symbol() already destroyed the symbol. */
     if (cad_document_add_symbol(doc, id) != 0) return 0;
     return id;
+}
+
+static isogl_symbol_id cad_add_circular_symbol(CadDocument *doc, int layer,
+                                               const char *type_name,
+                                               const double points[3][2],
+                                               const char *text_left,
+                                               const char *text_right,
+                                               double text_height_mm,
+                                               int precision, int pick_text,
+                                               const int *arrows,
+                                               int arrow_count,
+                                               uint8_t pattern,
+                                               uint8_t weight,
+                                               uint8_t layer_value,
+                                               const float color[4]) {
+    if (!doc || !type_name || !points) return 0;
+
+    isogl_symbol_params *params = isogl_symbol_params_create(type_name);
+    if (!params) return 0;
+
+    int ok = 1;
+    for (size_t i = 0; i < 3; ++i) {
+        if (cad_symbol_set_point(params, "points", i,
+                                 points[i][0], points[i][1]) != 0) {
+            ok = 0;
+        }
+    }
+    if (cad_symbol_set_text(params, "texts", 0, text_left) != 0 ||
+        cad_symbol_set_text(params, "texts", 1, text_right) != 0 ||
+        cad_symbol_set_number(params, "text_height_mm",
+                              text_height_mm) != 0 ||
+        cad_symbol_set_integer(params, "precision", precision) != 0 ||
+        cad_symbol_set_boolean(params, "pick_text", pick_text) != 0 ||
+        cad_symbol_set_integer(params, "pattern", pattern) != 0 ||
+        cad_symbol_set_integer(params, "weight", weight) != 0 ||
+        cad_symbol_set_integer(params, "layer", layer_value) != 0 ||
+        cad_symbol_set_color(params, "color", color) != 0) {
+        ok = 0;
+    }
+    if (arrow_count == 2) {
+        if (cad_symbol_set_integer(params, "arrow_left", arrows[0]) != 0 ||
+            cad_symbol_set_integer(params, "arrow_right", arrows[1]) != 0) {
+            ok = 0;
+        }
+    } else if (arrow_count == 1) {
+        if (cad_symbol_set_integer(params, "arrow", arrows[0]) != 0) {
+            ok = 0;
+        }
+    }
+
+    isogl_symbol_id id = 0;
+    if (ok) {
+        id = isogl_symbol_create(type_name, params, doc->sheet_scale);
+    }
+    isogl_symbol_params_free(params);
+    if (id == 0) return 0;
+    /* On failure cad_document_add_symbol() already destroyed the symbol. */
+    if (cad_document_add_symbol(doc, id) != 0) return 0;
+    return id;
+}
+
+isogl_symbol_id cad_add_diameter_symbol(CadDocument *doc, int layer,
+                                        const IsoglDiameterDesc *desc) {
+    if (!doc || !desc) return 0;
+
+    IsoglDiameterDesc d = *desc;
+    if (cad_symbol_style(doc, layer, &d.pattern, &d.weight, &d.layer,
+                         d.color) < 0) {
+        return 0;
+    }
+    d.sheet_scale = doc->sheet_scale;
+
+    const double points[3][2] = {
+        {d.cx, d.cy}, {d.px, d.py}, {d.tx, d.ty}
+    };
+    const int arrows[2] = {(int)d.arrow_left, (int)d.arrow_right};
+    return cad_add_circular_symbol(doc, layer, "dimension_diameter", points,
+                                   d.text_left, d.text_right,
+                                   d.text_height_mm, d.precision, d.pick_text,
+                                   arrows, 2, d.pattern, d.weight, d.layer,
+                                   d.color);
+}
+
+isogl_symbol_id cad_add_radius_symbol(CadDocument *doc, int layer,
+                                      const IsoglRadiusDesc *desc) {
+    if (!doc || !desc) return 0;
+
+    IsoglRadiusDesc d = *desc;
+    if (cad_symbol_style(doc, layer, &d.pattern, &d.weight, &d.layer,
+                         d.color) < 0) {
+        return 0;
+    }
+    d.sheet_scale = doc->sheet_scale;
+
+    const double points[3][2] = {
+        {d.cx, d.cy}, {d.px, d.py}, {d.tx, d.ty}
+    };
+    const int arrows[1] = {(int)d.arrow};
+    return cad_add_circular_symbol(doc, layer, "dimension_radius", points,
+                                   d.text_left, d.text_right,
+                                   d.text_height_mm, d.precision, d.pick_text,
+                                   arrows, 1, d.pattern, d.weight, d.layer,
+                                   d.color);
 }
 
 uint32_t cad_add_line(CadDocument *doc, int layer, isogl_line_type pattern,

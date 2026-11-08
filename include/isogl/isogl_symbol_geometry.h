@@ -108,6 +108,59 @@ typedef struct {
     float color[4];
 } IsoglCenterMarkDesc;
 
+/*
+ * Diameter dimension.  points = (centre, point on the circle, text anchor).
+ * The radius is |point - centre| and must be positive.  The value is 2 * r
+ * formatted with `precision` decimals; text_left/text_right are free text
+ * around it (the type default for text_left is "Ø"; no unit is appended).
+ * (tx, ty) is the centre of the text box in model units; the generator
+ * converts it to a baseline-left origin using the real text width.  The text
+ * follows the diameter line and reads upright.
+ *
+ * Arrow tips sit on the two diameter ends with the legs pointing toward the
+ * centre.  When the text anchor is not on the diameter segment, a leader runs
+ * from the text centre to the closest point of the segment (projection
+ * clamped to the two ends).
+ */
+typedef struct {
+    double cx, cy;          /* circle centre */
+    double px, py;          /* point on the circle */
+    double tx, ty;          /* text-box centre */
+    double text_height_mm;  /* ISO 3098 height on paper */
+    double sheet_scale;     /* paper/model scale; 0 or negative -> 1 */
+    char text_left[32];
+    char text_right[32];
+    int precision;          /* decimals in the value, 0..12 */
+    int pick_text;          /* 1 = text OBB participates in rectangle pick */
+    IsoglDimensionArrow arrow_left;   /* arrow at centre - r*u */
+    IsoglDimensionArrow arrow_right;  /* arrow at centre + r*u */
+    uint8_t pattern, weight, layer;
+    float color[4];
+} IsoglDiameterDesc;
+
+/*
+ * Radius dimension.  Same three points as IsoglDiameterDesc: centre, point on
+ * the circle and text anchor.  The radius line runs centre -> circle point and
+ * the value is r (text_left defaults to "R").  The single arrow points from
+ * the circle point toward the centre.  When the text anchor is off the radius
+ * segment, a leader runs from the circle point to the anchor; a text anchor
+ * already on the segment adds no leader.
+ */
+typedef struct {
+    double cx, cy;
+    double px, py;
+    double tx, ty;
+    double text_height_mm;
+    double sheet_scale;
+    char text_left[32];
+    char text_right[32];
+    int precision;
+    int pick_text;
+    IsoglDimensionArrow arrow;        /* arrow at the circle point */
+    uint8_t pattern, weight, layer;
+    float color[4];
+} IsoglRadiusDesc;
+
 typedef enum {
     ISOGL_SYM_PICK_SEGMENT = 0,
     ISOGL_SYM_PICK_OBB = 1
@@ -137,6 +190,22 @@ int isogl_center_mark_geometry(const IsoglCenterMarkDesc *d,
 
 int isogl_center_mark_pick_geometry(const IsoglCenterMarkDesc *d,
                                     IsoglSymPickEmitter *out);
+
+int isogl_diameter_geometry(const IsoglDiameterDesc *d,
+                            const IsoglSymMetrics *metrics,
+                            IsoglSymEmitter *out);
+
+int isogl_diameter_pick_geometry(const IsoglDiameterDesc *d,
+                                 const IsoglSymMetrics *metrics,
+                                 IsoglSymPickEmitter *out);
+
+int isogl_radius_geometry(const IsoglRadiusDesc *d,
+                          const IsoglSymMetrics *metrics,
+                          IsoglSymEmitter *out);
+
+int isogl_radius_pick_geometry(const IsoglRadiusDesc *d,
+                               const IsoglSymMetrics *metrics,
+                               IsoglSymPickEmitter *out);
 
 #ifdef __cplusplus
 }

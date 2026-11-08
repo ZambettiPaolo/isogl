@@ -147,6 +147,10 @@ isogl_symbol_id cad_add_dimension_symbol(CadDocument *doc, int layer,
                                          const IsoglDimensionDesc *desc);
 isogl_symbol_id cad_add_center_mark_symbol(CadDocument *doc, int layer,
                                            const IsoglCenterMarkDesc *desc);
+isogl_symbol_id cad_add_diameter_symbol(CadDocument *doc, int layer,
+                                        const IsoglDiameterDesc *desc);
+isogl_symbol_id cad_add_radius_symbol(CadDocument *doc, int layer,
+                                      const IsoglRadiusDesc *desc);
 
 /*
  * Append an existing symbol reference to the document (low-level helper).

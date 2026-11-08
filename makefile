@@ -74,6 +74,14 @@ TABLE_ROW_TEST_OBJS := $(BUILD)/tests/test_table_row.o \
                        $(BUILD)/apps/isocad/src/console.o \
                        $(BUILD)/apps/isocad/src/console_cmd.o \
                        $(BUILD)/examples/demo/drawing_load.o
+TEST_DIAMETER_RADIUS := $(BUILD)/test-diameter-radius
+DIAMETER_RADIUS_TEST_OBJS := $(BUILD)/tests/test_diameter_radius.o \
+                             $(BUILD)/apps/isocad/src/cad.o \
+                             $(BUILD)/apps/isocad/src/cad_geometry.o \
+                             $(BUILD)/apps/isocad/src/cad_commands.o \
+                             $(BUILD)/apps/isocad/src/console.o \
+                             $(BUILD)/apps/isocad/src/console_cmd.o \
+                             $(BUILD)/examples/demo/drawing_load.o
 TEST_CONSOLE_CMD := $(BUILD)/test-console-cmd
 CONSOLE_CMD_TEST_OBJS := $(BUILD)/tests/test_console_cmd.o \
                          $(BUILD)/apps/isocad/src/console_cmd.o
@@ -87,11 +95,14 @@ CAD_ENTITIES_TEST_OBJS := $(BUILD)/tests/test_cad_entities.o \
 
 SYMBOL_GEOMETRY_SRC := src/isogl_symbol_geometry.c
 SYMBOL_TABLE_SRC := src/isogl_symbol_table.c
+SYMBOL_DIAMETER_SRC := src/isogl_symbol_diameter.c
+SYMBOL_RADIUS_SRC := src/isogl_symbol_radius.c
 SYMBOL_SRC := src/isogl_symbol.c
 LIB_SRCS    := src/isogl.c src/isogl_font.c src/isogl_font_data.c \
                src/isogl_style.c src/isogl_overlay.c src/isogl_panel.c \
                src/isogl_panel_emit.c src/isogl_symbol_enums.c \
-               $(SYMBOL_GEOMETRY_SRC) $(SYMBOL_TABLE_SRC) $(SYMBOL_SRC) \
+               $(SYMBOL_GEOMETRY_SRC) $(SYMBOL_TABLE_SRC) \
+               $(SYMBOL_DIAMETER_SRC) $(SYMBOL_RADIUS_SRC) $(SYMBOL_SRC) \
                third_party/glad/glad.c third_party/tomlc99/toml.c
 SDL_HOST_SRCS := hosts/isogl-sdl/isogl_sdl.c
 DEMO_SRCS   := examples/demo/main.c examples/demo/drawing_load.c
@@ -115,7 +126,8 @@ sdl-host: $(SDL_HOST_LIB)
 $(SDL_HOST_OBJS) $(DEMO_OBJS) $(TEST_OBJS) $(TEST_SYMBOLS_OBJS) \
     $(TEST_VIEWPORT_OBJS) $(TEST_OVERLAY_OBJS) $(DRAWING_LOAD_TEST_OBJS) \
     $(SYMBOL_PARAMS_TEST_OBJS) $(CAD_SYMBOLS_TEST_OBJS) \
-    $(CAD_ENTITIES_TEST_OBJS) $(TABLE_ROW_TEST_OBJS): \
+    $(CAD_ENTITIES_TEST_OBJS) $(TABLE_ROW_TEST_OBJS) \
+    $(DIAMETER_RADIUS_TEST_OBJS): \
     TARGET_CFLAGS := $(SDL2_CFLAGS)
 
 $(BUILD)/%.o: %.c
@@ -222,6 +234,14 @@ $(TEST_TABLE_ROW): $(TABLE_ROW_TEST_OBJS) $(LIB)
 test-table-row: $(TEST_TABLE_ROW)
 	./$(TEST_TABLE_ROW) .
 
+$(TEST_DIAMETER_RADIUS): $(DIAMETER_RADIUS_TEST_OBJS) $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(DIAMETER_RADIUS_TEST_OBJS) $(LIB) \
+	    $(SDL2_LIBS) $(LDLIBS) $(LDFLAGS) -o $@
+
+test-diameter-radius: $(TEST_DIAMETER_RADIUS)
+	./$(TEST_DIAMETER_RADIUS) .
+
 $(TEST_CONSOLE_CMD): $(CONSOLE_CMD_TEST_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(CONSOLE_CMD_TEST_OBJS) -lm $(LDFLAGS) -o $@
@@ -267,8 +287,8 @@ example-gtk4: lib
 test: test-cad-geometry test-symbol-geometry test-table-row-geometry \
       test-panel-layout test-panel-deck \
       test-overlay test-drawing-load test-symbol-params test-console-cmd \
-      test-cad-symbols test-table-row test-cad-entities test-symbols \
-      test-viewport $(TEST)
+      test-cad-symbols test-table-row test-diameter-radius test-cad-entities \
+      test-symbols test-viewport $(TEST)
 	./$(TEST) .
 
 install: all
@@ -321,11 +341,13 @@ clean:
          $(SYMBOL_PARAMS_TEST_OBJS:.o=.d) $(CAD_SYMBOLS_TEST_OBJS:.o=.d) \
          $(TABLE_ROW_GEOMETRY_TEST_OBJS:.o=.d) \
          $(TABLE_ROW_TEST_OBJS:.o=.d) \
+         $(DIAMETER_RADIUS_TEST_OBJS:.o=.d) \
          $(CONSOLE_CMD_TEST_OBJS:.o=.d) $(CAD_GEOMETRY_TEST_OBJS:.o=.d) \
          $(CAD_ENTITIES_TEST_OBJS:.o=.d)
 
 .PHONY: all lib sdl-host run test test-cad-geometry test-cad-entities \
         test-symbol-geometry test-table-row-geometry test-table-row \
+        test-diameter-radius \
         test-panel-layout test-panel-deck test-overlay \
         test-drawing-load test-symbol-params test-console-cmd test-cad-symbols \
         test-symbols test-viewport check-sdl-free example-qt6 example-gtk4 \
